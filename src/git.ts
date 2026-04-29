@@ -7,6 +7,7 @@ export interface AiMemoryRepoOptions {
   localDir: string;
   gitAuthor: { name: string; email: string };
   sshKeyPath?: string;
+  branch?: string;
 }
 
 export interface InboxRow {
@@ -47,7 +48,8 @@ export class AiMemoryRepo {
         unsafe: { allowUnsafeSshCommand: true },
       });
       if (sshKeyPath) parentGit.env(env);
-      await parentGit.clone(remoteUrl, path.basename(localDir));
+      const branch = this.opts.branch ?? "master";
+      await parentGit.clone(remoteUrl, path.basename(localDir), ["-b", branch]);
     }
 
     this.git = simpleGit({
@@ -62,7 +64,8 @@ export class AiMemoryRepo {
   }
 
   async pullLatest(): Promise<void> {
-    await this.git.pull("origin", "main", { "--rebase": "false" });
+    // Pull without specifying branch — uses the tracking branch set up by clone
+    await this.git.pull(["--ff-only"]);
   }
 
   async writeFinding(filename: string, body: string): Promise<void> {
@@ -116,7 +119,7 @@ export class AiMemoryRepo {
     const status = await this.git.status();
     if (status.staged.length === 0) return;
     await this.git.commit(message);
-    await this.git.push("origin", "main");
+    await this.git.push();
   }
 }
 

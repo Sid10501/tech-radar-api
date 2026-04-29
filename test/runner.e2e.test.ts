@@ -16,7 +16,7 @@ function initBareRemote(): void {
 
   // Clone it to seed an initial commit
   workDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-seed-"));
-  execFileSync("git", ["clone", bareDir, workDir]);
+  execFileSync("git", ["-c", "init.defaultBranch=master", "init", workDir]);
   execFileSync("git", ["-C", workDir, "config", "user.email", "test@test.com"]);
   execFileSync("git", ["-C", workDir, "config", "user.name", "Test"]);
   fs.writeFileSync(path.join(workDir, "README.md"), "# ai-memory\n");
@@ -27,7 +27,8 @@ function initBareRemote(): void {
     "# Tech Radar Index\n\n| Date | Title | Finding | Project |\n|---|---|---|---|\n");
   execFileSync("git", ["-C", workDir, "add", "."]);
   execFileSync("git", ["-C", workDir, "commit", "-m", "init"]);
-  execFileSync("git", ["-C", workDir, "push", "origin", "HEAD:main"]);
+  execFileSync("git", ["-C", workDir, "remote", "add", "origin", bareDir]);
+  execFileSync("git", ["-C", workDir, "push", "-u", "origin", "master"]);
 }
 
 describe("runPipeline()", () => {

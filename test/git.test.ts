@@ -15,7 +15,7 @@ beforeAll(() => {
 
   // Seed it with an initial commit so we have a main branch to push to
   const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), "tech-radar-seed-"));
-  execSync("git init", { cwd: seedDir });
+  execSync("git -c init.defaultBranch=master init", { cwd: seedDir });
   execSync('git config user.email "test@test.com"', { cwd: seedDir });
   execSync('git config user.name "Test"', { cwd: seedDir });
   fs.mkdirSync(path.join(seedDir, "tech-radar", "findings"), { recursive: true });
@@ -24,7 +24,7 @@ beforeAll(() => {
   execSync("git add -A", { cwd: seedDir });
   execSync('git commit -m "init"', { cwd: seedDir });
   execSync(`git remote add origin ${bareRepoDir}`, { cwd: seedDir });
-  execSync("git push -u origin HEAD:main", { cwd: seedDir });
+  execSync("git push -u origin master", { cwd: seedDir });
   fs.rmSync(seedDir, { recursive: true });
 
   workDir = fs.mkdtempSync(path.join(os.tmpdir(), "tech-radar-work-"));
@@ -55,7 +55,7 @@ describe("AiMemoryRepo", () => {
     // Verify the push landed in the bare repo by cloning it fresh
     const verifyDir = fs.mkdtempSync(path.join(os.tmpdir(), "tech-radar-verify-"));
     try {
-      execSync(`git clone ${bareRepoDir} .`, { cwd: verifyDir });
+      execSync(`git clone -b master ${bareRepoDir} .`, { cwd: verifyDir });
       const findingPath = path.join(verifyDir, "tech-radar", "findings", "2026-04-28-test-tool.md");
       expect(fs.existsSync(findingPath)).toBe(true);
       expect(fs.readFileSync(findingPath, "utf8")).toContain("# Test Tool");
@@ -76,7 +76,7 @@ describe("AiMemoryRepo", () => {
 
     const verifyDir = fs.mkdtempSync(path.join(os.tmpdir(), "tech-radar-verify2-"));
     try {
-      execSync(`git clone ${bareRepoDir} .`, { cwd: verifyDir });
+      execSync(`git clone -b master ${bareRepoDir} .`, { cwd: verifyDir });
       const inbox = fs.readFileSync(path.join(verifyDir, "tech-radar", "INBOX.md"), "utf8");
       expect(inbox).toContain("https://example.com/video");
       expect(inbox).toContain("processed");
