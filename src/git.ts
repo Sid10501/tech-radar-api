@@ -41,7 +41,8 @@ export class AiMemoryRepo {
 
     if (!fs.existsSync(path.join(localDir, ".git"))) {
       fs.mkdirSync(path.dirname(localDir), { recursive: true });
-      const parentGit = simpleGit({ baseDir: path.dirname(localDir), config: [], env });
+      const parentGit = simpleGit({ baseDir: path.dirname(localDir), config: [] });
+      if (sshKeyPath) parentGit.env(env);
       await parentGit.clone(remoteUrl, path.basename(localDir));
     }
 
@@ -51,8 +52,8 @@ export class AiMemoryRepo {
         `user.name=${gitAuthor.name}`,
         `user.email=${gitAuthor.email}`,
       ],
-      env,
     });
+    if (sshKeyPath) this.git.env(env);
   }
 
   async pullLatest(): Promise<void> {

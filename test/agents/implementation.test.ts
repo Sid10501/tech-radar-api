@@ -12,7 +12,7 @@ const extractFixture = JSON.parse(
 const researchFixture = {
   what: "Zod 4 is a TypeScript-first schema validation library.",
   who: "Colin McDonnell (@colinhacks)",
-  status: "stable",
+  status: "stable" as const,
   why: "Faster parsing, smaller bundle, better TypeScript inference.",
   comparisons: ["Valibot", "Yup"],
   links: { github: "https://github.com/colinhacks/zod", docs: "https://zod.dev", npm: null },
