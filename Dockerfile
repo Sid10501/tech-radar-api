@@ -10,14 +10,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Node dependencies
+# Install all deps (including devDeps) to build
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 
 # Copy source and build
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
+
+# Prune devDeps after build
+RUN npm prune --omit=dev
 
 # Copy Python scripts (ai-memory repo is cloned at runtime via GIT_DEPLOY_KEY_B64 + AI_MEMORY_REPO)
 # The extract.ts shells out to run_pipeline.sh; path is resolved at runtime via AI_MEMORY_LOCAL_DIR
