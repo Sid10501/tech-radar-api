@@ -39,7 +39,8 @@ export class AiMemoryRepo {
       env["GIT_SSH_COMMAND"] = `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no`;
     }
 
-    if (!fs.existsSync(localDir)) {
+    if (!fs.existsSync(path.join(localDir, ".git"))) {
+      fs.mkdirSync(path.dirname(localDir), { recursive: true });
       const parentGit = simpleGit({ baseDir: path.dirname(localDir), config: [], env });
       await parentGit.clone(remoteUrl, path.basename(localDir));
     }
@@ -66,7 +67,7 @@ export class AiMemoryRepo {
   }
 
   async updateInbox(row: InboxRow): Promise<void> {
-    const inboxPath = path.join(this.opts.localDir, "INBOX.md");
+    const inboxPath = path.join(this.opts.localDir, "tech-radar", "INBOX.md");
     const newRow = `| ${row.date} | ${row.url} | ${row.status} | ${row.finding ?? ""} |`;
 
     let content = fs.existsSync(inboxPath) ? fs.readFileSync(inboxPath, "utf8") : "";
@@ -91,18 +92,18 @@ export class AiMemoryRepo {
     }
 
     fs.writeFileSync(inboxPath, content, "utf8");
-    await this.git.add("INBOX.md");
+    await this.git.add(path.join("tech-radar", "INBOX.md"));
   }
 
   async updateIndex(row: IndexRow): Promise<void> {
-    const indexPath = path.join(this.opts.localDir, "INDEX.md");
+    const indexPath = path.join(this.opts.localDir, "tech-radar", "INDEX.md");
     const newRow = `| ${row.date} | ${row.title} | [${row.finding}](tech-radar/findings/${row.finding}) | ${row.targetProject} |`;
 
     let content = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
     content += `\n${newRow}`;
 
     fs.writeFileSync(indexPath, content, "utf8");
-    await this.git.add("INDEX.md");
+    await this.git.add(path.join("tech-radar", "INDEX.md"));
   }
 
   async commitAndPush(message: string): Promise<void> {

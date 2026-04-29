@@ -18,9 +18,9 @@ beforeAll(() => {
   execSync("git init", { cwd: seedDir });
   execSync('git config user.email "test@test.com"', { cwd: seedDir });
   execSync('git config user.name "Test"', { cwd: seedDir });
-  fs.writeFileSync(path.join(seedDir, "INBOX.md"), "| URL | Status |\n|---|---|\n");
-  fs.writeFileSync(path.join(seedDir, "INDEX.md"), "| Date | Title | Finding |\n|---|---|---|\n");
   fs.mkdirSync(path.join(seedDir, "tech-radar", "findings"), { recursive: true });
+  fs.writeFileSync(path.join(seedDir, "tech-radar", "INBOX.md"), "| URL | Status |\n|---|---|\n");
+  fs.writeFileSync(path.join(seedDir, "tech-radar", "INDEX.md"), "| Date | Title | Finding |\n|---|---|---|\n");
   execSync("git add -A", { cwd: seedDir });
   execSync('git commit -m "init"', { cwd: seedDir });
   execSync(`git remote add origin ${bareRepoDir}`, { cwd: seedDir });
@@ -45,7 +45,7 @@ describe("AiMemoryRepo", () => {
       gitAuthor: { name: "Test Bot", email: "bot@test.com" },
     });
     await repo.init();
-    expect(fs.existsSync(path.join(workDir, "clone", "INBOX.md"))).toBe(true);
+    expect(fs.existsSync(path.join(workDir, "clone", "tech-radar", "INBOX.md"))).toBe(true);
   });
 
   it("writes a finding file and commits + pushes", async () => {
@@ -77,7 +77,7 @@ describe("AiMemoryRepo", () => {
     const verifyDir = fs.mkdtempSync(path.join(os.tmpdir(), "tech-radar-verify2-"));
     try {
       execSync(`git clone ${bareRepoDir} .`, { cwd: verifyDir });
-      const inbox = fs.readFileSync(path.join(verifyDir, "INBOX.md"), "utf8");
+      const inbox = fs.readFileSync(path.join(verifyDir, "tech-radar", "INBOX.md"), "utf8");
       expect(inbox).toContain("https://example.com/video");
       expect(inbox).toContain("processed");
     } finally {
