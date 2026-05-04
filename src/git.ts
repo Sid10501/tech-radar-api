@@ -83,19 +83,28 @@ export class AiMemoryRepo {
 
     let content = fs.existsSync(inboxPath) ? fs.readFileSync(inboxPath, "utf8") : "";
 
+    const sentinel = "<!-- new rows inserted above this line -->";
     if (row.status === "pending") {
-      content += `\n${newRow}`;
+      if (content.includes(sentinel)) {
+        content = content.replace(sentinel, `${newRow}\n${sentinel}`);
+      } else {
+        content += `\n${newRow}`;
+      }
     } else {
-      // Find the pending row for this URL by simple string search (avoids fragile regex on base64 params)
+      // Find the pending row for this URL — match regardless of spacing around "pending"
       const lines = content.split("\n");
       const pendingIdx = lines.findIndex(
-        (l) => l.includes(row.url) && l.includes("| pending |")
+        (l) => l.includes(row.url) && /\|\s*pending\s*\|/.test(l)
       );
       if (pendingIdx >= 0) {
         lines[pendingIdx] = newRow;
         content = lines.join("\n");
       } else {
-        content += `\n${newRow}`;
+        if (content.includes(sentinel)) {
+          content = content.replace(sentinel, `${newRow}\n${sentinel}`);
+        } else {
+          content += `\n${newRow}`;
+        }
       }
     }
 

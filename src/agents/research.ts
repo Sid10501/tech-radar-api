@@ -48,8 +48,13 @@ const TOOLS: Anthropic.Tool[] = [
 async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
   if (name === "github_lookup") {
     const repo = input["repo"] as string;
-    const info = await githubLookup(repo);
-    return JSON.stringify(info);
+    try {
+      const info = await githubLookup(repo);
+      return JSON.stringify(info);
+    } catch (err) {
+      // Return error as tool result so the agent can continue with degraded data
+      return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+    }
   }
   return JSON.stringify({ error: `Unknown tool: ${name}` });
 }

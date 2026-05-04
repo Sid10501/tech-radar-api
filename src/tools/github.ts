@@ -17,7 +17,18 @@ export function githubLookup(repo: string): Promise<GithubRepoInfo> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const url = `https://api.github.com/repos/${repo}`;
+  // Normalize: strip any leading API URL or https://github.com/ prefix
+  let normalized = repo
+    .replace(/^https?:\/\/api\.github\.com\/repos\//, "")
+    .replace(/^https?:\/\/github\.com\//, "")
+    .replace(/\/$/, "");
+
+  // If the model passed a numeric repository ID, reject early with a clear error
+  if (/^\d+$/.test(normalized)) {
+    return Promise.reject(new Error(`github_lookup requires owner/name format, got numeric ID: ${repo}`));
+  }
+
+  const url = `https://api.github.com/repos/${normalized}`;
 
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers }, (res) => {
