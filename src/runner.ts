@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { extract } from "./extract.js";
 import { runResearch } from "./agents/research.js";
 import { runImplementation } from "./agents/implementation.js";
@@ -83,7 +85,7 @@ export async function runPipeline(
 
   const remoteUrl = opts.remoteUrl ?? process.env["AI_MEMORY_REPO"] ?? "";
   const localDir = opts.localDir ?? `/tmp/ai-memory-${runId}`;
-  const aiMemoryDir = opts.aiMemoryDir ?? process.env["AI_MEMORY_LOCAL_DIR"];
+  const configuredAiMemoryDir = opts.aiMemoryDir ?? process.env["AI_MEMORY_LOCAL_DIR"];
 
   // Set up SSH key if provided
   let sshKeyPath: string | undefined;
@@ -118,7 +120,17 @@ export async function runPipeline(
     const researchResult = await runResearch(extractResult);
 
     // Step 3: Implementation
-    const implementationResult = await runImplementation(extractResult, researchResult, aiMemoryDir);
+    const implementationMemoryDir =
+      configuredAiMemoryDir &&
+      fs.existsSync(path.join(configuredAiMemoryDir, "GLOBAL_MEMORY.md"))
+        ? configuredAiMemoryDir
+        : localDir;
+
+    const implementationResult = await runImplementation(
+      extractResult,
+      researchResult,
+      implementationMemoryDir,
+    );
 
     // Step 4: Compose
     const { filename, body } = composeFinding({
@@ -157,7 +169,7 @@ export async function runPipeline(
     // Best-effort: try to mark inbox as failed
     try {
       const today = new Date().toISOString().slice(0, 10);
-      await repo.updateInbox({ url, status: "failed", finding: null, date: today });
+      await repo.updateInbox({ url, status: "failed", finding: null, date: today, error: run.error });
       await repo.commitAndPush(`tech-radar: failed ${url.slice(0, 60)}`);
     } catch {
       // ignore secondary errors

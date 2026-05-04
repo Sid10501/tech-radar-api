@@ -15,6 +15,7 @@ export interface InboxRow {
   status: "pending" | "processed" | "failed";
   finding: string | null;
   date: string;
+  error?: string;
 }
 
 export interface IndexRow {
@@ -77,24 +78,22 @@ export class AiMemoryRepo {
 
   async updateInbox(row: InboxRow): Promise<void> {
     const inboxPath = path.join(this.opts.localDir, "tech-radar", "INBOX.md");
-    const newRow = `| ${row.date} | ${row.url} | ${row.status} | ${row.finding ?? ""} |`;
+    const errorCell = row.error ? row.error.slice(0, 120).replace(/\|/g, "/") : "";
+    const newRow = `| ${row.date} | ${row.url} | ${row.status} | ${row.finding ?? ""} | ${errorCell} |`;
 
     let content = fs.existsSync(inboxPath) ? fs.readFileSync(inboxPath, "utf8") : "";
 
     if (row.status === "pending") {
       content += `\n${newRow}`;
     } else {
-      // Update the existing pending row for this URL
-      const urlEscaped = row.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const pendingRe = new RegExp(`^(\\|[^|]*\\| *${urlEscaped} *\\| *)pending( *\\|.*)$`, "m");
-      if (pendingRe.test(content)) {
-        content = content.replace(pendingRe, `$1${row.status}$2`);
-        if (row.finding) {
-          content = content.replace(
-            new RegExp(`(\\|[^|]*\\| *${urlEscaped} *\\|[^|]*\\| *)([^|]*)(\\|)`, "m"),
-            `$1${row.finding}$3`
-          );
-        }
+      // Find the pending row for this URL by simple string search (avoids fragile regex on base64 params)
+      const lines = content.split("\n");
+      const pendingIdx = lines.findIndex(
+        (l) => l.includes(row.url) && l.includes("| pending |")
+      );
+      if (pendingIdx >= 0) {
+        lines[pendingIdx] = newRow;
+        content = lines.join("\n");
       } else {
         content += `\n${newRow}`;
       }
@@ -109,7 +108,12 @@ export class AiMemoryRepo {
     const newRow = `| ${row.date} | ${row.title} | [${row.finding}](tech-radar/findings/${row.finding}) | ${row.targetProject} |`;
 
     let content = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
-    content += `\n${newRow}`;
+    const sentinel = "<!-- new rows inserted above this line -->";
+    if (content.includes(sentinel)) {
+      content = content.replace(sentinel, `${newRow}\n${sentinel}`);
+    } else {
+      content += `\n${newRow}`;
+    }
 
     fs.writeFileSync(indexPath, content, "utf8");
     await this.git.add(path.join("tech-radar", "INDEX.md"));

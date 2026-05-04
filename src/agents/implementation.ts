@@ -6,9 +6,18 @@ import { parseJsonObjectFromModelText } from "./json.js";
 import type { ExtractResult } from "../extract.js";
 import type { ResearchOutput } from "./research.js";
 
+function getTargetProjects(): [string, ...string[]] {
+  const raw = process.env["TARGET_PROJECTS"];
+  if (raw) {
+    const values = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    if (values.length > 0) return values as [string, ...string[]];
+  }
+  return ["other", "none"];
+}
+
 export const ImplementationOutputSchema = z.object({
   fit_for_sid: z.string(),
-  target_project: z.enum(["Cross-Tax", "StockBot", "Finance Assistant", "new project", "none"]),
+  target_project: z.string(),
   implementation_idea_markdown: z.string(),
   follow_ups: z.array(z.string()),
 });

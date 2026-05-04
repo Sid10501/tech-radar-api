@@ -33,7 +33,7 @@ const HTML_TEMPLATE = (runs: ReturnType<typeof listRuns>) => `<!DOCTYPE html>
       ${runs.map((r) => `<tr>
         <td class="status-${r.status}">${r.status}</td>
         <td><a href="${r.url}" target="_blank" rel="noopener">${r.url.slice(0, 60)}${r.url.length > 60 ? "…" : ""}</a></td>
-        <td>${r.findingPath ? `<a href="https://github.com/Sid10501/ai-memory/blob/main/${r.findingPath}" target="_blank" rel="noopener">${r.findingPath.split("/").pop()}</a>` : r.error ?? ""}</td>
+        <td>${r.findingPath ? `<a href="${process.env["AI_MEMORY_REPO_URL"] ? process.env["AI_MEMORY_REPO_URL"] + "/blob/master/" + r.findingPath : r.findingPath}" target="_blank" rel="noopener">${r.findingPath.split("/").pop()}</a>` : r.error ?? ""}</td>
         <td>${new Date(r.startedAt).toLocaleString()}</td>
       </tr>`).join("")}
     </tbody>
@@ -104,15 +104,12 @@ export function buildServer() {
       if (!url || typeof url !== "string") {
         return reply.code(400).send({ error: "url is required" });
       }
-      // Start pipeline in background — don't await
-      const runId = Math.random().toString(36).slice(2);
+      // runPipeline registers the run synchronously before its first await,
+      // so listRuns()[0] is reliably set after one microtask tick.
       runPipeline(url).catch(() => {}); // errors are captured inside runPipeline
-      // Re-run to get the actual runId (runPipeline generates it internally)
-      // We need to query after a tick to get it from listRuns
-      await new Promise((r) => setTimeout(r, 50));
-      const runs = listRuns();
-      const latest = runs[0];
-      return reply.code(202).send({ runId: latest?.id ?? runId });
+      await Promise.resolve(); // yield to let runPipeline register the run
+      const latest = listRuns()[0];
+      return reply.code(202).send({ runId: latest?.id ?? "unknown" });
     },
   );
 

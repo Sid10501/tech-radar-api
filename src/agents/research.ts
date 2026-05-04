@@ -43,28 +43,6 @@ const TOOLS: Anthropic.Tool[] = [
       required: ["repo"],
     },
   },
-  {
-    name: "web_search",
-    description: "Search the web for information about a technology.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        query: { type: "string", description: "Search query" },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    name: "web_fetch",
-    description: "Fetch the content of a URL.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        url: { type: "string", description: "URL to fetch" },
-      },
-      required: ["url"],
-    },
-  },
 ];
 
 async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
@@ -73,10 +51,7 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
     const info = await githubLookup(repo);
     return JSON.stringify(info);
   }
-  // web_search and web_fetch are stubs — the server-side tool versions handle these
-  // In practice Claude uses the server-side web_search/web_fetch tools; these stubs
-  // exist so the tool list is valid and our mock tests can exercise the loop.
-  return JSON.stringify({ error: `Tool ${name} not implemented in this runtime` });
+  return JSON.stringify({ error: `Unknown tool: ${name}` });
 }
 
 export async function runResearch(extract: ExtractResult): Promise<ResearchOutput> {
