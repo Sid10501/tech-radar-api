@@ -21,6 +21,16 @@ export function githubLookup(repo: string): Promise<GithubRepoInfo> {
 
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers }, (res) => {
+      // Follow redirects (301/302)
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        const location = res.headers["location"];
+        if (location) {
+          const redirectedRepo = location.replace("https://api.github.com/repos/", "");
+          resolve(githubLookup(redirectedRepo));
+          return;
+        }
+      }
+
       let body = "";
       res.on("data", (chunk: Buffer | string) => { body += chunk; });
       res.on("end", () => {

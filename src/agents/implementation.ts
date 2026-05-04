@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { readAiMemory, listRecentSessions } from "../tools/ai_memory.js";
 import { IMPLEMENTATION_SYSTEM_PROMPT } from "./prompts.js";
+import { parseJsonObjectFromModelText } from "./json.js";
 import type { ExtractResult } from "../extract.js";
 import type { ResearchOutput } from "./research.js";
 
@@ -114,8 +115,19 @@ Read GLOBAL_MEMORY.md first, then domains/webdev.md, and optionally 1-2 recent s
       if (!textBlock) {
         throw new Error("Implementation agent returned no text content");
       }
-      const parsed = ImplementationOutputSchema.parse(JSON.parse(textBlock.text));
-      return parsed;
+      try {
+        const parsed = ImplementationOutputSchema.parse(
+          parseJsonObjectFromModelText<unknown>(textBlock.text),
+        );
+        return parsed;
+      } catch {
+        messages.push({ role: "assistant", content: response.content });
+        messages.push({
+          role: "user",
+          content: "Your response was not valid JSON. Output ONLY the raw JSON object — no markdown, no code blocks, no explanation.",
+        });
+        continue;
+      }
     }
 
     if (response.stop_reason === "tool_use") {

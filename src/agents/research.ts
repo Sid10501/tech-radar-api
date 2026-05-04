@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { githubLookup } from "../tools/github.js";
 import { RESEARCH_SYSTEM_PROMPT } from "./prompts.js";
+import { parseJsonObjectFromModelText } from "./json.js";
 import type { ExtractResult } from "../extract.js";
 
 export const ResearchOutputSchema = z.object({
@@ -118,13 +119,24 @@ Produce the JSON report as instructed. Call github_lookup if the technology has 
     });
 
     if (response.stop_reason === "end_turn") {
-      // Extract the final text block
       const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
       if (!textBlock) {
         throw new Error("Research agent returned no text content");
       }
-      const parsed = ResearchOutputSchema.parse(JSON.parse(textBlock.text));
-      return parsed;
+      try {
+        const parsed = ResearchOutputSchema.parse(
+          parseJsonObjectFromModelText<unknown>(textBlock.text),
+        );
+        return parsed;
+      } catch {
+        // Model output wasn't valid JSON — ask it to reformat
+        messages.push({ role: "assistant", content: response.content });
+        messages.push({
+          role: "user",
+          content: "Your response was not valid JSON. Output ONLY the raw JSON object — no markdown, no code blocks, no explanation.",
+        });
+        continue;
+      }
     }
 
     if (response.stop_reason === "tool_use") {
