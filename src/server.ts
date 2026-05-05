@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { runPipeline, getRun, listRuns } from "./runner.js";
+import { handleTelegramUpdate } from "./telegram.js";
 
 const HTML_TEMPLATE = (runs: ReturnType<typeof listRuns>) => `<!DOCTYPE html>
 <html lang="en">
@@ -110,6 +111,20 @@ export function buildServer() {
       await Promise.resolve(); // yield to let runPipeline register the run
       const latest = listRuns()[0];
       return reply.code(202).send({ runId: latest?.id ?? "unknown" });
+    },
+  );
+
+  // Telegram webhook — Telegram POSTs updates here
+  app.post<{ Body: Record<string, unknown> }>(
+    "/telegram/webhook",
+    async (request, reply) => {
+      // Verify it's from our bot via secret token header
+      const secret = process.env["TELEGRAM_WEBHOOK_SECRET"];
+      if (secret && request.headers["x-telegram-bot-api-secret-token"] !== secret) {
+        return reply.code(401).send();
+      }
+      handleTelegramUpdate(request.body).catch(() => {});
+      return reply.code(200).send();
     },
   );
 
