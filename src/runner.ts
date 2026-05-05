@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
 import { extract } from "./extract.js";
@@ -22,6 +23,22 @@ export interface RunPipelineOptions {
   remoteUrl?: string;
   localDir?: string;
   aiMemoryDir?: string;
+}
+
+function sendTelegram(text: string): void {
+  const token = process.env["TELEGRAM_BOT_TOKEN"];
+  const chatId = process.env["TELEGRAM_CHAT_ID"];
+  if (!token || !chatId) return;
+  const body = JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" });
+  const req = https.request({
+    hostname: "api.telegram.org",
+    path: `/bot${token}/sendMessage`,
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+  });
+  req.on("error", () => {}); // fire-and-forget
+  req.write(body);
+  req.end();
 }
 
 // In-memory run store (last 50)
@@ -157,6 +174,10 @@ export async function runPipeline(
     run.finishedAt = new Date().toISOString();
     storeRun(run);
 
+    const repoUrl = process.env["AI_MEMORY_REPO_URL"] ?? "";
+    const fileLink = repoUrl ? `${repoUrl}/blob/master/${findingPath}` : findingPath;
+    sendTelegram(`✅ *Tech Radar finding ready*\n\n[${filename.replace(".md", "")}](${fileLink})\n\nSource: ${url.slice(0, 60)}`);
+
     releaseSlot();
     return { runId, findingPath };
 
@@ -174,6 +195,8 @@ export async function runPipeline(
     } catch {
       // ignore secondary errors
     }
+
+    sendTelegram(`❌ *Tech Radar run failed*\n\n${url.slice(0, 80)}\n\nError: \`${(run.error ?? "unknown").slice(0, 200)}\``);
 
     releaseSlot();
     throw err;
