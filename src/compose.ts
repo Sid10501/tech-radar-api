@@ -3,6 +3,8 @@ import type { ExtractResult } from "./extract.js";
 import type { ResearchOutput } from "./agents/research.js";
 import type { ImplementationOutput } from "./agents/implementation.js";
 
+const OWNER_NAME = process.env["OWNER_NAME"] ?? "the developer";
+
 export interface ComposedFinding {
   filename: string;
   body: string;
@@ -73,7 +75,7 @@ ${links.join("\n")}
 
 ${research.kickstarter}
 
-## Fit for Sid
+## Fit for ${OWNER_NAME}
 
 - Target project: ${implementation.target_project}
 - ${implementation.fit_for_sid}

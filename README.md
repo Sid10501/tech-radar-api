@@ -2,8 +2,8 @@
 
 A self-hosted pipeline that turns social media tech posts into structured research findings committed to your personal knowledge base.
 
-Paste a TikTok, YouTube, or Instagram URL → get a markdown finding file with:
-- What the technology is and who built it
+Paste a TikTok, YouTube, or Instagram URL and get back a markdown finding with:
+- What the technology actually is and who built it
 - GitHub viability signals (stars, license, last push date)
 - A concrete implementation idea grounded in your own projects and stack
 - Committed directly to your `ai-memory` git repo
@@ -15,25 +15,25 @@ Built and used by [Sidharth Grover](https://github.com/Sid10501). Fork it and po
 ## How it works
 
 ```
-URL submitted
+URL submitted (web UI, API, Telegram bot, or iOS Shortcut)
     │
     ▼
-[extract]  yt-dlp + faster-whisper → title, caption, hashtags, transcript
+[extract]   yt-dlp + faster-whisper → title, caption, hashtags, transcript
     │
     ▼
-[research]  Claude (claude-sonnet-4-6) + GitHub API → structured research JSON
+[research]  Claude + GitHub API → what it is, stars, license, alternatives
     │
     ▼
-[implement]  Claude reads your ai-memory → personalized implementation idea
+[implement] Claude reads your ai-memory → personalized implementation idea
     │
     ▼
-[compose]  Markdown finding file assembled
+[compose]   Markdown finding assembled
     │
     ▼
 [git push]  Finding committed to your ai-memory repo
 ```
 
-The service runs on Railway. You submit URLs through a minimal web UI or the REST API. The pipeline serializes through a single queue (git pushes don't race). Run status is visible in the UI and persisted to `INBOX.md` in your ai-memory repo.
+The pipeline serializes through a single queue — git pushes don't race. Run status is visible in the web UI and persisted to `INBOX.md` in your ai-memory repo.
 
 ---
 
@@ -49,13 +49,13 @@ npm install
 
 ### 2. Set up your ai-memory repo
 
-The pipeline needs a git repo to commit findings to. You can use [Sid10501/ai-memory](https://github.com/Sid10501/ai-memory) as a template, or create your own with the same structure:
+The pipeline commits findings to a git repo you own. Use [Sid10501/ai-memory](https://github.com/Sid10501/ai-memory) as a template, or create your own with this structure:
 
 ```
 ai-memory/
-  GLOBAL_MEMORY.md          ← the implementation agent reads this
+  GLOBAL_MEMORY.md          ← implementation agent reads this for your stack + projects
   domains/
-    webdev.md               ← optional, read for tech stack context
+    webdev.md               ← optional, tech stack context
   sessions/                 ← optional session logs
   tech-radar/
     INBOX.md                ← pipeline writes status rows here
@@ -63,30 +63,38 @@ ai-memory/
     findings/               ← markdown findings committed here
 ```
 
+`INBOX.md` and `INDEX.md` need a sentinel comment for row insertion:
+```markdown
+<!-- new rows inserted above this line -->
+```
+
 ### 3. Create a deploy key
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/tech-radar-deploy -C "tech-radar-api"
 # Add ~/.ssh/tech-radar-deploy.pub as a deploy key with write access to your ai-memory repo
-# Then base64-encode the private key:
+# Base64-encode the private key:
 base64 -i ~/.ssh/tech-radar-deploy | tr -d '\n'
 ```
 
 ### 4. Configure environment variables
 
-Copy `.env.example` to `.env` and fill in the values:
+Copy `.env.example` to `.env`:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
-| `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo, e.g. `git@github.com:youruser/ai-memory.git` |
-| `GIT_DEPLOY_KEY_B64` | Yes | Base64-encoded SSH private key (write access to ai-memory repo) |
-| `AUTH_TOKEN` | Recommended | Bearer token to protect `POST /runs` |
+| `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo, e.g. `git@github.com:you/ai-memory.git` |
+| `GIT_DEPLOY_KEY_B64` | Yes | Base64-encoded SSH private key (write access to ai-memory) |
+| `AUTH_TOKEN` | Recommended | Bearer token protecting `POST /runs` |
 | `AI_MEMORY_LOCAL_DIR` | No | Where to clone ai-memory (default: `/tmp/ai-memory`) |
-| `AI_MEMORY_REPO_URL` | No | Public HTTPS URL of your ai-memory repo (used for finding links in the UI) |
-| `OWNER_NAME` | No | Your name for the implementation agent prompt (default: `the developer`) |
+| `AI_MEMORY_REPO_URL` | No | Public HTTPS URL of your ai-memory repo (used for finding links) |
+| `OWNER_NAME` | No | Your name for agent prompts (default: `the developer`) |
 | `TARGET_PROJECTS` | No | Comma-separated list of your projects for the implementation agent |
-| `GITHUB_TOKEN` | No | GitHub token — raises API rate limit from 60 to 5000 req/hr |
+| `GITHUB_TOKEN` | No | GitHub token — raises rate limit from 60 to 5000 req/hr |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token (from @BotFather) |
+| `TELEGRAM_CHAT_ID` | No | Your Telegram chat ID (for notifications and two-way control) |
+| `TELEGRAM_WEBHOOK_SECRET` | No | Random string to validate Telegram webhook requests |
 | `PORT` | No | HTTP port (default: `3000`) |
 
 ### 5. Run locally
@@ -106,54 +114,78 @@ railway init
 railway up
 ```
 
-Set all env vars under **Variables** in the Railway dashboard. The `Dockerfile` and `railway.json` are already configured.
+Set all env vars under **Variables** in the Railway dashboard. The `Dockerfile` and `railway.json` are preconfigured.
 
 ---
 
-## API
+## Submitting URLs
 
-### `GET /healthz`
-Returns `{ ok: true }`. Used by Railway's healthcheck.
+### Web UI
 
-### `GET /`
-Web UI — submit a URL, view run history.
+Open your deployed URL in a browser, paste a link, hit Research.
 
-### `POST /runs`
-Requires `Authorization: Bearer <AUTH_TOKEN>` header (if `AUTH_TOKEN` is set).
+### iOS Shortcut
 
-```json
-{ "url": "https://www.instagram.com/reel/..." }
+One tap from any social media post to a queued research job. See [shortcuts/README.md](shortcuts/README.md) for setup — takes about 2 minutes to configure. Works from the share sheet so you never have to leave the app.
+
+### Telegram bot
+
+Set up a Telegram bot and you can submit URLs by sending them directly to the bot, as well as query run status:
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token
+2. Set `TELEGRAM_BOT_TOKEN` in Railway Variables
+3. Send any message to your bot, then call `https://api.telegram.org/bot<TOKEN>/getUpdates` to find your `chat.id`
+4. Set `TELEGRAM_CHAT_ID` to that value
+5. Register the webhook:
+   ```bash
+   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+     -H "Content-Type: application/json" \
+     -d '{"url":"https://YOUR-RAILWAY-URL/telegram/webhook","secret_token":"YOUR_WEBHOOK_SECRET"}'
+   ```
+
+Bot commands:
+- Send any URL → queues it for research
+- `/status` → last 5 runs
+- `/list` → recent findings with links
+- `/help` → command list
+
+### REST API
+
+```bash
+# Submit a URL
+curl -X POST https://your-railway-url/runs \
+  -H "Authorization: Bearer YOUR_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.instagram.com/reel/..."}'
+
+# Check run status
+curl https://your-railway-url/runs/RUN_ID \
+  -H "Authorization: Bearer YOUR_AUTH_TOKEN"
 ```
-
-Returns `202 { "runId": "..." }`.
-
-### `GET /runs`
-Returns array of recent runs (last 50).
-
-### `GET /runs/:id`
-Returns a single run by ID.
 
 ---
 
 ## Tech stack
 
-- **Runtime**: Node.js 20, TypeScript
-- **HTTP**: Fastify
-- **Agents**: Anthropic SDK (`claude-sonnet-4-6`) with tool use
-- **Extract**: Python + yt-dlp + faster-whisper (via shell script)
-- **Git**: simple-git
-- **Validation**: Zod
-- **Tests**: Vitest
-- **Deploy**: Railway (Dockerfile)
+| Layer | Choice |
+|-------|--------|
+| Runtime | Node.js 20 + TypeScript |
+| HTTP | Fastify |
+| Agents | Anthropic SDK (`claude-sonnet-4-6`) with tool use |
+| Extraction | Python + yt-dlp + faster-whisper |
+| Git | simple-git |
+| Validation | Zod |
+| Tests | Vitest |
+| Deploy | Railway (Dockerfile) |
 
 ---
 
 ## Development
 
 ```bash
-npm test              # run tests
-npm run build         # tsc compile
-npm run dev           # tsx watch (hot reload)
+npm test          # run tests
+npm run build     # tsc compile
+npm run dev       # hot reload on port 3000
 
 # Test the extractor directly
 bash scripts/run_pipeline.sh "https://www.youtube.com/watch?v=..."
