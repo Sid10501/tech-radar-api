@@ -23,6 +23,7 @@ Persistent memory for AI agents working on this project. Updated via the **learn
 - (2026-05-04) `github_lookup` would throw a hard error if the model passed a numeric repo ID (e.g. from a GitHub API URL). Fixed: normalize input to strip URL prefixes, reject numeric IDs with a clear message, and catch all errors in `executeTool` returning them as tool-result content so the agent continues gracefully.
 - (2026-05-05) Telegram two-way control: `POST /telegram/webhook` in server.ts, handler in `src/telegram.ts`. Send any URL to queue it; `/status`, `/list`, `/help` commands. Secured to `TELEGRAM_CHAT_ID` env var. Webhook secret validated via `X-Telegram-Bot-Api-Secret-Token` header.
 - (2026-05-05) `railway deployment up --detach` is needed to deploy new code when Railway's GitHub auto-deploy is slow. `railway deployment redeploy --yes` redeploys the *previous image*, not the latest commit — don't use it after a code push.
+- (2026-05-06) `compose.ts` verdict is now dynamic: `#skip` when `target_project === "none"` (DM-gated or no identifiable technology), `#try-soon` otherwise. The hardcoded `#try-soon` on every finding was a cross-cutting quality issue flagged in findings review.
 
 ---
 
@@ -69,4 +70,4 @@ railway up
 
 ## Active Context
 
-Last session (2026-05-05): Pipeline fully operational. All historical failed URLs reprocessed. Telegram bot (@Siddy_Techy_Bot) wired for two-way control — send URL to queue research, /status, /list, /help. INBOX/INDEX cleaned up. LICENSE added. Next: LinkedIn post, then make repo public.
+Last session (2026-05-06): Repo made public (github.com/Sid10501/tech-radar-api). Secrets audit clean. Findings quality review: 11 good, 2 ok, 5 poor (all DM-gated/no-tech posts). Fixed hardcoded #try-soon verdict in compose.ts — now dynamic (#skip for target_project=none). Two LinkedIn post drafts ready (short 160w, long 420w). Next: post LinkedIn, set up Obsidian vault.
