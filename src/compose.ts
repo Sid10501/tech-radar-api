@@ -36,6 +36,8 @@ export function composeFinding(input: {
     ? research.comparisons.map((c) => `  - ${c}`).join("\n")
     : "  - (none identified)";
 
+  const verdict = implementation.target_project === "none" ? "#skip" : "#try-soon";
+
   const body = `# ${title}
 
 **Source:** ${extract.platform} · [${extract.creator ?? "unknown"}](${extract.url})
@@ -75,7 +77,7 @@ ${research.kickstarter}
 
 - Target project: ${implementation.target_project}
 - ${implementation.fit_for_sid}
-- Verdict: \`#try-soon\`
+- Verdict: \`${verdict}\`
 
 ## Implementation Idea
 
