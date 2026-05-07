@@ -1,45 +1,89 @@
 # tech-radar-api
 
-A self-hosted pipeline that turns social media tech posts into structured research findings committed to your personal knowledge base.
+Stop saving posts you'll never read. Send a URL to a bot and get back a structured research finding committed to your knowledge base — what the tool actually is, whether it's worth your time, and a concrete implementation idea for your specific projects.
 
-Paste a TikTok, YouTube, or Instagram URL and get back a markdown finding with:
-- What the technology actually is and who built it
-- GitHub viability signals (stars, license, last push date)
-- A concrete implementation idea grounded in your own projects and stack
-- Committed directly to your `ai-memory` git repo
+Built by [Sidharth Grover](https://github.com/Sid10501). Self-host it and point it at your own knowledge base.
 
-Built and used by [Sidharth Grover](https://github.com/Sid10501). Fork it and point it at your own knowledge base.
+---
+
+## What it does
+
+You send a TikTok, Instagram, or YouTube URL. Within a few minutes:
+
+1. **Extracts** the caption, hashtags, and transcript from the post (yt-dlp + faster-whisper)
+2. **Researches** the technology — GitHub stars, license, last activity, alternatives (Claude + GitHub API)
+3. **Reads your personal knowledge base** and writes an implementation idea grounded in your actual projects and stack (second Claude agent)
+4. **Commits** a structured markdown finding to your `ai-memory` repo
+
+The finding tells you what to think about a tool, not just what the tool is.
+
+---
+
+## How to submit URLs
+
+Four ways, pick whichever fits your workflow:
+
+- **iOS Shortcut** — one tap from the share sheet while you're scrolling. See [shortcuts/README.md](shortcuts/README.md)
+- **Telegram bot** — send URLs directly to a bot, get notified when the finding is ready
+- **Web UI** — paste and click at your deployed URL
+- **REST API** — `POST /runs` with a JSON body
 
 ---
 
 ## How it works
 
 ```
-URL submitted (web UI, API, Telegram bot, or iOS Shortcut)
-    │
-    ▼
-[extract]   yt-dlp + faster-whisper → title, caption, hashtags, transcript
-    │
-    ▼
-[research]  Claude + GitHub API → what it is, stars, license, alternatives
-    │
-    ▼
-[implement] Claude reads your ai-memory → personalized implementation idea
-    │
-    ▼
-[compose]   Markdown finding assembled
-    │
-    ▼
-[git push]  Finding committed to your ai-memory repo
+URL
+ │
+ ▼
+[extract]    yt-dlp + faster-whisper → title, caption, hashtags, transcript
+ │
+ ▼
+[research]   Claude + GitHub API → what it is, stars, license, comparisons
+ │
+ ▼
+[implement]  Claude reads your ai-memory → personalized implementation idea
+ │
+ ▼
+[compose]    Markdown finding assembled
+ │
+ ▼
+[git push]   Finding committed to your ai-memory repo
 ```
 
-The pipeline serializes through a single queue — git pushes don't race. Run status is visible in the web UI and persisted to `INBOX.md` in your ai-memory repo.
+One run at a time — the pipeline serializes through a single queue so git pushes don't race.
+
+---
+
+## Example output
+
+```markdown
+# Udeler — Cross-Platform Udemy Course Downloader
+
+**Source:** Instagram · @harry · 2026-05-04
+**Tags:** instagram, #tools, #dev
+
+## TL;DR
+Udeler is an open-source desktop app for downloading Udemy courses for offline use...
+
+## What it actually is
+- Stars: 6,847 · License: GPL-3.0 · Archived: no
+- Compares to: youtube-dl, yt-dlp (web), Motrix
+
+## Fit for you
+- Target project: Finance Assistant
+- Could replace the manual export step in your lesson pipeline...
+- Verdict: `#try-soon`
+
+## Implementation Idea
+...
+```
 
 ---
 
 ## Setup
 
-### 1. Fork / clone this repo
+### 1. Fork this repo
 
 ```bash
 git clone https://github.com/Sid10501/tech-radar-api
@@ -49,21 +93,21 @@ npm install
 
 ### 2. Set up your ai-memory repo
 
-The pipeline commits findings to a git repo you own. Use [Sid10501/ai-memory](https://github.com/Sid10501/ai-memory) as a template, or create your own with this structure:
+The pipeline commits findings to a git repo you control. Use [Sid10501/ai-memory](https://github.com/Sid10501/ai-memory) as a template, or create your own with this structure:
 
 ```
 ai-memory/
-  GLOBAL_MEMORY.md          ← implementation agent reads this for your stack + projects
+  GLOBAL_MEMORY.md       ← the agent reads this: your stack, projects, preferences
   domains/
-    webdev.md               ← optional, tech stack context
-  sessions/                 ← optional session logs
+    webdev.md            ← optional tech stack detail
   tech-radar/
-    INBOX.md                ← pipeline writes status rows here
-    INDEX.md                ← pipeline writes finding index rows here
-    findings/               ← markdown findings committed here
+    INBOX.md             ← pipeline writes run status here
+    INDEX.md             ← pipeline writes a finding index here
+    findings/            ← markdown findings land here
 ```
 
-`INBOX.md` and `INDEX.md` need a sentinel comment for row insertion:
+`INBOX.md` and `INDEX.md` each need this sentinel line for row insertion:
+
 ```markdown
 <!-- new rows inserted above this line -->
 ```
@@ -72,29 +116,29 @@ ai-memory/
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/tech-radar-deploy -C "tech-radar-api"
-# Add ~/.ssh/tech-radar-deploy.pub as a deploy key with write access to your ai-memory repo
-# Base64-encode the private key:
+# Add the .pub file as a deploy key with write access to your ai-memory repo
+# Then base64-encode the private key:
 base64 -i ~/.ssh/tech-radar-deploy | tr -d '\n'
 ```
 
-### 4. Configure environment variables
+### 4. Set environment variables
 
 Copy `.env.example` to `.env`:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
-| `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo, e.g. `git@github.com:you/ai-memory.git` |
-| `GIT_DEPLOY_KEY_B64` | Yes | Base64-encoded SSH private key (write access to ai-memory) |
+| `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
+| `GIT_DEPLOY_KEY_B64` | Yes | Base64-encoded SSH private key with write access |
 | `AUTH_TOKEN` | Recommended | Bearer token protecting `POST /runs` |
-| `AI_MEMORY_LOCAL_DIR` | No | Where to clone ai-memory (default: `/tmp/ai-memory`) |
-| `AI_MEMORY_REPO_URL` | No | Public HTTPS URL of your ai-memory repo (used for finding links) |
-| `OWNER_NAME` | No | Your name for agent prompts (default: `the developer`) |
+| `OWNER_NAME` | No | Your name — used in agent prompts (default: `the developer`) |
 | `TARGET_PROJECTS` | No | Comma-separated list of your projects for the implementation agent |
-| `GITHUB_TOKEN` | No | GitHub token — raises rate limit from 60 to 5000 req/hr |
-| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token (from @BotFather) |
-| `TELEGRAM_CHAT_ID` | No | Your Telegram chat ID (for notifications and two-way control) |
-| `TELEGRAM_WEBHOOK_SECRET` | No | Random string to validate Telegram webhook requests |
+| `AI_MEMORY_REPO_URL` | No | Public HTTPS URL of your ai-memory repo (for finding links in the UI) |
+| `AI_MEMORY_LOCAL_DIR` | No | Where to clone ai-memory (default: `/tmp/ai-memory`) |
+| `GITHUB_TOKEN` | No | Raises GitHub API rate limit from 60 to 5000 req/hr |
+| `TELEGRAM_BOT_TOKEN` | No | From [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_CHAT_ID` | No | Your chat ID — enables notifications and two-way control |
+| `TELEGRAM_WEBHOOK_SECRET` | No | Random string to verify Telegram webhook requests |
 | `PORT` | No | HTTP port (default: `3000`) |
 
 ### 5. Run locally
@@ -114,54 +158,58 @@ railway init
 railway up
 ```
 
-Set all env vars under **Variables** in the Railway dashboard. The `Dockerfile` and `railway.json` are preconfigured.
+Set all env vars under **Variables** in the Railway dashboard. `Dockerfile` and `railway.json` are preconfigured.
+
+> **Note:** After pushing new code, use `railway up` to deploy — not `railway deployment redeploy`, which redeploys the previous image.
 
 ---
 
-## Submitting URLs
+## Telegram bot setup
 
-### Web UI
-
-Open your deployed URL in a browser, paste a link, hit Research.
-
-### iOS Shortcut
-
-One tap from any social media post to a queued research job. See [shortcuts/README.md](shortcuts/README.md) for setup — takes about 2 minutes to configure. Works from the share sheet so you never have to leave the app.
-
-### Telegram bot
-
-Set up a Telegram bot and you can submit URLs by sending them directly to the bot, as well as query run status:
-
-1. Create a bot via [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token
-2. Set `TELEGRAM_BOT_TOKEN` in Railway Variables
-3. Send any message to your bot, then call `https://api.telegram.org/bot<TOKEN>/getUpdates` to find your `chat.id`
+1. Message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token
+2. Set `TELEGRAM_BOT_TOKEN` in your env
+3. Send any message to your bot, then fetch `https://api.telegram.org/bot<TOKEN>/getUpdates` to get your `chat.id`
 4. Set `TELEGRAM_CHAT_ID` to that value
-5. Register the webhook:
-   ```bash
-   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-     -H "Content-Type: application/json" \
-     -d '{"url":"https://YOUR-RAILWAY-URL/telegram/webhook","secret_token":"YOUR_WEBHOOK_SECRET"}'
-   ```
-
-Bot commands:
-- Send any URL → queues it for research
-- `/status` → last 5 runs
-- `/list` → recent findings with links
-- `/help` → command list
-
-### REST API
+5. Register the webhook after deploying:
 
 ```bash
-# Submit a URL
-curl -X POST https://your-railway-url/runs \
-  -H "Authorization: Bearer YOUR_AUTH_TOKEN" \
+curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://www.instagram.com/reel/..."}'
-
-# Check run status
-curl https://your-railway-url/runs/RUN_ID \
-  -H "Authorization: Bearer YOUR_AUTH_TOKEN"
+  -d '{"url":"https://YOUR-RAILWAY-URL/telegram/webhook","secret_token":"YOUR_WEBHOOK_SECRET"}'
 ```
+
+Bot commands: send any URL to queue it, `/status`, `/list`, `/help`.
+
+---
+
+## iOS Shortcut
+
+See [shortcuts/README.md](shortcuts/README.md) for step-by-step instructions. Takes about 2 minutes. Once set up, you can trigger a research run directly from Instagram or TikTok's share sheet without leaving the app.
+
+---
+
+## API reference
+
+### `GET /healthz`
+Returns `{ ok: true }`.
+
+### `GET /`
+Web UI — submit URLs, view run history.
+
+### `POST /runs`
+Requires `Authorization: Bearer <AUTH_TOKEN>` if `AUTH_TOKEN` is set.
+
+```json
+{ "url": "https://www.instagram.com/reel/..." }
+```
+
+Returns `202 { "runId": "..." }`.
+
+### `GET /runs`
+Returns last 50 runs.
+
+### `GET /runs/:id`
+Returns a single run by ID.
 
 ---
 
@@ -183,13 +231,18 @@ curl https://your-railway-url/runs/RUN_ID \
 ## Development
 
 ```bash
-npm test          # run tests
-npm run build     # tsc compile
-npm run dev       # hot reload on port 3000
+npm run dev                                          # hot reload on port 3000
+npm test                                             # run tests
+npm run build                                        # compile
 
-# Test the extractor directly
-bash scripts/run_pipeline.sh "https://www.youtube.com/watch?v=..."
+bash scripts/run_pipeline.sh "https://..."          # test extractor directly
 ```
+
+---
+
+## Forking
+
+Copy `CLAUDE.example.md` → `CLAUDE.md` and `MEMORY.example.md` → `MEMORY.md`, then fill in your details. These files are gitignored — they're personal context for AI agents working on your instance.
 
 ---
 

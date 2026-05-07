@@ -12,13 +12,7 @@ The pipeline runs in the background. By the time you're done scrolling, the find
 
 ## Install
 
-### Option A — Shortcut Gallery link
-
-> **[Add to Shortcuts →](https://www.icloud.com/shortcuts/)**
->
-> *(Link available once published — use Option B for now)*
-
-### Option B — Build it yourself (2 minutes)
+### Build it yourself (2 minutes)
 
 1. Open the **Shortcuts** app on your iPhone
 2. Tap **+** to create a new shortcut
