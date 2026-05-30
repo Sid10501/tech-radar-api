@@ -2,79 +2,75 @@
 
 One tap from any Instagram, TikTok, or YouTube post to a structured finding in your knowledge base.
 
-## What it does
+---
 
-1. Grabs the URL from your clipboard (or the share sheet)
-2. POSTs it to your tech-radar-api instance
-3. Shows a confirmation notification
+## Before you start — two values you need
 
-The pipeline runs in the background. By the time you're done scrolling, the finding is committed to your ai-memory repo.
+| Value | Where to find it |
+|-------|-----------------|
+| `YOUR_RAILWAY_URL` | Railway dashboard → your service → Settings → Domain (e.g. `https://tech-radar-api-production.up.railway.app`) |
+| `YOUR_AUTH_TOKEN` | The `AUTH_TOKEN` value in your Railway Variables |
 
-## Install
-
-### Build it yourself (2 minutes)
-
-1. Open the **Shortcuts** app on your iPhone
-2. Tap **+** to create a new shortcut
-3. Add the following actions in order:
+Have these ready before building the shortcut.
 
 ---
 
-**Action 1: Get Clipboard**
-- Action: `Get Clipboard`
-- This captures whatever URL you copied from Instagram/TikTok/YouTube
+## Quick start (share sheet — recommended)
+
+1. Open **Shortcuts** app → tap **+**
+2. Build the 3 actions below in order
+3. Tap **ⓘ** → enable **Show in Share Sheet** → Receive: **URLs**
+
+Then: on any Instagram/TikTok/YouTube post, tap **Share** → **Research This** → done.
 
 ---
 
-**Action 2: Get Contents of URL** *(the actual API call)*
+## The 3 actions
+
+### Action 1: Get the URL
+- Action: `Shortcut Input`
+- Use: `Provided Input` (this is the URL from the share sheet)
+
+> **Clipboard fallback:** If you prefer to copy links manually, replace this with `Get Clipboard`.
+
+### Action 2: POST to your pipeline
 - Action: `Get Contents of URL`
-- URL: `https://YOUR-RAILWAY-URL.railway.app/runs`
+- URL: `https://YOUR_RAILWAY_URL/runs`
 - Method: `POST`
 - Headers:
   - `Content-Type` → `application/json`
   - `Authorization` → `Bearer YOUR_AUTH_TOKEN`
 - Request Body: `JSON`
-  - Add field: key = `url`, value = `Clipboard` (tap the variable picker, choose Clipboard)
+  - Key: `url` — Value: tap the variable picker → choose **Shortcut Input** (or Clipboard)
 
----
-
-**Action 3: Show Notification**
+### Action 3: Confirm
 - Action: `Show Notification`
 - Title: `Tech Radar`
 - Body: `Queued for research ✓`
 
 ---
 
-4. Name the shortcut **"Research This"**
-5. Tap the shortcut icon → choose a symbol (the radar or antenna icon works well)
+## Naming and icon
 
-### Adding to the Share Sheet
+- Name it **Research This**
+- Tap the icon → choose the radar or antenna symbol
 
-To trigger it directly from Instagram/TikTok without copying the URL first:
+---
 
-1. Open the shortcut
-2. Tap the **ⓘ** (info) button
-3. Enable **Show in Share Sheet**
-4. Under "Receive", select **URLs** and **Safari web pages**
-5. Replace Action 1 (Get Clipboard) with `Shortcut Input` → use `Provided Input` as the URL
+## Testing it
 
-Now when you tap Share on any post → scroll to **Research This** → done.
+1. Open Instagram, find a post about a dev tool
+2. Tap **Share** → scroll to **Research This** → tap
+3. You should get the "Queued for research ✓" notification
+4. Check your Telegram bot or Railway URL — the run should appear within seconds
 
-## Environment values to fill in
+---
 
-| Placeholder | Where to find it |
-|-------------|-----------------|
-| `YOUR-RAILWAY-URL` | Railway dashboard → your service → Settings → Domain |
-| `YOUR_AUTH_TOKEN` | The `AUTH_TOKEN` value you set in Railway Variables |
+## Troubleshooting
 
-## Usage
-
-**Copy-paste flow:**
-1. On Instagram/TikTok, tap the share button → **Copy Link**
-2. Open Shortcuts → tap **Research This**
-3. Done
-
-**Share sheet flow (after setup above):**
-1. On any post, tap the share button
-2. Scroll down → tap **Research This**
-3. Done
+| Problem | Fix |
+|---------|-----|
+| "Unauthorized" error | Double-check `AUTH_TOKEN` matches your Railway variable exactly |
+| No notification | Make sure Shortcuts has notification permission in iOS Settings |
+| Run doesn't appear | Check Railway logs — the URL may have failed to extract |
+| Share sheet doesn't show the shortcut | Enable "Show in Share Sheet" in the shortcut's ⓘ settings |
