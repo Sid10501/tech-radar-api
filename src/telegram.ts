@@ -71,7 +71,7 @@ export async function handleTelegramUpdate(update: Record<string, unknown>): Pro
       return;
     }
     const lines = runs.map((r) => {
-      const icon = r.status === "processed" ? "✅" : r.status === "failed" ? "❌" : "⏳";
+      const icon = r.status === "processed" ? "✅" : r.status === "failed" ? "❌" : r.status === "skipped" ? "⏭️" : "⏳";
       const label = r.url.replace(/[_*[\]()~`>#+=|{}.!-]/g, "\\$&").slice(0, 50);
       return `${icon} ${r.status} — ${label}`;
     });
