@@ -31,10 +31,10 @@ After `extract()` returns in `runner.ts`, add a bail guard:
 
 **Web UI:** `.status-skipped { color: #999; }` — rendered as grey, same visual weight as `pending`.
 
-**Dedup behavior:** Skipped runs are excluded from the dedup guard — re-submitting a skipped URL queues a fresh full run (user may have fixed the post, or it may have become public).
+**Dedup behavior:** The dedup guard blocks `pending`, `running`, and `processed` statuses only. `skipped` and `failed` are not blocked — re-submitting a skipped or failed URL via plain URL paste always queues a fresh run without needing `/retry`.
 
 ### `/retry` command
-`/retry <url>` in Telegram explicitly force-retries any URL regardless of its current status (skipped, failed, or even processed if user wants a refresh). Implementation: strip the dedup check when a `/retry` prefix is detected by passing a `{ force: true }` option to `runPipeline`.
+`/retry <url>` force-retries any URL regardless of status — including `processed` runs where the user wants a fresh pass. Implementation: pass `{ force: true }` to `runPipeline`, which bypasses the dedup check entirely for all statuses.
 
 **Telegram responses:**
 - `/retry https://...` → `⏳ Force-retrying:\n<url>`
