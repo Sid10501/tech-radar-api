@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".codex/hooks/pre-compact.sh",
+            "statusMessage": "Preservation brief reminder"
+          }
+        ]
+      }
+    ]
+  }
+}
