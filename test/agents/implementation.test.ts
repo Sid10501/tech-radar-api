@@ -24,7 +24,7 @@ const researchFixture = {
 let memoryFilesRead: string[] = [];
 
 const CANNED_IMPLEMENTATION = {
-  fit_for_sid: "Zod 4 is a direct upgrade for Cross-Tax, which already uses Zod 3 for API input validation.",
+  fit_for_owner: "Zod 4 is a direct upgrade for Cross-Tax, which already uses Zod 3 for API input validation.",
   target_project: "Cross-Tax",
   implementation_idea_markdown: "## Implementation Idea\n\nReplace Zod 3 with Zod 4 in Cross-Tax's API layer for a performance boost.\n\n```typescript\nimport { z } from 'zod';\n```\n",
   follow_ups: ["Check Cross-Tax's current Zod version", "Run migration script"],
@@ -57,9 +57,26 @@ describe("runImplementation()", () => {
         usage: { input_tokens: 500, output_tokens: 50, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
       });
 
-      // Second call: final JSON response
+      // Second call: list recent sessions
       mockCreate.mockResolvedValueOnce({
         id: "msg_2",
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_2",
+            name: "list_recent_sessions",
+            input: { n: 2 },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 550, output_tokens: 30, cache_read_input_tokens: 400, cache_creation_input_tokens: 0 },
+      });
+
+      // Third call: final JSON response
+      mockCreate.mockResolvedValueOnce({
+        id: "msg_3",
         type: "message",
         role: "assistant",
         content: [
@@ -99,8 +116,12 @@ describe("runImplementation()", () => {
     // Must have read GLOBAL_MEMORY.md
     expect(memoryFilesRead).toContain("GLOBAL_MEMORY.md");
 
+    // list_recent_sessions must have been invoked
+    const { listRecentSessions } = await import("../../src/tools/ai_memory.js");
+    expect(listRecentSessions).toHaveBeenCalled();
+
     // Output must parse against ImplementationOutputSchema
-    expect(result.fit_for_sid).toBeTruthy();
+    expect(result.fit_for_owner).toBeTruthy();
     expect(["Cross-Tax", "StockBot", "Finance Assistant", "new project", "none"]).toContain(result.target_project);
     expect(result.implementation_idea_markdown).toBeTruthy();
     expect(Array.isArray(result.follow_ups)).toBe(true);

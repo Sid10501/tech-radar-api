@@ -40,11 +40,11 @@ Tools available:
 - list_recent_sessions: List recent session log filenames
 - read_ai_memory: Read a file from the ai-memory knowledge base (allowed: GLOBAL_MEMORY.md, domains/*, sessions/*)
 
-Always read GLOBAL_MEMORY.md first. Then read domains/webdev.md for stack preferences. Optionally read 1-2 recent sessions for context.
+Always read GLOBAL_MEMORY.md first. Then read domains/webdev.md for stack preferences. Then always call list_recent_sessions and read the 2 most recent session files for current project context.
 
 Your output MUST be a single JSON object matching this exact schema (no markdown fences, just raw JSON):
 {
-  "fit_for_${OWNER_NAME.toLowerCase().replace(/\s+/g, "_")}": "1-2 sentences on whether/how this technology fits their context",
+  "fit_for_owner": "1-2 sentences on whether/how this technology fits their context",
   "target_project": "${TARGET_PROJECTS_LIST}",
   "implementation_idea_markdown": "Markdown section (2-4 paragraphs) with a concrete implementation idea grounded in their stack and projects. Include a code snippet if helpful.",
   "follow_ups": ["array", "of", "follow-up", "questions", "or", "actions"]

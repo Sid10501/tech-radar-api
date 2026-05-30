@@ -6,23 +6,22 @@ import { parseJsonObjectFromModelText } from "./json.js";
 import type { ExtractResult } from "../extract.js";
 import type { ResearchOutput } from "./research.js";
 
-function getTargetProjects(): [string, ...string[]] {
-  const raw = process.env["TARGET_PROJECTS"];
-  if (raw) {
-    const values = raw.split(",").map((s) => s.trim()).filter(Boolean);
-    if (values.length > 0) return values as [string, ...string[]];
-  }
-  return ["other", "none"];
-}
-
 export const ImplementationOutputSchema = z.object({
-  fit_for_sid: z.string(),
+  fit_for_owner: z.string(),
   target_project: z.string(),
   implementation_idea_markdown: z.string(),
   follow_ups: z.array(z.string()),
 });
 
 export type ImplementationOutput = z.infer<typeof ImplementationOutputSchema>;
+
+// Backward-compat: accept old `fit_for_sid` key from callers/tests that haven't migrated
+export function normalizeImplementationOutput(raw: Record<string, unknown>): Record<string, unknown> {
+  if (!("fit_for_owner" in raw) && "fit_for_sid" in raw) {
+    return { ...raw, fit_for_owner: raw["fit_for_sid"] };
+  }
+  return raw;
+}
 
 const TOOLS: Anthropic.Tool[] = [
   {
@@ -80,7 +79,8 @@ export async function runImplementation(
 ): Promise<ImplementationOutput> {
   const client = new Anthropic();
 
-  const userMessage = `Produce an implementation recommendation for Sid based on the following technology:
+  const ownerName = process.env["OWNER_NAME"] ?? "the developer";
+  const userMessage = `Produce an implementation recommendation for ${ownerName} based on the following technology:
 
 Title: ${extract.title ?? "unknown"}
 URL: ${extract.url}
@@ -93,7 +93,7 @@ Research summary:
 - Kickstarter: ${research.kickstarter}
 - GitHub stars: ${research.viability_signals.github_stars}
 
-Read GLOBAL_MEMORY.md first, then domains/webdev.md, and optionally 1-2 recent sessions. Then produce the JSON output.`;
+Read GLOBAL_MEMORY.md first, then domains/webdev.md, then call list_recent_sessions and read the 2 most recent session files. Then produce the JSON output.`;
 
   const messages: Anthropic.MessageParam[] = [
     { role: "user", content: userMessage },
@@ -126,7 +126,7 @@ Read GLOBAL_MEMORY.md first, then domains/webdev.md, and optionally 1-2 recent s
       }
       try {
         const parsed = ImplementationOutputSchema.parse(
-          parseJsonObjectFromModelText<unknown>(textBlock.text),
+          normalizeImplementationOutput(parseJsonObjectFromModelText<Record<string, unknown>>(textBlock.text)),
         );
         return parsed;
       } catch {
