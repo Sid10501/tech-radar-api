@@ -17,6 +17,10 @@ export interface ExtractResult {
   transcript_source: "whisper" | "subs" | null;
   upload_date: string | null;
   raw_metadata_keys: string[];
+  /** Pre-wrapped by extract_post.py when pipeline uses ai-memory llm-defense */
+  caption_for_llm?: string | null;
+  transcript_for_llm?: string | null;
+  title_for_llm?: string | null;
 }
 
 export class ExtractError extends Error {

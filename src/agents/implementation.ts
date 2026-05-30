@@ -1,19 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { z } from "zod";
 import { readAiMemory, listRecentSessions } from "../tools/ai_memory.js";
+import { wrapAsUntrusted } from "../lib/untrustedContent.js";
+import { parseAgentOutput } from "../lib/validateAgentOutput.js";
+import {
+  ImplementationOutputSchema,
+  type ImplementationOutput,
+} from "../schemas/implementationOutput.js";
 import { IMPLEMENTATION_SYSTEM_PROMPT } from "./prompts.js";
 import { parseJsonObjectFromModelText } from "./json.js";
 import type { ExtractResult } from "../extract.js";
 import type { ResearchOutput } from "./research.js";
 
-export const ImplementationOutputSchema = z.object({
-  fit_for_owner: z.string(),
-  target_project: z.string(),
-  implementation_idea_markdown: z.string(),
-  follow_ups: z.array(z.string()),
-});
-
-export type ImplementationOutput = z.infer<typeof ImplementationOutputSchema>;
+export { ImplementationOutputSchema, type ImplementationOutput };
 
 // Backward-compat: accept old `fit_for_sid` key from callers/tests that haven't migrated
 export function normalizeImplementationOutput(raw: Record<string, unknown>): Record<string, unknown> {
@@ -62,14 +60,53 @@ async function executeTool(
   if (name === "read_ai_memory") {
     const filePath = input["path"] as string;
     const content = await readAiMemory(filePath, memoryDir);
-    return content;
+    return wrapAsUntrusted(content, { label: `ai-memory file ${filePath}` });
   }
   if (name === "list_recent_sessions") {
     const n = (input["n"] as number | undefined) ?? 5;
     const sessions = await listRecentSessions(n, memoryDir);
-    return JSON.stringify(sessions);
+    return wrapAsUntrusted(JSON.stringify(sessions), { label: "session index listing" });
   }
-  return JSON.stringify({ error: `Unknown tool: ${name}` });
+  return wrapAsUntrusted(JSON.stringify({ error: `Unknown tool: ${name}` }), {
+    label: "tool error",
+  });
+}
+
+function buildImplementationUserMessage(
+  extract: ExtractResult,
+  research: ResearchOutput,
+  ownerName: string,
+): string {
+  const title =
+    extract.title_for_llm ??
+    (extract.title?.trim()
+      ? wrapAsUntrusted(extract.title, { label: "post title" })
+      : "unknown");
+
+  const researchSummary = wrapAsUntrusted(
+    [
+      `What: ${research.what}`,
+      `Who: ${research.who}`,
+      `Status: ${research.status}`,
+      `Why it matters: ${research.why}`,
+      `Kickstarter: ${research.kickstarter}`,
+      `GitHub stars: ${research.viability_signals.github_stars}`,
+    ].join("\n"),
+    { label: "validated research summary" },
+  );
+
+  return [
+    `Produce an implementation recommendation for ${ownerName} based on the following technology.`,
+    "",
+    `URL (reference only): ${extract.url}`,
+    "",
+    "Post title:",
+    title,
+    "",
+    researchSummary,
+    "",
+    "Read GLOBAL_MEMORY.md first, then domains/webdev.md, then call list_recent_sessions and read the 2 most recent session files. Then produce the JSON output.",
+  ].join("\n");
 }
 
 export async function runImplementation(
@@ -78,25 +115,13 @@ export async function runImplementation(
   memoryDir?: string,
 ): Promise<ImplementationOutput> {
   const client = new Anthropic();
-
   const ownerName = process.env["OWNER_NAME"] ?? "the developer";
-  const userMessage = `Produce an implementation recommendation for ${ownerName} based on the following technology:
-
-Title: ${extract.title ?? "unknown"}
-URL: ${extract.url}
-
-Research summary:
-- What: ${research.what}
-- Who: ${research.who}
-- Status: ${research.status}
-- Why it matters: ${research.why}
-- Kickstarter: ${research.kickstarter}
-- GitHub stars: ${research.viability_signals.github_stars}
-
-Read GLOBAL_MEMORY.md first, then domains/webdev.md, then call list_recent_sessions and read the 2 most recent session files. Then produce the JSON output.`;
 
   const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: userMessage },
+    {
+      role: "user",
+      content: buildImplementationUserMessage(extract, research, ownerName),
+    },
   ];
 
   const systemBlock: Anthropic.TextBlockParam & { cache_control: { type: "ephemeral" } } = {
@@ -125,10 +150,20 @@ Read GLOBAL_MEMORY.md first, then domains/webdev.md, then call list_recent_sessi
         throw new Error("Implementation agent returned no text content");
       }
       try {
-        const parsed = ImplementationOutputSchema.parse(
-          normalizeImplementationOutput(parseJsonObjectFromModelText<Record<string, unknown>>(textBlock.text)),
+        const jsonPayload = JSON.stringify(
+          normalizeImplementationOutput(
+            parseJsonObjectFromModelText<Record<string, unknown>>(textBlock.text),
+          ),
         );
-        return parsed;
+        const validated = parseAgentOutput(
+          jsonPayload,
+          ImplementationOutputSchema,
+          "implementation",
+        );
+        if (!validated.ok) {
+          throw new Error(validated.error);
+        }
+        return validated.data;
       } catch {
         messages.push({ role: "assistant", content: response.content });
         messages.push({

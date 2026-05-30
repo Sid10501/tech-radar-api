@@ -1,32 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { z } from "zod";
 import { githubLookup } from "../tools/github.js";
+import { buildResearchUserMessage } from "../lib/extractForLlm.js";
+import { wrapAsUntrusted } from "../lib/untrustedContent.js";
+import { parseAgentOutput } from "../lib/validateAgentOutput.js";
+import { ResearchOutputSchema, type ResearchOutput } from "../schemas/researchOutput.js";
 import { RESEARCH_SYSTEM_PROMPT } from "./prompts.js";
 import { parseJsonObjectFromModelText } from "./json.js";
 import type { ExtractResult } from "../extract.js";
 
-export const ResearchOutputSchema = z.object({
-  what: z.string(),
-  who: z.string(),
-  status: z.enum(["stable", "alpha", "beta", "abandoned", "unknown"]),
-  why: z.string(),
-  comparisons: z.array(z.string()),
-  links: z.object({
-    github: z.string().nullable(),
-    docs: z.string().nullable(),
-    npm: z.string().nullable(),
-  }),
-  kickstarter: z.string(),
-  viability_signals: z.object({
-    github_stars: z.number(),
-    last_pushed: z.string().nullable(),
-    open_issues: z.number(),
-    license: z.string().nullable(),
-    archived: z.boolean(),
-  }),
-});
-
-export type ResearchOutput = z.infer<typeof ResearchOutputSchema>;
+export { ResearchOutputSchema, type ResearchOutput };
 
 const TOOLS: Anthropic.Tool[] = [
   {
@@ -50,32 +32,24 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
     const repo = input["repo"] as string;
     try {
       const info = await githubLookup(repo);
-      return JSON.stringify(info);
+      return wrapAsUntrusted(JSON.stringify(info), { label: "GitHub API response" });
     } catch (err) {
-      // Return error as tool result so the agent can continue with degraded data
-      return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+      return wrapAsUntrusted(
+        JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+        { label: "GitHub API error" },
+      );
     }
   }
-  return JSON.stringify({ error: `Unknown tool: ${name}` });
+  return wrapAsUntrusted(JSON.stringify({ error: `Unknown tool: ${name}` }), {
+    label: "tool error",
+  });
 }
 
 export async function runResearch(extract: ExtractResult): Promise<ResearchOutput> {
   const client = new Anthropic();
 
-  const userMessage = `Research the following technology extracted from a social media post:
-
-URL: ${extract.url}
-Platform: ${extract.platform}
-Title: ${extract.title ?? "unknown"}
-Creator: ${extract.creator ?? "unknown"}
-Caption: ${extract.caption ?? ""}
-Hashtags: ${(extract.hashtags ?? []).join(", ")}
-Transcript excerpt: ${(extract.transcript ?? "").slice(0, 800)}
-
-Produce the JSON report as instructed. Call github_lookup if the technology has a GitHub repo.`;
-
   const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: userMessage },
+    { role: "user", content: buildResearchUserMessage(extract) },
   ];
 
   const systemBlock: Anthropic.TextBlockParam & { cache_control: { type: "ephemeral" } } = {
@@ -104,12 +78,15 @@ Produce the JSON report as instructed. Call github_lookup if the technology has 
         throw new Error("Research agent returned no text content");
       }
       try {
-        const parsed = ResearchOutputSchema.parse(
+        const jsonPayload = JSON.stringify(
           parseJsonObjectFromModelText<unknown>(textBlock.text),
         );
-        return parsed;
+        const validated = parseAgentOutput(jsonPayload, ResearchOutputSchema, "research");
+        if (!validated.ok) {
+          throw new Error(validated.error);
+        }
+        return validated.data;
       } catch {
-        // Model output wasn't valid JSON — ask it to reformat
         messages.push({ role: "assistant", content: response.content });
         messages.push({
           role: "user",
@@ -140,7 +117,6 @@ Produce the JSON report as instructed. Call github_lookup if the technology has 
       continue;
     }
 
-    // pause_turn or unexpected stop reason — append and continue
     messages.push({ role: "assistant", content: response.content });
   }
 

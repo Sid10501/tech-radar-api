@@ -78,7 +78,7 @@ ${research.kickstarter}
 ## Fit for ${OWNER_NAME}
 
 - Target project: ${implementation.target_project}
-- ${implementation.fit_for_sid}
+- ${implementation.fit_for_owner}
 - Verdict: \`${verdict}\`
 
 ## Implementation Idea

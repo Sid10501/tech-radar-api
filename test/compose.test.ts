@@ -31,7 +31,7 @@ const researchFixture = {
 };
 
 const implementationFixture = {
-  fit_for_sid: "Zod 4 is a direct upgrade for Cross-Tax, which already uses Zod 3.",
+  fit_for_owner: "Zod 4 is a direct upgrade for Cross-Tax, which already uses Zod 3.",
   target_project: "Cross-Tax" as const,
   implementation_idea_markdown: "Upgrade the Cross-Tax API input validation layer from Zod 3 to Zod 4. The new `.parse()` is 14x faster and tree-shaking reduces bundle size.\n\n```typescript\nimport { z } from 'zod';\nconst schema = z.object({ amount: z.number() });\n```\n",
   follow_ups: ["Check current Zod version in Cross-Tax", "Run codemods for breaking changes"],
@@ -57,12 +57,12 @@ describe("composeFinding()", () => {
     expect(body).toContain("## What it actually is");
     expect(body).toContain("## Links");
     expect(body).toContain("## Kickstarter guide");
-    expect(body).toContain("## Fit for Sid");
+    expect(body).toMatch(/## Fit for /);
     expect(body).toContain("## Implementation Idea");
     expect(body).toContain("## Follow-ups");
 
-    // Section order: Implementation Idea must come after Fit for Sid
-    const fitIdx = body.indexOf("## Fit for Sid");
+    // Section order: Implementation Idea must come after Fit for …
+    const fitIdx = body.search(/## Fit for /);
     const implIdx = body.indexOf("## Implementation Idea");
     const followIdx = body.indexOf("## Follow-ups");
     expect(implIdx).toBeGreaterThan(fitIdx);
