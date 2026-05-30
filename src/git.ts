@@ -132,7 +132,18 @@ export class AiMemoryRepo {
     const status = await this.git.status();
     if (status.staged.length === 0) return;
     await this.git.commit(message);
-    await this.git.push();
+    try {
+      await this.git.push();
+    } catch (pushErr) {
+      const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+      if (msg.includes("rejected") || msg.includes("fetch first") || msg.includes("non-fast-forward")) {
+        // Remote has new commits — pull with rebase and retry once
+        await this.git.pull(["--rebase"]);
+        await this.git.push();
+      } else {
+        throw pushErr;
+      }
+    }
   }
 }
 
