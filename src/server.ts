@@ -1,5 +1,6 @@
 import Fastify from "fastify";
-import { runPipeline, getRun, listRuns } from "./runner.js";
+import path from "node:path";
+import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError } from "./runner.js";
 import { handleTelegramUpdate } from "./telegram.js";
 
 const HTML_TEMPLATE = (runs: ReturnType<typeof listRuns>) => `<!DOCTYPE html>
@@ -105,9 +106,17 @@ export function buildServer() {
       if (!url || typeof url !== "string") {
         return reply.code(400).send({ error: "url is required" });
       }
-      // runPipeline registers the run synchronously before its first await,
-      // so listRuns()[0] is reliably set after one microtask tick.
-      runPipeline(url).catch(() => {}); // errors are captured inside runPipeline
+      // Check for duplicate before queuing
+      try {
+        // runPipeline registers the run synchronously before its first await,
+        // so listRuns()[0] is reliably set after one microtask tick.
+        runPipeline(url).catch(() => {}); // errors are captured inside runPipeline
+      } catch (err) {
+        if (err instanceof DuplicateRunError) {
+          return reply.code(409).send({ error: `URL already ${err.existingRun.status}`, runId: err.existingRun.id });
+        }
+        throw err;
+      }
       await Promise.resolve(); // yield to let runPipeline register the run
       const latest = listRuns()[0];
       return reply.code(202).send({ runId: latest?.id ?? "unknown" });
@@ -146,6 +155,16 @@ export function buildServer() {
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
+  // Hydrate run history from persisted INBOX.md on startup
+  const aiMemoryDir = process.env["AI_MEMORY_LOCAL_DIR"];
+  if (aiMemoryDir) {
+    hydrateRunsFromInbox(path.join(aiMemoryDir, "tech-radar", "INBOX.md"));
+  }
+
+  if (!process.env["AI_MEMORY_REPO_URL"]) {
+    console.warn("[warn] AI_MEMORY_REPO_URL not set — Telegram finding links will be bare paths");
+  }
+
   const app = buildServer();
   const port = Number(process.env["PORT"] ?? 3000);
   await app.listen({ port, host: "0.0.0.0" });
