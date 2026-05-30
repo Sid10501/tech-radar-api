@@ -160,6 +160,22 @@ railway up
 
 Set all env vars under **Variables** in the Railway dashboard. `Dockerfile` and `railway.json` are preconfigured.
 
+Key variables to set (see `.env.example` for full list):
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `ANTHROPIC_API_KEY` | Yes | Claude API |
+| `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
+| `GIT_DEPLOY_KEY_B64` | Yes | SSH deploy key (base64) |
+| `AUTH_TOKEN` | Recommended | Protects POST /runs |
+| `GITHUB_TOKEN` | Recommended | GitHub API (5000 req/hr vs 60) |
+| `WHISPER_MODEL` | Optional | Transcription quality: `tiny`/`base`/`small` |
+| `AI_MEMORY_REPO_URL` | Optional | Makes finding links in Telegram clickable |
+| `OWNER_NAME` | Optional | Your name in agent prompts |
+| `TARGET_PROJECTS` | Optional | Comma-separated list of your projects |
+| `TELEGRAM_BOT_TOKEN` | Optional | Telegram notifications |
+| `TELEGRAM_CHAT_ID` | Optional | Your Telegram chat ID |
+
 > **Note:** After pushing new code, use `railway up` to deploy — not `railway deployment redeploy`, which redeploys the previous image.
 
 ---
