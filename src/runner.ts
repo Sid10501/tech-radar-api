@@ -12,7 +12,7 @@ import type { AiMemoryRepoOptions } from "./git.js";
 export interface Run {
   id: string;
   url: string;
-  status: "pending" | "running" | "processed" | "failed";
+  status: "pending" | "running" | "processed" | "failed" | "skipped";
   findingPath?: string;
   error?: string;
   startedAt: string;
@@ -23,6 +23,7 @@ export interface RunPipelineOptions {
   remoteUrl?: string;
   localDir?: string;
   aiMemoryDir?: string;
+  force?: boolean;
 }
 
 function sendTelegram(text: string): void {
@@ -43,6 +44,32 @@ function sendTelegram(text: string): void {
 
 // In-memory run store (last 50)
 const runs = new Map<string, Run>();
+
+export function hydrateRunsFromInbox(inboxPath: string): void {
+  if (!fs.existsSync(inboxPath)) return;
+  const content = fs.readFileSync(inboxPath, "utf8");
+  const rows = content
+    .split("\n")
+    .filter((l) => l.startsWith("|") && !l.startsWith("| Date") && !l.startsWith("|---") && !l.includes("<!-- "));
+
+  for (const row of rows) {
+    const cols = row.split("|").map((c) => c.trim()).filter((_, i) => i > 0 && i < 6);
+    const [date, url, status, finding, error] = cols;
+    if (!url || !status) continue;
+    const validStatus = ["pending", "running", "processed", "failed", "skipped"].includes(status)
+      ? (status as Run["status"])
+      : "processed";
+    const run: Run = {
+      id: randomUUID(),
+      url,
+      status: validStatus,
+      startedAt: date ? `${date}T00:00:00.000Z` : new Date().toISOString(),
+      findingPath: finding ? `tech-radar/findings/${finding}` : undefined,
+      error: error || undefined,
+    };
+    storeRun(run);
+  }
+}
 
 function storeRun(run: Run): void {
   runs.set(run.id, run);
@@ -81,10 +108,31 @@ export function listRuns(): Run[] {
   return Array.from(runs.values()).reverse();
 }
 
+export function findRunByUrl(url: string): Run | undefined {
+  for (const run of runs.values()) {
+    if (run.url === url) return run;
+  }
+  return undefined;
+}
+
+export class DuplicateRunError extends Error {
+  constructor(public readonly existingRun: Run) {
+    super(`URL already ${existingRun.status}: ${existingRun.url}`);
+    this.name = "DuplicateRunError";
+  }
+}
+
 export async function runPipeline(
   url: string,
   opts: RunPipelineOptions = {},
 ): Promise<{ runId: string; findingPath: string }> {
+  if (!opts.force) {
+    const existing = findRunByUrl(url);
+    if (existing && (existing.status === "pending" || existing.status === "running" || existing.status === "processed")) {
+      throw new DuplicateRunError(existing);
+    }
+  }
+
   const runId = randomUUID();
   const now = new Date().toISOString();
 
@@ -132,6 +180,26 @@ export async function runPipeline(
 
     // Step 1: Extract
     const extractResult = await extract(url);
+
+    // Bail early if the post has no usable content — skip agents entirely
+    const hasContent = (extractResult.caption && extractResult.caption.trim()) ||
+                       (extractResult.transcript && extractResult.transcript.trim());
+    if (extractResult.status === "failed" || !hasContent) {
+      const skipReason = extractResult.status === "failed"
+        ? (extractResult.error ?? "extract failed")
+        : "no caption or transcript";
+      await repo.updateInbox({ url, status: "skipped", finding: null, date: today, error: skipReason });
+      await repo.commitAndPush(`tech-radar: skipped ${url.slice(0, 60)}`);
+
+      run.status = "skipped";
+      run.error = skipReason;
+      run.finishedAt = new Date().toISOString();
+      storeRun(run);
+
+      sendTelegram(`⏭️ *Skipped* (${skipReason}):\n${url.slice(0, 80)}`);
+      releaseSlot();
+      return { runId, findingPath: "" };
+    }
 
     // Step 2: Research
     const researchResult = await runResearch(extractResult);

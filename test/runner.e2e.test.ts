@@ -87,7 +87,7 @@ describe("runPipeline()", () => {
     mockCreate.mockResolvedValueOnce({
       id: "i2", type: "message", role: "assistant",
       content: [{ type: "text", text: JSON.stringify({
-        fit_for_sid: "Good fit for Cross-Tax.",
+        fit_for_owner: "Good fit for Cross-Tax.",
         target_project: "Cross-Tax",
         implementation_idea_markdown: "Upgrade to Zod 4 in Cross-Tax.\n",
         follow_ups: ["Check current version"],
@@ -176,6 +176,92 @@ describe("runPipeline()", () => {
       const failed = runs.find((r) => r.status === "failed");
       expect(failed).toBeDefined();
 
+    } finally {
+      fs.rmSync(localDir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks run as skipped when extract returns status: failed", async () => {
+    const extractFixture = JSON.parse(
+      fs.readFileSync(path.join(FIXTURE_DIR, "extract_youtube.json"), "utf8"),
+    );
+    const failedExtract = { ...extractFixture, status: "failed", caption: null, transcript: null, error: "yt-dlp error: 403" };
+
+    vi.doMock("../src/extract.js", () => ({
+      extract: vi.fn(async () => failedExtract),
+      ExtractError: class ExtractError extends Error {},
+    }));
+
+    vi.doMock("@anthropic-ai/sdk", () => ({
+      default: vi.fn().mockImplementation(() => ({
+        messages: { create: vi.fn() },
+      })),
+    }));
+
+    const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-skip1-"));
+    try {
+      const { runPipeline, listRuns } = await import("../src/runner.js");
+
+      const result = await runPipeline(
+        "https://www.instagram.com/reel/skip-test-1/",
+        { remoteUrl: bareDir, localDir },
+      );
+
+      expect(result.runId).toBeTruthy();
+      expect(result.findingPath).toBe("");
+
+      const runs = listRuns();
+      const skipped = runs.find((r) => r.url === "https://www.instagram.com/reel/skip-test-1/");
+      expect(skipped?.status).toBe("skipped");
+      expect(skipped?.error).toContain("yt-dlp error");
+    } finally {
+      fs.rmSync(localDir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks run as skipped when extract returns no caption and no transcript", async () => {
+    const emptyExtract = {
+      url: "https://www.instagram.com/reel/skip-test-2/",
+      platform: "instagram",
+      status: "partial",
+      error: null,
+      title: "Some post",
+      creator: "someone",
+      caption: null,
+      hashtags: [],
+      duration_sec: 30,
+      transcript: null,
+      transcript_source: null,
+      upload_date: "2026-05-30",
+      raw_metadata_keys: [],
+    };
+
+    vi.doMock("../src/extract.js", () => ({
+      extract: vi.fn(async () => emptyExtract),
+      ExtractError: class ExtractError extends Error {},
+    }));
+
+    vi.doMock("@anthropic-ai/sdk", () => ({
+      default: vi.fn().mockImplementation(() => ({
+        messages: { create: vi.fn() },
+      })),
+    }));
+
+    const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-skip2-"));
+    try {
+      const { runPipeline, listRuns } = await import("../src/runner.js");
+
+      const result = await runPipeline(
+        "https://www.instagram.com/reel/skip-test-2/",
+        { remoteUrl: bareDir, localDir },
+      );
+
+      expect(result.findingPath).toBe("");
+
+      const runs = listRuns();
+      const skipped = runs.find((r) => r.url === "https://www.instagram.com/reel/skip-test-2/");
+      expect(skipped?.status).toBe("skipped");
+      expect(skipped?.error).toBe("no caption or transcript");
     } finally {
       fs.rmSync(localDir, { recursive: true, force: true });
     }

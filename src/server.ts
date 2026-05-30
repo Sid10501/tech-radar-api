@@ -21,6 +21,7 @@ const HTML_TEMPLATE = (runs: ReturnType<typeof listRuns>) => `<!DOCTYPE html>
     .status-processed { color: #0a7; }
     .status-failed { color: #c00; }
     .status-running, .status-pending { color: #777; }
+    .status-skipped { color: #999; }
   </style>
 </head>
 <body>

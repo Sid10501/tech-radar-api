@@ -1,5 +1,5 @@
 import https from "node:https";
-import { runPipeline, listRuns } from "./runner.js";
+import { runPipeline, listRuns, DuplicateRunError } from "./runner.js";
 
 const URL_RE = /https?:\/\/[^\s]+/;
 
@@ -43,8 +43,23 @@ export async function handleTelegramUpdate(update: Record<string, unknown>): Pro
       "Commands:",
       "`/status` — last 5 runs",
       "`/list` — recent findings with links",
+      "`/retry <url>` — force\\-retry any URL \\(ignores dedup\\)",
       "`/help` — this message",
     ].join("\n"));
+    return;
+  }
+
+  // /retry <url>
+  if (text.startsWith("/retry")) {
+    const retryUrl = text.replace("/retry", "").trim();
+    if (!retryUrl) {
+      reply(chatId, "Usage: `/retry <url>`");
+      return;
+    }
+    reply(chatId, `⏳ Force-retrying:\n${retryUrl}`);
+    runPipeline(retryUrl, { force: true }).catch((err: unknown) => {
+      reply(chatId, `❌ Retry failed: \`${err instanceof Error ? err.message.slice(0, 200) : String(err)}\``);
+    });
     return;
   }
 
@@ -85,10 +100,18 @@ export async function handleTelegramUpdate(update: Record<string, unknown>): Pro
   const urlMatch = text.match(URL_RE);
   if (urlMatch) {
     const url = urlMatch[0];
+    try {
+      runPipeline(url).catch((err: unknown) => {
+        reply(chatId, `❌ Pipeline error: \`${err instanceof Error ? err.message.slice(0, 200) : String(err)}\``);
+      });
+    } catch (err) {
+      if (err instanceof DuplicateRunError) {
+        reply(chatId, `⚠️ Already ${err.existingRun.status}:\n${url}`);
+        return;
+      }
+      throw err;
+    }
     reply(chatId, `⏳ Queued for research:\n${url}`);
-    runPipeline(url).catch((err: unknown) => {
-      reply(chatId, `❌ Pipeline error: \`${err instanceof Error ? err.message.slice(0, 200) : String(err)}\``);
-    });
     return;
   }
 
