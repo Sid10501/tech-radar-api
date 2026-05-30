@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
@@ -165,13 +166,14 @@ def run_ytdlp(url: str, out_dir: Path, want_audio: bool) -> tuple[dict | None, P
 # --- Whisper transcription ---------------------------------------------------
 
 def transcribe(audio_path: Path) -> tuple[str | None, str | None]:
-    """Return (transcript, error). Uses faster-whisper with the 'tiny' model."""
+    """Return (transcript, error). Uses faster-whisper with the model from WHISPER_MODEL env var (default: 'tiny')."""
     try:
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError as e:
         return None, f"faster-whisper not installed: {e}"
     try:
-        model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        whisper_model = os.environ.get("WHISPER_MODEL", "tiny")
+        model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
         segments, _info = model.transcribe(str(audio_path), language=None, vad_filter=True)
         text = " ".join(seg.text.strip() for seg in segments).strip()
         return text or None, None
