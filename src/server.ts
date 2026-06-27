@@ -3,7 +3,8 @@ import path from "node:path";
 import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError } from "./runner.js";
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
-import { getFindingDetail, listFindings } from "./findings.js";
+import { getAiMemoryDir, getFindingDetail, listFindings } from "./findings.js";
+import { AiMemoryRepo, setupSshKey } from "./git.js";
 
 function authMiddleware(request: any, reply: any, done: () => void): void {
   const authToken = process.env["AUTH_TOKEN"];
@@ -19,6 +20,34 @@ function authMiddleware(request: any, reply: any, done: () => void): void {
     return;
   }
   reply.code(401).send({ error: "Unauthorized" });
+}
+
+let aiMemorySync: Promise<void> | null = null;
+
+async function ensureAiMemoryCheckout(): Promise<void> {
+  const localDir = getAiMemoryDir();
+  const remoteUrl = process.env["AI_MEMORY_REPO"] ?? "";
+  if (!remoteUrl) return;
+
+  aiMemorySync ??= (async () => {
+    let sshKeyPath: string | undefined;
+    const deployKeyB64 = process.env["GIT_DEPLOY_KEY_B64"];
+    if (deployKeyB64) {
+      sshKeyPath = setupSshKey(deployKeyB64);
+    }
+    const repo = new AiMemoryRepo({
+      remoteUrl,
+      localDir,
+      gitAuthor: { name: "Tech Radar Bot", email: "bot@tech-radar.local" },
+      sshKeyPath,
+    });
+    await repo.init();
+    await repo.pullLatest();
+  })().finally(() => {
+    aiMemorySync = null;
+  });
+
+  await aiMemorySync;
 }
 
 export function buildServer() {
@@ -86,6 +115,7 @@ export function buildServer() {
   });
 
   app.get("/api/findings", { preHandler: authMiddleware }, async () => {
+    await ensureAiMemoryCheckout();
     return { findings: listFindings() };
   });
 
@@ -93,6 +123,7 @@ export function buildServer() {
     "/api/findings/:id",
     { preHandler: authMiddleware },
     async (request, reply) => {
+      await ensureAiMemoryCheckout();
       const detail = getFindingDetail(request.params.id);
       if (!detail) return reply.code(404).send({ error: "Finding not found" });
       return detail;
