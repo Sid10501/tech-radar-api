@@ -183,11 +183,12 @@ export async function runPipeline(
 
     // Bail early if the post has no usable content — skip agents entirely
     const hasContent = (extractResult.caption && extractResult.caption.trim()) ||
-                       (extractResult.transcript && extractResult.transcript.trim());
+                       (extractResult.transcript && extractResult.transcript.trim()) ||
+                       (extractResult.visual_text && extractResult.visual_text.trim());
     if (extractResult.status === "failed" || !hasContent) {
       const skipReason = extractResult.status === "failed"
         ? (extractResult.error ?? "extract failed")
-        : "no caption or transcript";
+        : "no caption, transcript, or visual text";
       await repo.updateInbox({ url, status: "skipped", finding: null, date: today, error: skipReason });
       await repo.commitAndPush(`tech-radar: skipped ${url.slice(0, 60)}`);
 

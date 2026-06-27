@@ -10,6 +10,8 @@
   "duration_sec": 58,
   "transcript": "Zod 4 is now available. It is significantly faster than Zod 3, has a smaller bundle size, and includes much better TypeScript inference. Check it out on GitHub.",
   "transcript_source": "whisper",
+  "visual_text": null,
+  "visual_text_source": null,
   "upload_date": "2026-04-01",
   "raw_metadata_keys": ["id", "title", "uploader", "duration", "description"]
 }

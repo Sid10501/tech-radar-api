@@ -27,6 +27,8 @@ JSON schema:
   "duration_sec": int | null,
   "transcript": str | null,
   "transcript_source": "whisper" | "subs" | null,
+  "visual_text": str | null,
+  "visual_text_source": "ocr" | null,
   "upload_date": str | null,
   "raw_metadata_keys": [str]
 }
@@ -37,6 +39,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -127,40 +131,54 @@ def try_html_meta(url: str) -> dict | None:
 
 # --- yt-dlp extraction -------------------------------------------------------
 
-def run_ytdlp(url: str, out_dir: Path, want_audio: bool) -> tuple[dict | None, Path | None, str | None]:
-    """Return (info_dict, audio_path, error). Any of those may be None."""
+def run_ytdlp(url: str, out_dir: Path, want_audio: bool, want_video: bool) -> tuple[dict | None, Path | None, Path | None, str | None]:
+    """Return (info_dict, audio_path, video_path, error). Any of those may be None."""
     try:
         import yt_dlp  # type: ignore
     except ImportError as e:
-        return None, None, f"yt-dlp not installed: {e}"
+        return None, None, None, f"yt-dlp not installed: {e}"
 
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
-        "skip_download": not want_audio,
+        "noprogress": True,
+        "skip_download": not (want_audio or want_video),
         "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
-        "format": "bestaudio/best",
-        "postprocessors": [] if not want_audio else [
+        "format": "best[height<=720]/best" if want_video else "bestaudio/best",
+        "keepvideo": want_video,
+        "postprocessors": [] if (not want_audio or want_video) else [
             {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "64"},
         ],
         "extractor_args": {},
     }
 
     audio_path: Path | None = None
+    video_path: Path | None = None
     info: dict | None = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=want_audio)
-            if want_audio and info:
+            info = ydl.extract_info(url, download=want_audio or want_video)
+            if (want_audio or want_video) and info:
                 base = Path(ydl.prepare_filename(info))
+                if want_video:
+                    candidates = [
+                        base,
+                        base.with_suffix(".mp4"),
+                        base.with_suffix(".webm"),
+                        base.with_suffix(".mkv"),
+                        base.with_suffix(".mov"),
+                    ]
+                    video_path = next((p for p in candidates if p.exists()), None)
+                    if want_audio and video_path:
+                        audio_path = video_path
                 mp3 = base.with_suffix(".mp3")
                 if mp3.exists():
                     audio_path = mp3
-                elif base.exists():
+                elif not audio_path and base.exists():
                     audio_path = base
-        return info, audio_path, None
+        return info, audio_path, video_path, None
     except Exception as e:
-        return info, audio_path, f"yt-dlp error: {e.__class__.__name__}: {e}"
+        return info, audio_path, video_path, f"yt-dlp error: {e.__class__.__name__}: {e}"
 
 
 # --- Whisper transcription ---------------------------------------------------
@@ -181,9 +199,90 @@ def transcribe(audio_path: Path) -> tuple[str | None, str | None]:
         return None, f"whisper error: {e.__class__.__name__}: {e}"
 
 
+# --- On-screen text OCR ------------------------------------------------------
+
+def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _float_env(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, str | None]:
+    """Sample a few video frames and OCR visible text with tesseract."""
+    if not shutil.which("ffmpeg"):
+        return None, "ocr skipped: ffmpeg not installed"
+    if not shutil.which("tesseract"):
+        return None, "ocr skipped: tesseract not installed"
+    if not video_path.exists():
+        return None, "ocr skipped: video file missing"
+
+    max_frames = _int_env("OCR_MAX_FRAMES", 6, 1, 20)
+    interval = _float_env("OCR_FRAME_INTERVAL_SEC", 2.0, 0.5, 10.0)
+    frames_dir = out_dir / "ocr-frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(video_path),
+                "-vf",
+                f"fps=1/{interval},scale=960:-1",
+                "-frames:v",
+                str(max_frames),
+                str(frames_dir / "frame-%03d.png"),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception as e:
+        return None, f"ocr frame extraction error: {e.__class__.__name__}: {e}"
+
+    seen: set[str] = set()
+    lines: list[str] = []
+    for frame in sorted(frames_dir.glob("frame-*.png")):
+        try:
+            result = subprocess.run(
+                ["tesseract", str(frame), "stdout", "--psm", "6"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+        except Exception:
+            continue
+        for line in result.stdout.splitlines():
+            clean = re.sub(r"\s+", " ", line).strip()
+            if len(clean) < 3:
+                continue
+            key = clean.lower()
+            if key not in seen:
+                seen.add(key)
+                lines.append(clean)
+
+    text = "\n".join(lines).strip()
+    return text or None, None
+
+
 # --- Main --------------------------------------------------------------------
 
-def extract(url: str, out_dir: Path, do_transcribe: bool) -> dict:
+def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     platform = detect_platform(url)
 
@@ -199,11 +298,18 @@ def extract(url: str, out_dir: Path, do_transcribe: bool) -> dict:
         "duration_sec": None,
         "transcript": None,
         "transcript_source": None,
+        "visual_text": None,
+        "visual_text_source": None,
         "upload_date": None,
         "raw_metadata_keys": [],
     }
 
-    info, audio_path, yt_err = run_ytdlp(url, out_dir, want_audio=do_transcribe)
+    info, audio_path, video_path, yt_err = run_ytdlp(
+        url,
+        out_dir,
+        want_audio=do_transcribe,
+        want_video=do_ocr,
+    )
     errors: list[str] = []
     if yt_err:
         errors.append(yt_err)
@@ -241,7 +347,15 @@ def extract(url: str, out_dir: Path, do_transcribe: bool) -> dict:
         elif w_err:
             errors.append(w_err)
 
-    if result["caption"] or result["transcript"]:
+    if do_ocr and video_path and video_path.exists():
+        visual_text, ocr_err = extract_visual_text(video_path, out_dir)
+        if visual_text:
+            result["visual_text"] = visual_text
+            result["visual_text_source"] = "ocr"
+        elif ocr_err:
+            errors.append(ocr_err)
+
+    if result["caption"] or result["transcript"] or result["visual_text"]:
         result["status"] = "ok"
     elif info:
         result["status"] = "partial"
@@ -259,10 +373,11 @@ def main() -> int:
     ap.add_argument("url")
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--no-transcribe", action="store_true")
+    ap.add_argument("--no-ocr", action="store_true")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else Path(tempfile.mkdtemp(prefix="tech-radar-"))
-    result = extract(args.url, out_dir, do_transcribe=not args.no_transcribe)
+    result = extract(args.url, out_dir, do_transcribe=not args.no_transcribe, do_ocr=not args.no_ocr)
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0 if result["status"] != "failed" else 2

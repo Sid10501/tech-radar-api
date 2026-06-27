@@ -15,12 +15,15 @@ export interface ExtractResult {
   duration_sec: number | null;
   transcript: string | null;
   transcript_source: "whisper" | "subs" | null;
+  visual_text: string | null;
+  visual_text_source: "ocr" | null;
   upload_date: string | null;
   raw_metadata_keys: string[];
   /** Pre-wrapped by extract_post.py when pipeline uses ai-memory llm-defense */
   caption_for_llm?: string | null;
   transcript_for_llm?: string | null;
   title_for_llm?: string | null;
+  visual_text_for_llm?: string | null;
 }
 
 export class ExtractError extends Error {

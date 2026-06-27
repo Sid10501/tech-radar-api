@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 // Mock runner before importing server so the routes work without a real pipeline
 vi.mock("../src/runner.js", () => ({
@@ -26,7 +29,7 @@ describe("server routes", () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.body).toContain("Tech Radar");
-    expect(res.body).toContain("<form");
+    expect(res.body).toContain("dashboard-root");
   });
 
   describe("with AUTH_TOKEN set", () => {
@@ -100,6 +103,72 @@ describe("server routes", () => {
         body: JSON.stringify({}),
       });
       expect(res.statusCode).toBe(400);
+    });
+
+    it("GET /api/findings returns parsed findings with valid Bearer token", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-findings-"));
+      const findingsDir = path.join(dir, "tech-radar", "findings");
+      fs.mkdirSync(findingsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+        [
+          "# Ponytail agent rubric",
+          "",
+          "**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)",
+          "**Saved:** 20260615",
+          "**Tags:** instagram, tech",
+          "",
+          "## TL;DR",
+          "",
+          "Useful agent rubric.",
+          "",
+          "## What the post showed",
+          "",
+          "> Caption: save tokens",
+          "",
+          "On-screen text / OCR:",
+          "smallest useful diff",
+          "",
+          "## Links",
+          "",
+          "- Repo: https://github.com/example/ponytail",
+          "",
+          "## Fit for Sid",
+          "",
+          "- Target project: ai-memory",
+          "- Verdict: `#try-soon`",
+        ].join("\n"),
+      );
+      process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/findings",
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.findings).toHaveLength(1);
+      expect(body.findings[0].title).toBe("Ponytail agent rubric");
+      expect(body.findings[0].quality.score).toBeGreaterThan(70);
+    });
+
+    it("GET /api/findings/:id returns markdown for a selected finding", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-finding-"));
+      const findingsDir = path.join(dir, "tech-radar", "findings");
+      fs.mkdirSync(findingsDir, { recursive: true });
+      fs.writeFileSync(path.join(findingsDir, "sample.md"), "# Sample\n\n## TL;DR\n\nHello");
+      process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/findings/sample.md",
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().markdown).toContain("# Sample");
     });
   });
 });

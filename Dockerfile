@@ -4,9 +4,15 @@ FROM node:20-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
     ffmpeg \
+    tesseract-ocr \
     git \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    "yt-dlp>=2025.1.1" \
+    "faster-whisper>=1.0" \
+    "curl_cffi>=0.7"
 
 WORKDIR /app
 

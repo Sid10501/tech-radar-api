@@ -39,6 +39,9 @@ export function composeFinding(input: {
     : "  - (none identified)";
 
   const verdict = implementation.target_project === "none" ? "#skip" : "#try-soon";
+  const visualTextBlock = extract.visual_text?.trim()
+    ? `\nOn-screen text / OCR:\n${extract.visual_text.slice(0, 400)}\n`
+    : "";
 
   const body = `# ${title}
 
@@ -56,6 +59,7 @@ ${research.what} ${research.why}
 
 Key claims from transcript:
 ${(extract.transcript ?? "").slice(0, 400) || "- (no transcript available)"}
+${visualTextBlock}
 
 ## What it actually is
 

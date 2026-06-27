@@ -261,7 +261,93 @@ describe("runPipeline()", () => {
       const runs = listRuns();
       const skipped = runs.find((r) => r.url === "https://www.instagram.com/reel/skip-test-2/");
       expect(skipped?.status).toBe("skipped");
-      expect(skipped?.error).toBe("no caption or transcript");
+      expect(skipped?.error).toBe("no caption, transcript, or visual text");
+    } finally {
+      fs.rmSync(localDir, { recursive: true, force: true });
+    }
+  });
+
+  it("continues when extract returns visual text but no caption or transcript", async () => {
+    const visualOnlyExtract = {
+      url: "https://www.instagram.com/reel/ocr-only/",
+      platform: "instagram",
+      status: "partial",
+      error: null,
+      title: "Visual-only tool demo",
+      creator: "someone",
+      caption: null,
+      hashtags: [],
+      duration_sec: 30,
+      transcript: null,
+      transcript_source: null,
+      visual_text: "FrameAgent: automate video timeline edits with Claude",
+      visual_text_source: "ocr",
+      upload_date: "2026-06-21",
+      raw_metadata_keys: [],
+    };
+
+    vi.doMock("../src/extract.js", () => ({
+      extract: vi.fn(async () => visualOnlyExtract),
+      ExtractError: class ExtractError extends Error {},
+    }));
+
+    const mockCreate = vi.fn();
+    mockCreate.mockResolvedValueOnce({
+      id: "r1", type: "message", role: "assistant",
+      content: [{ type: "text", text: JSON.stringify({
+        what: "FrameAgent automates video timeline edits.",
+        who: "unknown",
+        status: "unknown",
+        why: "It captures a tool name that only appears in the video frame.",
+        comparisons: [],
+        links: { github: null, docs: null, npm: null },
+        kickstarter: "Find the repo before evaluating.",
+        viability_signals: { github_stars: 0, last_pushed: null, open_issues: 0, license: null, archived: false },
+      }) }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 100, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    });
+    mockCreate.mockResolvedValueOnce({
+      id: "i1", type: "message", role: "assistant",
+      content: [{ type: "text", text: JSON.stringify({
+        fit_for_owner: "Potential fit, pending source validation.",
+        target_project: "tech-radar-api",
+        implementation_idea_markdown: "Use OCR text as a low-confidence extraction signal.",
+        follow_ups: ["Verify the source repo"],
+      }) }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 100, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    });
+
+    vi.doMock("@anthropic-ai/sdk", () => ({
+      default: vi.fn().mockImplementation(() => ({
+        messages: { create: mockCreate },
+      })),
+    }));
+
+    vi.doMock("../src/tools/ai_memory.js", () => ({
+      readAiMemory: vi.fn(async () => "# memory\n"),
+      listRecentSessions: vi.fn(async () => []),
+    }));
+
+    const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-ocr-"));
+    try {
+      const { runPipeline, listRuns } = await import("../src/runner.js");
+
+      const result = await runPipeline(
+        "https://www.instagram.com/reel/ocr-only/",
+        {
+          remoteUrl: bareDir,
+          localDir,
+          aiMemoryDir: FIXTURE_DIR,
+        },
+      );
+
+      expect(result.findingPath).toContain("tech-radar/findings/");
+
+      const runs = listRuns();
+      const processed = runs.find((r) => r.url === "https://www.instagram.com/reel/ocr-only/");
+      expect(processed?.status).toBe("processed");
     } finally {
       fs.rmSync(localDir, { recursive: true, force: true });
     }

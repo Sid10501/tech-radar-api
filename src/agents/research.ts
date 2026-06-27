@@ -60,15 +60,19 @@ export async function runResearch(extract: ExtractResult): Promise<ResearchOutpu
 
   let iterations = 0;
   const MAX_ITERATIONS = 10;
+  let toolRounds = 0;
+  const MAX_TOOL_ROUNDS = 1;
+  let lastValidationError = "";
 
   while (iterations < MAX_ITERATIONS) {
     iterations++;
+    const allowTools = toolRounds < MAX_TOOL_ROUNDS;
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 4096,
       system: [systemBlock],
-      tools: TOOLS,
+      ...(allowTools ? { tools: TOOLS } : {}),
       messages,
     });
 
@@ -86,7 +90,8 @@ export async function runResearch(extract: ExtractResult): Promise<ResearchOutpu
           throw new Error(validated.error);
         }
         return validated.data;
-      } catch {
+      } catch (err) {
+        lastValidationError = err instanceof Error ? err.message : String(err);
         messages.push({ role: "assistant", content: response.content });
         messages.push({
           role: "user",
@@ -97,6 +102,7 @@ export async function runResearch(extract: ExtractResult): Promise<ResearchOutpu
     }
 
     if (response.stop_reason === "tool_use") {
+      toolRounds++;
       messages.push({ role: "assistant", content: response.content });
 
       const toolUseBlocks = response.content.filter(
@@ -114,11 +120,46 @@ export async function runResearch(extract: ExtractResult): Promise<ResearchOutpu
       }
 
       messages.push({ role: "user", content: toolResults });
+      if (toolRounds >= MAX_TOOL_ROUNDS) {
+        messages.push({
+          role: "user",
+          content:
+            "Tool budget reached. Use the evidence already available and output ONLY the raw JSON object now. Do not request more tools.",
+        });
+      }
       continue;
     }
 
     messages.push({ role: "assistant", content: response.content });
   }
 
-  throw new Error(`Research agent exceeded ${MAX_ITERATIONS} iterations without finishing`);
+  const fallback = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 4096,
+    system: [systemBlock],
+    messages: [
+      {
+        role: "user",
+        content: [
+          buildResearchUserMessage(extract),
+          "",
+          "No tools are available for this final pass. Use the extracted evidence only. If a repo or metric is uncertain, set it to null/unknown/0 as appropriate. Output ONLY the raw JSON object.",
+        ].join("\n"),
+      },
+    ],
+  });
+
+  const textBlock = fallback.content.find((b): b is Anthropic.TextBlock => b.type === "text");
+  if (!textBlock) {
+    throw new Error(`Research agent exceeded ${MAX_ITERATIONS} iterations without finishing`);
+  }
+  const jsonPayload = JSON.stringify(parseJsonObjectFromModelText<unknown>(textBlock.text));
+  const validated = parseAgentOutput(jsonPayload, ResearchOutputSchema, "research");
+  if (!validated.ok) {
+    const detail = lastValidationError ? ` Last validation error: ${lastValidationError}` : "";
+    throw new Error(
+      `Research agent exceeded ${MAX_ITERATIONS} iterations and fallback output was invalid.${detail}`,
+    );
+  }
+  return validated.data;
 }

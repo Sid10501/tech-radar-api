@@ -6,6 +6,7 @@ dist/
 tmp/
 *.log
 *.tsbuildinfo
+.superpowers/
 MEMORY.md
 CLAUDE.md
 AGENTS.md

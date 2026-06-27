@@ -17,6 +17,13 @@ export function llmTranscriptBlock(extract: ExtractResult): string {
   return wrapAsUntrusted(raw, { label: "post transcript" });
 }
 
+export function llmVisualTextBlock(extract: ExtractResult): string {
+  if (extract.visual_text_for_llm) return extract.visual_text_for_llm;
+  const raw = extract.visual_text?.trim() ?? "";
+  if (!raw) return "";
+  return wrapAsUntrusted(raw, { label: "post on-screen text / OCR" });
+}
+
 export function llmTitleBlock(extract: ExtractResult): string {
   if (extract.title_for_llm) return extract.title_for_llm;
   if (extract.title?.trim()) {
@@ -28,6 +35,7 @@ export function llmTitleBlock(extract: ExtractResult): string {
 export function buildResearchUserMessage(extract: ExtractResult): string {
   const caption = llmCaptionBlock(extract);
   const transcript = llmTranscriptBlock(extract);
+  const visualText = llmVisualTextBlock(extract);
   const title = llmTitleBlock(extract);
   const hashtags = (extract.hashtags ?? []).join(", ") || "(none)";
 
@@ -48,6 +56,9 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
   }
   if (transcript) {
     parts.push("", "Transcript excerpt:", transcript);
+  }
+  if (visualText) {
+    parts.push("", "On-screen text / OCR:", visualText);
   }
 
   parts.push(
