@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { listFindings, parseFindingMarkdown } from "../src/findings.js";
+import { getPublicFindingDetail, listFindings, listPublicFindings, parseFindingMarkdown } from "../src/findings.js";
 
 const SAMPLE_FINDING = `# Ponytail agent rubric
 
@@ -37,10 +37,18 @@ smallest useful diff
 
 - Repo: https://github.com/example/ponytail
 
+## Kickstarter guide
+
+Read the repo and copy the prompt into your agent instructions.
+
 ## Fit for Sid
 
 - Target project: ai-memory
 - Verdict: \`#try-soon\`
+
+## Implementation Idea
+
+Add this to Sid's shared rubric.
 `;
 
 describe("parseFindingMarkdown()", () => {
@@ -62,6 +70,26 @@ describe("parseFindingMarkdown()", () => {
     expect(finding.quality.score).toBeGreaterThanOrEqual(80);
     expect(finding.quality.level).toBe("strong");
     expect(finding.recommendedAction).toBe("Create task");
+  });
+});
+
+describe("public finding shape", () => {
+  it("removes Sid-specific project fields and sections", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-finding-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(path.join(findingsDir, "20260615-video-by-shawnchee.md"), SAMPLE_FINDING);
+
+    const [finding] = listPublicFindings(dir);
+    const detail = getPublicFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(finding).not.toHaveProperty("targetProject");
+    expect(finding).not.toHaveProperty("recommendedAction");
+    expect(finding).not.toHaveProperty("verdict");
+    expect(detail?.markdown).not.toContain("## Fit for Sid");
+    expect(detail?.markdown).not.toContain("## Implementation Idea");
+    expect(detail?.sections.research).toContain("reusable senior-dev prompt");
+    expect(detail?.sections.kickstarter).toContain("copy the prompt");
   });
 });
 

@@ -3,7 +3,7 @@ import path from "node:path";
 import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError } from "./runner.js";
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
-import { getAiMemoryDir, getFindingDetail, listFindings } from "./findings.js";
+import { getAiMemoryDir, getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings } from "./findings.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 
 function getCookieValue(cookieHeader: unknown, name: string): string | undefined {
@@ -77,6 +77,16 @@ export function buildServer() {
     return { ok: true };
   });
 
+  app.post<{ Body: { password?: string } }>("/api/unlock", async (request, reply) => {
+    const authToken = process.env["AUTH_TOKEN"];
+    if (!authToken) return { ok: true };
+    if (request.body?.password !== authToken) {
+      return reply.code(401).send({ error: "Invalid password" });
+    }
+    reply.header("Set-Cookie", `auth_token=${encodeURIComponent(authToken)}; HttpOnly; SameSite=Strict; Path=/`);
+    return { ok: true };
+  });
+
   app.get("/", async (_request, reply) => {
     const runs = listRuns();
     reply.header("Content-Type", "text/html; charset=utf-8");
@@ -124,6 +134,18 @@ export function buildServer() {
 
   app.get("/runs", { preHandler: authMiddleware }, async () => {
     return listRuns();
+  });
+
+  app.get("/api/public/findings", async () => {
+    await ensureAiMemoryCheckout();
+    return { findings: listPublicFindings() };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/public/findings/:id", async (request, reply) => {
+    await ensureAiMemoryCheckout();
+    const detail = getPublicFindingDetail(request.params.id);
+    if (!detail) return reply.code(404).send({ error: "Finding not found" });
+    return detail;
   });
 
   app.get("/api/findings", { preHandler: authMiddleware }, async () => {

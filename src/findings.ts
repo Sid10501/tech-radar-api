@@ -35,6 +35,10 @@ export interface FindingSummary {
   recommendedAction: "Create task" | "Backlog" | "Skip" | "Retry" | "Review";
 }
 
+export type PublicFindingSummary = Omit<FindingSummary, "targetProject" | "verdict" | "recommendedAction"> & {
+  isPrivate: false;
+};
+
 export interface FindingDetail {
   finding: FindingSummary;
   markdown: string;
@@ -47,11 +51,23 @@ export interface FindingDetail {
   };
 }
 
+export interface PublicFindingDetail {
+  finding: PublicFindingSummary;
+  markdown: string;
+  sections: {
+    tldr: string;
+    shown: string;
+    research: string;
+    links: string;
+    kickstarter: string;
+  };
+}
+
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 
 function textBetween(body: string, heading: string): string {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = body.match(new RegExp(`^## ${escaped}\\s*\\n([\\s\\S]*?)(?=^## |\\z)`, "m"));
+  const match = body.match(new RegExp(`^## ${escaped}\\s*\\n([\\s\\S]*?)(?=^## |$)`, "m"));
   return match?.[1]?.trim() ?? "";
 }
 
@@ -158,6 +174,34 @@ function recommendedAction(quality: FindingQuality, targetProject: string, verdi
   return "Backlog";
 }
 
+function withoutPrivateSections(markdown: string): string {
+  return markdown
+    .replace(/^## Fit for Sid\s*\n[\s\S]*?(?=^## |$)/m, "")
+    .replace(/^## Implementation Idea\s*\n[\s\S]*?(?=^## |$)/m, "")
+    .replace(/^## Follow-ups\s*\n[\s\S]*?(?=^## |$)/m, "")
+    .trim();
+}
+
+function publicQuality(finding: FindingSummary): FindingQuality {
+  const hasProjectFit = finding.quality.reasons.includes("project fit");
+  const score = Math.max(0, Math.min(100, finding.quality.score - (hasProjectFit ? 10 : 0)));
+  const level = score >= 80 ? "strong" : score >= 60 ? "review" : "weak";
+  return {
+    score,
+    level,
+    reasons: finding.quality.reasons.filter((reason) => reason !== "project fit"),
+  };
+}
+
+export function toPublicFinding(finding: FindingSummary): PublicFindingSummary {
+  const { targetProject: _targetProject, verdict: _verdict, recommendedAction: _recommendedAction, ...rest } = finding;
+  return {
+    ...rest,
+    quality: publicQuality(finding),
+    isPrivate: false,
+  };
+}
+
 export function parseFindingMarkdown(filename: string, markdown: string): FindingSummary {
   const title = decodeEntities(markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() || filename.replace(/\.md$/, ""));
   const sourceLine = markdown.match(/^\*\*Source:\*\*\s*(.+)$/m)?.[1]?.trim() ?? "";
@@ -223,6 +267,10 @@ export function listFindings(aiMemoryDir = getAiMemoryDir()): FindingSummary[] {
     });
 }
 
+export function listPublicFindings(aiMemoryDir = getAiMemoryDir()): PublicFindingSummary[] {
+  return listFindings(aiMemoryDir).map(toPublicFinding);
+}
+
 export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir()): FindingDetail | null {
   const safeName = path.basename(filename);
   if (safeName !== filename || !safeName.endsWith(".md")) return null;
@@ -238,6 +286,23 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
       research: textBetween(markdown, "What it actually is"),
       fit: textBetween(markdown, "Fit for Sid"),
       implementation: textBetween(markdown, "Implementation Idea"),
+    },
+  };
+}
+
+export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir()): PublicFindingDetail | null {
+  const detail = getFindingDetail(filename, aiMemoryDir);
+  if (!detail) return null;
+  const publicMarkdown = withoutPrivateSections(detail.markdown);
+  return {
+    finding: toPublicFinding(detail.finding),
+    markdown: publicMarkdown,
+    sections: {
+      tldr: textBetween(publicMarkdown, "TL;DR"),
+      shown: textBetween(publicMarkdown, "What the post showed"),
+      research: textBetween(publicMarkdown, "What it actually is"),
+      links: textBetween(publicMarkdown, "Links"),
+      kickstarter: textBetween(publicMarkdown, "Kickstarter guide"),
     },
   };
 }

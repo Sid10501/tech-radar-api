@@ -57,12 +57,13 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
     .search::placeholder { color: #b9c5ba; }
     .top-actions { display: flex; gap: 8px; align-items: center; }
-    .icon-btn, .add-btn {
+    .icon-btn, .add-btn, .unlock-btn {
       height: 36px; border: 1px solid rgba(247,242,230,.18); border-radius: 8px;
       background: rgba(255,255,255,.04); color: #f7f2e6; cursor: pointer;
     }
     .icon-btn { width: 36px; }
     .add-btn { padding: 0 12px; background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 800; }
+    .unlock-btn { padding: 0 12px; font-weight: 760; }
     .workspace { display: grid; grid-template-columns: 370px minmax(0, 1fr); min-height: calc(100vh - 56px); }
     .queue { background: var(--panel); border-right: 1px solid var(--line); min-width: 0; }
     .queue-head { padding: 14px; border-bottom: 1px solid #eef1eb; }
@@ -165,7 +166,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       <input id="search" class="search" placeholder="Search by tool, project, source, repo, or extracted text">
       <div class="top-actions">
         <button id="refresh" class="icon-btn" title="Refresh">↻</button>
-        <button class="icon-btn" title="Settings">⚙</button>
+        <button id="unlock" class="unlock-btn">Unlock Sid view</button>
         <button id="add-url" class="add-btn">Add URL</button>
       </div>
     </header>
@@ -195,9 +196,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
-    const state = { findings: [], selectedId: null, view: "review", filter: "all", detail: null, query: "" };
+    const state = { findings: [], selectedId: null, view: "review", filter: "all", detail: null, query: "", privateUnlocked: false };
     const token = new URLSearchParams(location.search).get("token") || document.cookie.match(/auth_token=([^;]+)/)?.[1] || "";
     const authHeaders = token ? { Authorization: "Bearer " + token } : {};
+    state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -211,6 +213,12 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return bits.join(" + ") || "metadata only";
     }
     function matchesView(f) {
+      if (!state.privateUnlocked) {
+        if (state.view === "adopt") return f.quality.level === "strong";
+        if (state.view === "backlog") return f.quality.level === "review";
+        if (state.view === "skip") return f.quality.level === "weak";
+        return true;
+      }
       if (state.view === "adopt") return f.recommendedAction === "Create task";
       if (state.view === "backlog") return f.recommendedAction === "Backlog" || f.recommendedAction === "Review";
       if (state.view === "skip") return f.recommendedAction === "Skip" || f.recommendedAction === "Retry";
@@ -220,13 +228,13 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (state.filter === "ocr") return f.evidence.ocr;
       if (state.filter === "repo") return f.evidence.repo;
       if (state.filter === "weak") return f.quality.level === "weak";
-      if (state.filter === "project") return f.targetProject && f.targetProject !== "none" && f.targetProject !== "unknown";
+      if (state.filter === "project") return state.privateUnlocked && f.targetProject && f.targetProject !== "none" && f.targetProject !== "unknown";
       return true;
     }
     function matchesQuery(f) {
       const q = state.query.trim().toLowerCase();
       if (!q) return true;
-      return [f.title, f.summary, f.targetProject, f.source.platform, f.verdict, ...(f.tags || [])].join(" ").toLowerCase().includes(q);
+      return [f.title, f.summary, f.targetProject, f.source.platform, f.verdict, ...(f.tags || [])].filter(Boolean).join(" ").toLowerCase().includes(q);
     }
     function filteredFindings() {
       return state.findings.filter((f) => matchesView(f) && matchesFilter(f) && matchesQuery(f));
@@ -250,7 +258,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           <div class="health \${f.quality.level}">\${f.quality.score}</div>
           <div>
             <div class="item-title">\${escapeHtml(f.title)}</div>
-            <div class="item-meta">\${escapeHtml(f.targetProject)} · \${escapeHtml(f.source.platform)} · \${escapeHtml(f.verdict)}</div>
+            <div class="item-meta">\${escapeHtml(state.privateUnlocked ? f.targetProject : "public research")} · \${escapeHtml(f.source.platform)}\${state.privateUnlocked ? " · " + escapeHtml(f.verdict) : ""}</div>
             <div class="reason">Why surfaced: \${escapeHtml(f.quality.reasons.slice(0, 3).join(", ") || "needs manual review")}.</div>
           </div>
         </button>\`).join("");
@@ -278,29 +286,28 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         return;
       }
       const f = d.finding;
+      const personal = state.privateUnlocked && f.targetProject;
       const evidenceHtml = {
         summary: markdownToHtml(d.sections.tldr || f.summary),
         ocr: markdownToHtml((d.sections.shown || "").split("On-screen text / OCR:")[1] || "No OCR text captured for this finding."),
         transcript: markdownToHtml((d.sections.shown || "").split("Key claims from transcript:")[1]?.split("On-screen text / OCR:")[0] || "No transcript captured for this finding."),
+        research: markdownToHtml(d.sections.research || "No general research section captured for this finding."),
+        kickstarter: markdownToHtml(d.sections.kickstarter || "No getting-started notes captured for this finding."),
         finding: markdownToHtml(d.markdown),
       };
       detail.innerHTML = \`
         <section class="hero">
-          <div class="breadcrumb">Review queue / \${escapeHtml(f.targetProject)} / \${escapeHtml(f.source.platform)}</div>
+          <div class="breadcrumb">\${personal ? "Sid view" : "Public radar"} / \${escapeHtml(personal ? f.targetProject : "general research")} / \${escapeHtml(f.source.platform)}</div>
           <div class="headline-row">
             <div>
               <div class="headline">\${escapeHtml(f.title)}</div>
               <div class="summary">\${escapeHtml(f.summary)}</div>
             </div>
             <div class="decision">
-              <div class="decision-label">Recommended decision</div>
-              <div class="decision-value">\${escapeHtml(f.recommendedAction)}</div>
+              <div class="decision-label">\${personal ? "Recommended decision" : "Personalized fit"}</div>
+              <div class="decision-value">\${escapeHtml(personal ? f.recommendedAction : "Locked")}</div>
               <div class="decision-actions">
-                <button class="action primary" data-action="task">Create task</button>
-                <button class="action" data-action="backlog">Backlog</button>
-                <button class="action" data-action="skip">Skip</button>
-                <button class="action" data-action="retry">Retry</button>
-                <button class="action" data-action="reviewed">Reviewed</button>
+                \${personal ? '<button class="action primary" data-action="task">Create task</button><button class="action" data-action="backlog">Backlog</button><button class="action" data-action="skip">Skip</button><button class="action" data-action="retry">Retry</button><button class="action" data-action="reviewed">Reviewed</button>' : '<button class="action primary" data-action="unlock">Unlock Sid view</button><button class="action" data-action="read">Keep reading</button>'}
               </div>
             </div>
           </div>
@@ -308,8 +315,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         <section class="facts">
           <div class="fact"><div class="fact-label">Quality</div><div class="fact-value">\${f.quality.score} / \${f.quality.level}</div></div>
           <div class="fact"><div class="fact-label">Evidence</div><div class="fact-value">\${escapeHtml(evidenceText(f))}</div></div>
-          <div class="fact"><div class="fact-label">Target</div><div class="fact-value">\${escapeHtml(f.targetProject)}</div></div>
-          <div class="fact"><div class="fact-label">Effort</div><div class="fact-value">\${f.quality.level === "strong" ? "Small scoped task" : "Review first"}</div></div>
+          <div class="fact"><div class="fact-label">\${personal ? "Target" : "Scope"}</div><div class="fact-value">\${escapeHtml(personal ? f.targetProject : "Public research")}</div></div>
+          <div class="fact"><div class="fact-label">\${personal ? "Effort" : "Use"}</div><div class="fact-value">\${personal ? (f.quality.level === "strong" ? "Small scoped task" : "Review first") : "Evaluate tool"}</div></div>
           <div class="fact"><div class="fact-label">Risk</div><div class="fact-value">\${f.quality.level === "weak" ? "High" : f.quality.level === "review" ? "Medium" : "Low"}</div></div>
           <div class="fact"><div class="fact-label">Status</div><div class="fact-value">Needs decision</div></div>
         </section>
@@ -319,6 +326,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
             <div class="panel-body">
               <div class="evidence-tabs">
                 <button class="evidence-tab active" data-tab="summary">Why it matters</button>
+                <button class="evidence-tab" data-tab="research">What it is</button>
+                <button class="evidence-tab" data-tab="kickstarter">Get started</button>
                 <button class="evidence-tab" data-tab="ocr">OCR</button>
                 <button class="evidence-tab" data-tab="transcript">Transcript</button>
                 <button class="evidence-tab" data-tab="finding">Full finding</button>
@@ -337,7 +346,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
               <div class="row"><div class="row-label">Source post</div><div class="badge">\${f.source.url ? '<a href="' + escapeHtml(f.source.url) + '" target="_blank" rel="noopener">open</a>' : "none"}</div></div>
               <div class="row"><div class="row-label">Markdown finding</div><div class="badge"><a href="https://github.com/Sid10501/ai-memory/blob/master/\${escapeHtml(f.path)}" target="_blank" rel="noopener">open</a></div></div>
             </div></div>
-            <div class="panel"><div class="panel-head">Next task</div><div class="panel-body">\${escapeHtml(nextTaskText(f))}</div></div>
+            <div class="panel"><div class="panel-head">\${personal ? "Next task" : "Sid-specific fit"}</div><div class="panel-body">\${escapeHtml(personal ? nextTaskText(f) : "Unlock to see where this might help Sid's actual projects, plus project-specific implementation ideas and actions.")}</div></div>
           </div>
         </section>\`;
       detail.querySelectorAll(".evidence-tab").forEach((button) => button.addEventListener("click", () => {
@@ -345,7 +354,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         button.classList.add("active");
         $("evidence-content").innerHTML = evidenceHtml[button.dataset.tab];
       }));
-      detail.querySelectorAll(".action").forEach((button) => button.addEventListener("click", () => showToast(button.textContent.trim() + " noted locally. Persistence comes next.")));
+      detail.querySelectorAll(".action").forEach((button) => button.addEventListener("click", () => {
+        if (button.dataset.action === "unlock") unlockPrivateView();
+        else showToast(button.textContent.trim() + " noted locally. Persistence comes next.");
+      }));
     }
     function nextTaskText(f) {
       if (f.recommendedAction === "Retry") return "Retry extraction or mark as low-confidence if the source is blocked.";
@@ -356,18 +368,19 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     async function selectFinding(id) {
       state.selectedId = id;
       renderList();
-      const res = await fetch("/api/findings/" + encodeURIComponent(id), { headers: authHeaders });
+      const path = state.privateUnlocked ? "/api/findings/" : "/api/public/findings/";
+      const res = await fetch(path + encodeURIComponent(id), { headers: state.privateUnlocked ? authHeaders : {} });
       if (!res.ok) {
-        showToast("Could not load finding. Add ?token=... if auth is enabled.");
+        showToast("Could not load finding.");
         return;
       }
       state.detail = await res.json();
       renderDetail();
     }
     async function loadFindings() {
-      const res = await fetch("/api/findings", { headers: authHeaders });
+      const res = await fetch(state.privateUnlocked ? "/api/findings" : "/api/public/findings", { headers: state.privateUnlocked ? authHeaders : {} });
       if (!res.ok) {
-        $("finding-list").innerHTML = '<div class="empty">Dashboard API is locked. Open this page with <code>?token=...</code>.</div>';
+        $("finding-list").innerHTML = '<div class="empty">Could not load findings.</div>';
         return;
       }
       const body = await res.json();
@@ -391,7 +404,30 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }));
     $("search").addEventListener("input", (event) => { state.query = event.target.value; renderList(); });
     $("refresh").addEventListener("click", () => loadFindings());
+    async function unlockPrivateView() {
+      if (state.privateUnlocked) return;
+      const password = prompt("Enter password to unlock Sid-specific project fit and actions");
+      if (!password) return;
+      const res = await fetch("/api/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (!res.ok) {
+        showToast("Password did not unlock Sid view.");
+        return;
+      }
+      state.privateUnlocked = true;
+      $("unlock").textContent = "Sid view unlocked";
+      showToast("Sid view unlocked.");
+      await loadFindings();
+    }
+    $("unlock").addEventListener("click", () => unlockPrivateView());
     $("add-url").addEventListener("click", async () => {
+      if (!state.privateUnlocked) {
+        unlockPrivateView();
+        return;
+      }
       const url = prompt("Paste an Instagram, TikTok, YouTube, GitHub, or article URL");
       if (!url) return;
       const res = await fetch("/runs", { method: "POST", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ url }) });

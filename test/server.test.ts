@@ -32,6 +32,61 @@ describe("server routes", () => {
     expect(res.body).toContain("dashboard-root");
   });
 
+  it("GET /api/public/findings returns public findings without auth", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-public-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "sample.md"),
+      [
+        "# Public Sample",
+        "",
+        "**Source:** github · [Repo](https://github.com/example/repo)",
+        "**Saved:** 20260615",
+        "**Tags:** github, ai",
+        "",
+        "## TL;DR",
+        "",
+        "General research summary.",
+        "",
+        "## What it actually is",
+        "",
+        "- What: A public tool.",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: ai-memory",
+      ].join("\n"),
+    );
+    process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+    const res = await app.inject({ method: "GET", url: "/api/public/findings" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.findings).toHaveLength(1);
+    expect(body.findings[0].title).toBe("Public Sample");
+    expect(body.findings[0]).not.toHaveProperty("targetProject");
+  });
+
+  it("GET /api/public/findings/:id returns sanitized markdown without auth", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-public-detail-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "sample.md"),
+      "# Sample\n\n## TL;DR\n\nPublic\n\n## Fit for Sid\n\nPrivate project fit\n\n## Implementation Idea\n\nPrivate action",
+    );
+    process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+    const res = await app.inject({ method: "GET", url: "/api/public/findings/sample.md" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().markdown).toContain("## TL;DR");
+    expect(res.json().markdown).not.toContain("Fit for Sid");
+    expect(res.json().markdown).not.toContain("Implementation Idea");
+  });
+
   describe("with AUTH_TOKEN set", () => {
     const TOKEN = "test-secret-token";
 
@@ -113,6 +168,17 @@ describe("server routes", () => {
         body: JSON.stringify({}),
       });
       expect(res.statusCode).toBe(400);
+    });
+
+    it("POST /api/unlock accepts the password and sets auth cookie", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/unlock",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: TOKEN }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["set-cookie"]).toContain("auth_token=");
     });
 
     it("GET /api/findings returns parsed findings with valid Bearer token", async () => {
