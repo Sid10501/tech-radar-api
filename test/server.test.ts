@@ -30,6 +30,10 @@ describe("server routes", () => {
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.body).toContain("Tech Radar");
     expect(res.body).toContain("dashboard-root");
+    expect(res.body).toContain("Raw extraction");
+    expect(res.body).not.toContain("class=\"tabs\"");
+    expect(res.body).not.toContain("data-filter=");
+    expect(res.body).not.toContain("evidence-tab");
   });
 
   it("GET /api/public/findings returns public findings without auth", async () => {
