@@ -36,11 +36,14 @@ function authMiddleware(request: any, reply: any, done: () => void): void {
 }
 
 let aiMemorySync: Promise<void> | null = null;
+let aiMemorySyncedAt = 0;
+const AI_MEMORY_SYNC_TTL_MS = Number(process.env["AI_MEMORY_SYNC_TTL_MS"] ?? 60_000);
 
 async function ensureAiMemoryCheckout(): Promise<void> {
   const localDir = getAiMemoryDir();
   const remoteUrl = process.env["AI_MEMORY_REPO"] ?? "";
   if (!remoteUrl) return;
+  if (Date.now() - aiMemorySyncedAt < AI_MEMORY_SYNC_TTL_MS) return;
 
   aiMemorySync ??= (async () => {
     let sshKeyPath: string | undefined;
@@ -56,6 +59,7 @@ async function ensureAiMemoryCheckout(): Promise<void> {
     });
     await repo.init();
     await repo.pullLatest();
+    aiMemorySyncedAt = Date.now();
   })().finally(() => {
     aiMemorySync = null;
   });

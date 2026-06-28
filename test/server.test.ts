@@ -3,11 +3,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const gitMocks = vi.hoisted(() => ({
+  init: vi.fn(async () => {}),
+  pullLatest: vi.fn(async () => {}),
+  setupSshKey: vi.fn(() => "/tmp/mock-key"),
+}));
+
 // Mock runner before importing server so the routes work without a real pipeline
 vi.mock("../src/runner.js", () => ({
   runPipeline: vi.fn(async () => ({ runId: "mock-run-id", findingPath: "tech-radar/findings/test.md" })),
   getRun: vi.fn((id: string) => id === "existing" ? { id, url: "https://x.com", status: "processed", startedAt: new Date().toISOString() } : undefined),
   listRuns: vi.fn(() => [{ id: "existing", url: "https://x.com", status: "processed", startedAt: new Date().toISOString() }]),
+}));
+
+vi.mock("../src/git.js", () => ({
+  setupSshKey: gitMocks.setupSshKey,
+  AiMemoryRepo: vi.fn().mockImplementation(() => ({
+    init: gitMocks.init,
+    pullLatest: gitMocks.pullLatest,
+  })),
 }));
 
 const { buildServer } = await import("../src/server.js");
@@ -91,6 +105,28 @@ describe("server routes", () => {
     expect(res.json().markdown).toContain("## TL;DR");
     expect(res.json().markdown).not.toContain("Fit for Sid");
     expect(res.json().markdown).not.toContain("Implementation Idea");
+  });
+
+  it("reuses a recent ai-memory sync for repeated dashboard reads", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-sync-cache-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(path.join(findingsDir, "sample.md"), "# Sample\n\n## TL;DR\n\nPublic");
+    process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+    process.env["AI_MEMORY_REPO"] = "git@example.com:Sid10501/ai-memory.git";
+    gitMocks.init.mockClear();
+    gitMocks.pullLatest.mockClear();
+
+    const list = await app.inject({ method: "GET", url: "/api/public/findings" });
+    const detailOne = await app.inject({ method: "GET", url: "/api/public/findings/sample.md" });
+    const detailTwo = await app.inject({ method: "GET", url: "/api/public/findings/sample.md" });
+
+    expect(list.statusCode).toBe(200);
+    expect(detailOne.statusCode).toBe(200);
+    expect(detailTwo.statusCode).toBe(200);
+    expect(gitMocks.init).toHaveBeenCalledTimes(1);
+    expect(gitMocks.pullLatest).toHaveBeenCalledTimes(1);
+    delete process.env["AI_MEMORY_REPO"];
   });
 
   describe("with AUTH_TOKEN set", () => {

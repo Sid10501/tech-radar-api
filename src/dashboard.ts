@@ -529,7 +529,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true };
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map() };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -766,6 +766,39 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }));
     }
 
+    function detailCacheKey(id) {
+      return (state.privateUnlocked ? "private:" : "public:") + id;
+    }
+
+    async function fetchFindingDetail(id, requestId) {
+      const cacheKey = detailCacheKey(id);
+      if (state.detailCache.has(cacheKey)) return state.detailCache.get(cacheKey);
+      const path = state.privateUnlocked ? "/api/findings/" : "/api/public/findings/";
+      const res = await fetch(path + encodeURIComponent(id), { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
+      if (requestId !== state.requestSeq || state.selectedId !== id) return null;
+      if (!res.ok) {
+        showToast("Could not load finding.");
+        return null;
+      }
+      const detail = await res.json();
+      state.detailCache.set(cacheKey, detail);
+      return detail;
+    }
+
+    function prefetchNextFindings() {
+      const selectedIndex = visibleFindings().findIndex((finding) => finding.id === state.selectedId);
+      const next = visibleFindings().slice(Math.max(0, selectedIndex + 1), selectedIndex + 4);
+      for (const finding of next) {
+        const cacheKey = detailCacheKey(finding.id);
+        if (state.detailCache.has(cacheKey)) continue;
+        const path = state.privateUnlocked ? "/api/findings/" : "/api/public/findings/";
+        fetch(path + encodeURIComponent(finding.id), { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" })
+          .then((res) => res.ok ? res.json() : null)
+          .then((detail) => { if (detail) state.detailCache.set(cacheKey, detail); })
+          .catch(() => {});
+      }
+    }
+
     function nextTaskText(f) {
       if (f.recommendedAction === "Retry") return "Retry extraction or mark as low-confidence if the source is blocked.";
       if (f.recommendedAction === "Skip") return "Skip unless a real project pain appears.";
@@ -777,16 +810,25 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       state.selectedId = id;
       const requestId = ++state.requestSeq;
       renderList();
-      const path = state.privateUnlocked ? "/api/findings/" : "/api/public/findings/";
-      const res = await fetch(path + encodeURIComponent(id), { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
-      if (requestId !== state.requestSeq || state.selectedId !== id) return;
-      if (!res.ok) {
-        showToast("Could not load finding.");
+      const cached = state.detailCache.get(detailCacheKey(id));
+      if (cached) {
+        state.detail = cached;
+        renderDetail();
+        prefetchNextFindings();
         return;
       }
-      state.detail = await res.json();
+      const current = state.findings.find((finding) => finding.id === id);
+      if (current) {
+        state.detail = { finding: current, sections: { tldr: current.summary, shown: "", research: current.summary, links: "", kickstarter: "", fit: "", implementation: "", followups: "" }, markdown: "" };
+        renderDetail();
+      }
+      const detail = await fetchFindingDetail(id, requestId);
       if (requestId !== state.requestSeq || state.selectedId !== id) return;
-      renderDetail();
+      if (detail) {
+        state.detail = detail;
+        renderDetail();
+        prefetchNextFindings();
+      }
     }
 
     async function loadFindings() {
@@ -801,6 +843,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       const body = await res.json();
       state.findings = body.findings || [];
+      state.detailCache.clear();
       state.loading = false;
       selectFirstVisibleIfNeeded();
       renderList();
