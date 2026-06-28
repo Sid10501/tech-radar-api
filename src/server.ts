@@ -18,16 +18,17 @@ function getCookieValue(cookieHeader: unknown, name: string): string | undefined
   return undefined;
 }
 
-function authMiddleware(request: any, reply: any, done: () => void): void {
+function isAuthorized(request: any): boolean {
   const authToken = process.env["AUTH_TOKEN"];
-  if (!authToken) {
-    done();
-    return;
-  }
+  if (!authToken) return true;
   // Accept bearer token or cookie
   const bearer = request.headers["authorization"]?.replace(/^Bearer\s+/i, "");
   const cookie = getCookieValue(request.headers["cookie"], "auth_token");
-  if (bearer === authToken || cookie === authToken) {
+  return bearer === authToken || cookie === authToken;
+}
+
+function authMiddleware(request: any, reply: any, done: () => void): void {
+  if (isAuthorized(request)) {
     done();
     return;
   }
@@ -85,6 +86,10 @@ export function buildServer() {
     }
     reply.header("Set-Cookie", `auth_token=${encodeURIComponent(authToken)}; HttpOnly; SameSite=Strict; Path=/`);
     return { ok: true };
+  });
+
+  app.get("/api/session", async (request) => {
+    return { privateUnlocked: isAuthorized(request) };
   });
 
   app.get("/", async (_request, reply) => {

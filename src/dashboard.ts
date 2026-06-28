@@ -5,6 +5,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>Tech Radar</title>
   <style>
     :root {
@@ -33,10 +34,16 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     button, input { font: inherit; }
     button { cursor: pointer; }
     a { color: inherit; }
+    html,
+    body {
+      height: 100%;
+    }
     .app {
-      min-height: 100vh;
+      height: 100vh;
+      min-height: 0;
       display: grid;
       grid-template-rows: 58px 1fr;
+      overflow: hidden;
     }
     .topbar {
       display: grid;
@@ -99,12 +106,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     .workspace {
       display: grid;
       grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
-      min-height: calc(100vh - 58px);
+      height: calc(100vh - 58px);
+      min-height: 0;
+      overflow: hidden;
     }
     .queue {
       background: var(--panel);
       border-right: 1px solid var(--line);
       min-width: 0;
+      min-height: 0;
       display: grid;
       grid-template-rows: auto auto 1fr;
     }
@@ -157,6 +167,30 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       font-size: 12px;
       line-height: 1.4;
     }
+    .filters {
+      display: flex;
+      gap: 6px;
+      padding: 10px 16px;
+      border-bottom: 1px solid #edf1ec;
+      overflow-x: auto;
+    }
+    .filter {
+      flex: 0 0 auto;
+      border: 1px solid #d7dfd5;
+      border-radius: 999px;
+      background: var(--paper);
+      color: #415247;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .filter.active {
+      background: var(--green);
+      border-color: var(--green);
+      color: #fff9eb;
+    }
+    .private-only-filter { display: none; }
+    .sid-unlocked .private-only-filter { display: block; }
     .list {
       overflow: auto;
       min-height: 0;
@@ -211,6 +245,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
     .content {
       min-width: 0;
+      min-height: 0;
       overflow: auto;
     }
     .detail {
@@ -454,6 +489,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           </div>
         </div>
         <div id="mode-note" class="mode-note">Public research is open. Unlock Sid view only when you want project fit and next actions.</div>
+        <div class="filters" aria-label="Filter findings">
+          <button class="filter active" data-filter="all">All</button>
+          <button class="filter" data-filter="strong">Strong</button>
+          <button class="filter" data-filter="review">Review</button>
+          <button class="filter" data-filter="weak">Weak</button>
+          <button class="filter" data-filter="repo">Repo/docs</button>
+          <button class="filter private-only-filter" data-filter="project">Project fit</button>
+          <button class="filter" data-filter="ocr">OCR</button>
+        </div>
         <div id="finding-list" class="list"></div>
       </aside>
       <main id="detail" class="content"></main>
@@ -462,11 +506,23 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
-    const state = { findings: [], selectedId: null, detail: null, query: "", privateUnlocked: false };
-    const token = new URLSearchParams(location.search).get("token") || document.cookie.match(/auth_token=([^;]+)/)?.[1] || "";
-    const authHeaders = token ? { Authorization: "Bearer " + token } : {};
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0 };
+    const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
+
+    function requestHeaders() {
+      const currentToken = new URLSearchParams(location.search).get("token") || "";
+      return currentToken ? { Authorization: "Bearer " + currentToken } : {};
+    }
+
+    async function syncSession() {
+      const res = await fetch("/api/session", { headers: requestHeaders(), credentials: "same-origin" });
+      if (!res.ok) return;
+      const session = await res.json();
+      state.privateUnlocked = Boolean(session.privateUnlocked);
+      updateStats();
+    }
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -496,8 +552,27 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       ].filter(Boolean).join(" ").toLowerCase().includes(q);
     }
 
+    function matchesFilter(f) {
+      if (state.filter === "strong") return f.quality.level === "strong";
+      if (state.filter === "review") return f.quality.level === "review";
+      if (state.filter === "weak") return f.quality.level === "weak";
+      if (state.filter === "repo") return f.evidence.repo || f.evidence.docs;
+      if (state.filter === "project") return state.privateUnlocked && f.targetProject && f.targetProject !== "none" && f.targetProject !== "unknown";
+      if (state.filter === "ocr") return f.evidence.ocr;
+      return true;
+    }
+
     function visibleFindings() {
-      return state.findings.filter(matchesQuery);
+      return state.findings.filter((finding) => matchesFilter(finding) && matchesQuery(finding));
+    }
+
+    function selectFirstVisibleIfNeeded() {
+      const findings = visibleFindings();
+      if (!findings.some((finding) => finding.id === state.selectedId)) {
+        state.selectedId = findings[0]?.id || null;
+        state.detail = null;
+      }
+      return findings;
     }
 
     function showToast(message) {
@@ -518,14 +593,16 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
         : "Public research is open. Unlock Sid view only when you want project fit and next actions.";
       $("unlock").textContent = state.privateUnlocked ? "Sid view unlocked" : "Unlock Sid view";
+      $("dashboard-root").classList.toggle("sid-unlocked", state.privateUnlocked);
     }
 
     function renderList() {
       updateStats();
       const list = $("finding-list");
-      const findings = visibleFindings();
+      const findings = selectFirstVisibleIfNeeded();
       if (!findings.length) {
         list.innerHTML = '<div class="empty">No findings match that search.</div>';
+        renderDetail();
         return;
       }
       list.innerHTML = findings.map((f) => \`
@@ -651,65 +728,84 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     async function selectFinding(id) {
       state.selectedId = id;
+      const requestId = ++state.requestSeq;
       renderList();
       const path = state.privateUnlocked ? "/api/findings/" : "/api/public/findings/";
-      const res = await fetch(path + encodeURIComponent(id), { headers: state.privateUnlocked ? authHeaders : {} });
+      const res = await fetch(path + encodeURIComponent(id), { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
+      if (requestId !== state.requestSeq || state.selectedId !== id) return;
       if (!res.ok) {
         showToast("Could not load finding.");
         return;
       }
       state.detail = await res.json();
+      if (requestId !== state.requestSeq || state.selectedId !== id) return;
       renderDetail();
     }
 
     async function loadFindings() {
-      const res = await fetch(state.privateUnlocked ? "/api/findings" : "/api/public/findings", { headers: state.privateUnlocked ? authHeaders : {} });
+      const res = await fetch(state.privateUnlocked ? "/api/findings" : "/api/public/findings", { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
       if (!res.ok) {
         $("finding-list").innerHTML = '<div class="empty">Could not load findings.</div>';
         return;
       }
       const body = await res.json();
       state.findings = body.findings || [];
-      state.selectedId = state.findings[0]?.id || null;
+      selectFirstVisibleIfNeeded();
       renderList();
       if (state.selectedId) await selectFinding(state.selectedId);
       else renderDetail();
     }
 
-    $("search").addEventListener("input", (event) => { state.query = event.target.value; renderList(); });
+    $("search").addEventListener("input", (event) => {
+      state.query = event.target.value;
+      const previousId = state.selectedId;
+      renderList();
+      if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
+    });
+    document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      state.filter = button.dataset.filter || "all";
+      const previousId = state.selectedId;
+      renderList();
+      if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
+    }));
     $("refresh").addEventListener("click", () => loadFindings());
 
     async function unlockPrivateView() {
-      if (state.privateUnlocked) return;
+      if (state.privateUnlocked) return true;
       const password = prompt("Enter password to unlock Sid-specific project fit and actions");
-      if (!password) return;
+      if (!password) return false;
       const res = await fetch("/api/unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ password }),
       });
       if (!res.ok) {
         showToast("Password did not unlock Sid view.");
-        return;
+        return false;
       }
       state.privateUnlocked = true;
+      updateStats();
       showToast("Sid view unlocked.");
       await loadFindings();
+      return true;
     }
 
     $("unlock").addEventListener("click", () => unlockPrivateView());
     $("add-url").addEventListener("click", async () => {
       if (!state.privateUnlocked) {
-        unlockPrivateView();
-        return;
+        const unlocked = await unlockPrivateView();
+        if (!unlocked) return;
       }
       const url = prompt("Paste an Instagram, TikTok, YouTube, GitHub, or article URL");
       if (!url) return;
-      const res = await fetch("/runs", { method: "POST", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      const res = await fetch("/runs", { method: "POST", headers: { ...requestHeaders(), "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ url }) });
       showToast(res.ok ? "Queued for research." : "Could not queue URL.");
     });
 
-    loadFindings();
+    syncSession().finally(() => loadFindings());
     if ((window.__RUNS__ || []).some((r) => r.status === "running" || r.status === "pending")) {
       setTimeout(loadFindings, 8000);
     }

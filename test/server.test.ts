@@ -31,8 +31,10 @@ describe("server routes", () => {
     expect(res.body).toContain("Tech Radar");
     expect(res.body).toContain("dashboard-root");
     expect(res.body).toContain("Raw extraction");
+    expect(res.body).toContain("data-filter=\"repo\"");
+    expect(res.body).toContain("data-filter=\"project\"");
+    expect(res.body).toContain("data-filter=\"ocr\"");
     expect(res.body).not.toContain("class=\"tabs\"");
-    expect(res.body).not.toContain("data-filter=");
     expect(res.body).not.toContain("evidence-tab");
   });
 
@@ -105,6 +107,21 @@ describe("server routes", () => {
     it("GET /runs returns 401 without token", async () => {
       const res = await app.inject({ method: "GET", url: "/runs" });
       expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /api/session reports private lock state without exposing token", async () => {
+      const locked = await app.inject({ method: "GET", url: "/api/session" });
+      const unlocked = await app.inject({
+        method: "GET",
+        url: "/api/session",
+        headers: { cookie: `auth_token=${TOKEN}` },
+      });
+
+      expect(locked.statusCode).toBe(200);
+      expect(locked.json()).toEqual({ privateUnlocked: false });
+      expect(unlocked.statusCode).toBe(200);
+      expect(unlocked.json()).toEqual({ privateUnlocked: true });
+      expect(JSON.stringify(unlocked.json())).not.toContain(TOKEN);
     });
 
     it("GET /runs returns run list with valid Bearer token", async () => {
