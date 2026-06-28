@@ -6,6 +6,18 @@ import { DASHBOARD_HTML } from "./dashboard.js";
 import { getAiMemoryDir, getFindingDetail, listFindings } from "./findings.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 
+function getCookieValue(cookieHeader: unknown, name: string): string | undefined {
+  const raw = Array.isArray(cookieHeader) ? cookieHeader.join(";") : cookieHeader;
+  if (typeof raw !== "string") return undefined;
+  for (const pair of raw.split(";")) {
+    const [key, ...valueParts] = pair.trim().split("=");
+    if (key === name) {
+      return decodeURIComponent(valueParts.join("="));
+    }
+  }
+  return undefined;
+}
+
 function authMiddleware(request: any, reply: any, done: () => void): void {
   const authToken = process.env["AUTH_TOKEN"];
   if (!authToken) {
@@ -14,7 +26,7 @@ function authMiddleware(request: any, reply: any, done: () => void): void {
   }
   // Accept bearer token or cookie
   const bearer = request.headers["authorization"]?.replace(/^Bearer\s+/i, "");
-  const cookie = request.cookies?.auth_token;
+  const cookie = getCookieValue(request.headers["cookie"], "auth_token");
   if (bearer === authToken || cookie === authToken) {
     done();
     return;

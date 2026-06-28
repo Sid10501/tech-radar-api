@@ -59,6 +59,16 @@ describe("server routes", () => {
       expect(Array.isArray(body)).toBe(true);
     });
 
+    it("GET /runs returns run list with valid auth_token cookie", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/runs",
+        headers: { cookie: `theme=light; auth_token=${TOKEN}; other=value` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(res.json())).toBe(true);
+    });
+
     it("GET /runs/:id returns 404 for unknown id", async () => {
       const res = await app.inject({
         method: "GET",
