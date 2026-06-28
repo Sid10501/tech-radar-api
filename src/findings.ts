@@ -67,11 +67,16 @@ export interface PublicFindingDetail {
 }
 
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
+const TEMPLATE_SECTION_HEADING =
+  /^## (TL;DR|What the post showed|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Follow-ups)\s*$/m;
 
 function textBetween(body: string, heading: string): string {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = body.match(new RegExp(`^## ${escaped}\\s*\\n([\\s\\S]*?)(?=^## |$)`, "m"));
-  return match?.[1]?.trim() ?? "";
+  const match = new RegExp(`^## ${escaped}\\s*$`, "m").exec(body);
+  if (!match) return "";
+  const tail = body.slice(match.index + match[0].length);
+  const nextHeading = TEMPLATE_SECTION_HEADING.exec(tail);
+  return (nextHeading ? tail.slice(0, nextHeading.index) : tail).trim();
 }
 
 function stripMarkdown(value: string): string {
@@ -112,8 +117,8 @@ function parseTags(raw: string | undefined): string[] {
   if (!raw) return [];
   return raw
     .split(",")
-    .map((tag) => tag.trim().replace(/^#/, ""))
-    .filter(Boolean);
+    .map((tag) => decodeEntities(tag.trim().replace(/^#/, "")))
+    .filter((tag) => tag && !/^x[0-9a-f]{2,}$/i.test(tag) && !/^\d+$/.test(tag));
 }
 
 function firstUrl(body: string, label: string): string | null {
@@ -170,11 +175,30 @@ function scoreFinding(body: string, evidence: FindingEvidence, targetProject: st
 }
 
 function recommendedAction(quality: FindingQuality, targetProject: string, verdict: string): FindingSummary["recommendedAction"] {
-  if (quality.level === "weak") return "Retry";
   if (verdict.includes("#skip") || targetProject === "none") return "Skip";
+  if (quality.level === "weak") return "Retry";
   if (quality.level === "strong" && targetProject && targetProject !== "unknown") return "Create task";
   if (quality.level === "review") return "Review";
   return "Backlog";
+}
+
+function markerText(source: string, marker: string, untilMarkers: string[] = []): string {
+  const lower = source.toLowerCase();
+  const markerIndex = lower.indexOf(marker.toLowerCase());
+  if (markerIndex < 0) return "";
+  const afterStart = markerIndex + marker.length;
+  const after = source.slice(afterStart);
+  const afterLower = lower.slice(afterStart);
+  const nextIndexes = untilMarkers
+    .map((until) => afterLower.indexOf(until.toLowerCase()))
+    .filter((index) => index >= 0);
+  const end = nextIndexes.length ? Math.min(...nextIndexes) : after.length;
+  return after.slice(0, end).trim();
+}
+
+function hasCapturedText(value: string, unavailable: RegExp): boolean {
+  const clean = stripMarkdown(value);
+  return Boolean(clean && !unavailable.test(clean));
 }
 
 function withoutPrivateSections(markdown: string): string {
@@ -220,10 +244,13 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const verdict = markdown.match(/^- Verdict:\s*`?([^`\n]+)`?/m)?.[1]?.trim() || "unknown";
   const repoUrl = firstUrl(markdown, "Repo");
   const docsUrl = firstUrl(markdown, "Docs");
+  const captionText = markerText(shown, "> Caption:", ["Key claims from transcript:", "On-screen text / OCR:"]);
+  const transcriptText = markerText(shown, "Key claims from transcript:", ["On-screen text / OCR:"]);
+  const ocrText = markerText(shown, "On-screen text / OCR:");
   const evidence: FindingEvidence = {
-    caption: /(^|\n)>\s*Caption:/i.test(markdown),
-    transcript: /Key claims from transcript:/i.test(markdown),
-    ocr: /On-screen text \/ OCR:/i.test(markdown),
+    caption: hasCapturedText(captionText, /^(none|no caption available)$/i),
+    transcript: hasCapturedText(transcriptText, /^[-\s]*(\(no transcript available\)|no transcript available)$/i),
+    ocr: hasCapturedText(ocrText, /^[-\s]*(\(no on-screen text available\)|no on-screen text available|not captured)$/i),
     repo: Boolean(repoUrl) || /https?:\/\/github\.com\//i.test(markdown),
     docs: Boolean(docsUrl),
   };

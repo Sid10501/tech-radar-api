@@ -90,6 +90,75 @@ describe("parseFindingMarkdown()", () => {
     expect(detail?.sections.implementation).toContain("shared rubric");
     expect(detail?.sections.followups).toContain("Re-run extraction");
   });
+
+  it("keeps multi-paragraph extraction sections instead of stopping at the first line", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "multiline-finding-sections-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(path.join(findingsDir, "20260615-video-by-shawnchee.md"), SAMPLE_FINDING);
+
+    const detail = getFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(detail?.sections.shown).toContain("Key claims from transcript:");
+    expect(detail?.sections.shown).toContain("Token usage down");
+    expect(detail?.sections.shown).not.toContain("## What it actually is");
+  });
+
+  it("keeps implementation content that starts with a nested markdown heading", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "implementation-heading-section-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING.replace(
+        "Add this to Sid's shared rubric.",
+        "## Senior Review Skill\n\nAdd this to Sid's shared rubric.",
+      ) + "\n## Follow-ups\n\n- Re-run extraction if the source changes.\n",
+    );
+
+    const detail = getFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(detail?.sections.implementation).toContain("## Senior Review Skill");
+    expect(detail?.sections.implementation).toContain("shared rubric");
+    expect(detail?.sections.implementation).not.toContain("## Follow-ups");
+  });
+
+  it("does not count placeholder extraction markers as captured evidence", () => {
+    const finding = parseFindingMarkdown(
+      "20260615-video-by-shawnchee.md",
+      SAMPLE_FINDING
+        .replace("It helps save tokens and make better architecture decisions.", "- (no transcript available)")
+        .replace("Token usage down\nsmallest useful diff", "not captured"),
+    );
+
+    expect(finding.evidence.caption).toBe(true);
+    expect(finding.evidence.transcript).toBe(false);
+    expect(finding.evidence.ocr).toBe(false);
+  });
+
+  it("treats skip verdicts as skip actions even when quality is weak", () => {
+    const finding = parseFindingMarkdown(
+      "20260615-video-by-shawnchee.md",
+      SAMPLE_FINDING
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#skip`")
+        .replace("- GitHub stars: 120", "- GitHub stars: 0")
+        .replace("- Repo: https://github.com/example/ponytail", "- (no links found)"),
+    );
+
+    expect(finding.verdict).toBe("#skip");
+    expect(finding.quality.level).toBe("weak");
+    expect(finding.recommendedAction).toBe("Skip");
+  });
+
+  it("filters entity-like junk tags from social metadata", () => {
+    const finding = parseFindingMarkdown(
+      "20260615-video-by-shawnchee.md",
+      SAMPLE_FINDING.replace("**Tags:** instagram, computerscience, skill, tech", "**Tags:** instagram, x201c, x1f449, 064, coding"),
+    );
+
+    expect(finding.tags).toEqual(["instagram", "coding"]);
+  });
 });
 
 describe("public finding shape", () => {
