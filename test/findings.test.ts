@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getPublicFindingDetail, listFindings, listPublicFindings, parseFindingMarkdown } from "../src/findings.js";
+import { getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings, parseFindingMarkdown } from "../src/findings.js";
 
 const SAMPLE_FINDING = `# Ponytail agent rubric
 
@@ -70,6 +70,25 @@ describe("parseFindingMarkdown()", () => {
     expect(finding.quality.score).toBeGreaterThanOrEqual(80);
     expect(finding.quality.level).toBe("strong");
     expect(finding.recommendedAction).toBe("Create task");
+  });
+
+  it("keeps public and Sid-specific detail sections for the private dashboard", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "private-finding-sections-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING + "\n## Follow-ups\n\n- Re-run extraction if the source changes.\n",
+    );
+
+    const detail = getFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(detail?.sections.research).toContain("reusable senior-dev prompt");
+    expect(detail?.sections.links).toContain("https://github.com/example/ponytail");
+    expect(detail?.sections.kickstarter).toContain("copy the prompt");
+    expect(detail?.sections.fit).toContain("Target project");
+    expect(detail?.sections.implementation).toContain("shared rubric");
+    expect(detail?.sections.followups).toContain("Re-run extraction");
   });
 });
 

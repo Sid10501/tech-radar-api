@@ -46,8 +46,11 @@ export interface FindingDetail {
     tldr: string;
     shown: string;
     research: string;
+    links: string;
+    kickstarter: string;
     fit: string;
     implementation: string;
+    followups: string;
   };
 }
 
@@ -284,8 +287,11 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
       tldr: textBetween(markdown, "TL;DR"),
       shown: textBetween(markdown, "What the post showed"),
       research: textBetween(markdown, "What it actually is"),
+      links: textBetween(markdown, "Links"),
+      kickstarter: textBetween(markdown, "Kickstarter guide"),
       fit: textBetween(markdown, "Fit for Sid"),
       implementation: textBetween(markdown, "Implementation Idea"),
+      followups: textBetween(markdown, "Follow-ups"),
     },
   };
 }

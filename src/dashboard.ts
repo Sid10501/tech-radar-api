@@ -116,7 +116,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       min-width: 0;
       min-height: 0;
       display: grid;
-      grid-template-rows: auto auto 1fr;
+      grid-template-rows: auto auto auto minmax(0, 1fr);
     }
     .queue-head {
       padding: 16px;
@@ -169,10 +169,12 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
     .filters {
       display: flex;
+      align-items: center;
+      flex-wrap: wrap;
       gap: 6px;
       padding: 10px 16px;
       border-bottom: 1px solid #edf1ec;
-      overflow-x: auto;
+      min-height: 56px;
     }
     .filter {
       flex: 0 0 auto;
@@ -183,6 +185,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       padding: 6px 10px;
       font-size: 11px;
       font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
     }
     .filter.active {
       background: var(--green);
@@ -190,7 +196,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       color: #fff9eb;
     }
     .private-only-filter { display: none; }
-    .sid-unlocked .private-only-filter { display: block; }
+    .sid-unlocked .private-only-filter { display: inline-flex; }
     .list {
       overflow: auto;
       min-height: 0;
@@ -426,6 +432,23 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       text-align: center;
       background: rgba(255,255,255,.55);
     }
+    .loading-list {
+      padding: 14px 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .skeleton {
+      border-radius: 8px;
+      background: linear-gradient(90deg, #edf2ec 0%, #f7f8f3 48%, #edf2ec 100%);
+      background-size: 220% 100%;
+      animation: shimmer 1.1s linear infinite;
+    }
+    .skeleton.item-line { height: 74px; }
+    .skeleton.detail-line { height: 18px; margin: 10px 0; }
+    @keyframes shimmer {
+      from { background-position: 100% 0; }
+      to { background-position: -120% 0; }
+    }
     .toast {
       position: fixed;
       right: 18px;
@@ -506,7 +529,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0 };
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -536,6 +559,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (f.evidence.repo) bits.push("repo");
       if (f.evidence.docs) bits.push("docs");
       return bits.join(" + ") || "metadata only";
+    }
+
+    function evidenceBadge(value, yes = "yes", no = "not captured") {
+      return value ? yes : no;
     }
 
     function matchesQuery(f) {
@@ -588,7 +615,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       $("strong-count").textContent = counts.strong;
       $("review-count").textContent = counts.review;
       $("weak-count").textContent = counts.weak;
-      $("count").textContent = visibleFindings().length + " of " + state.findings.length;
+      $("count").textContent = state.loading ? "Loading" : visibleFindings().length + " of " + state.findings.length;
       $("mode-note").textContent = state.privateUnlocked
         ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
         : "Public research is open. Unlock Sid view only when you want project fit and next actions.";
@@ -599,6 +626,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     function renderList() {
       updateStats();
       const list = $("finding-list");
+      if (state.loading) {
+        list.innerHTML = '<div class="loading-list" aria-label="Loading findings"><div class="skeleton item-line"></div><div class="skeleton item-line"></div><div class="skeleton item-line"></div><div class="skeleton item-line"></div></div>';
+        return;
+      }
       const findings = selectFirstVisibleIfNeeded();
       if (!findings.length) {
         list.innerHTML = '<div class="empty">No findings match that search.</div>';
@@ -652,8 +683,14 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (caption) blocks.push(\`<details><summary>Caption</summary><div class="details-content markdown">\${markdownToHtml(caption)}</div></details>\`);
       if (transcript) blocks.push(\`<details><summary>Transcript</summary><div class="details-content markdown">\${markdownToHtml(transcript)}</div></details>\`);
       if (ocr) blocks.push(\`<details><summary>OCR text</summary><div class="details-content markdown">\${markdownToHtml(ocr)}</div></details>\`);
+      else blocks.push('<details><summary>OCR text</summary><div class="details-content">No on-screen text was captured for this finding.</div></details>');
       blocks.push(\`<details><summary>Full finding markdown</summary><div class="details-content markdown">\${markdownToHtml(d.markdown)}</div></details>\`);
       return blocks.join("");
+    }
+
+    function sectionPanel(title, markdown) {
+      if (!markdown || !markdown.trim()) return "";
+      return '<div class="panel"><div class="panel-head">' + escapeHtml(title) + '</div><div class="panel-body markdown">' + markdownToHtml(markdown) + '</div></div>';
     }
 
     function privateSummary(f, d) {
@@ -663,12 +700,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           <div class="private-cell"><div class="cell-label">Project</div><div class="cell-value">\${escapeHtml(f.targetProject)}</div></div>
           <div class="private-cell"><div class="cell-label">Decision</div><div class="cell-value">\${escapeHtml(f.recommendedAction)}</div></div>
           <div class="private-cell"><div class="cell-label">Verdict</div><div class="cell-value">\${escapeHtml(f.verdict)}</div></div>
-        </div>
-        \${d.sections.implementation ? '<div class="panel"><div class="panel-head">Implementation idea</div><div class="panel-body markdown">' + markdownToHtml(d.sections.implementation) + '</div></div>' : ""}\`;
+        </div>\`;
     }
 
     function renderDetail() {
       const detail = $("detail");
+      if (state.loading) {
+        detail.innerHTML = '<div class="detail"><section class="hero"><div class="hero-main"><div class="skeleton detail-line" style="width: 180px"></div><div class="skeleton detail-line" style="height: 54px; width: 72%; max-width: 760px"></div><div class="skeleton detail-line" style="width: 86%"></div><div class="skeleton detail-line" style="width: 64%"></div></div></section></div>';
+        return;
+      }
       const d = state.detail;
       if (!d) {
         detail.innerHTML = '<div class="empty">Select a finding to read the research.</div>';
@@ -676,6 +716,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       const f = d.finding;
       const personal = state.privateUnlocked && f.targetProject;
+      const mainSections = [
+        sectionPanel("What it is", d.sections.research || d.sections.tldr || f.summary),
+        sectionPanel("Links", d.sections.links),
+        sectionPanel("How to try it", d.sections.kickstarter),
+        personal ? sectionPanel("Fit for Sid", d.sections.fit) : "",
+        personal ? sectionPanel("Implementation idea", d.sections.implementation) : "",
+        personal ? sectionPanel("Follow-ups", d.sections.followups) : "",
+        !state.privateUnlocked ? '<div class="panel"><div class="panel-head">Sid-specific layer</div><div class="panel-body">Unlock when you want to see project fit, recommended action, and implementation notes. The public research above stays open for everyone.</div></div>' : "",
+      ].filter(Boolean).join("");
       detail.innerHTML = \`
         <div class="detail">
           <section class="hero">
@@ -693,18 +742,16 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           </section>
           <section class="body-grid">
             <div>
-              <div class="panel"><div class="panel-head">What it is</div><div class="panel-body markdown">\${markdownToHtml(d.sections.research || d.sections.tldr || f.summary)}</div></div>
-              \${d.sections.kickstarter ? '<div class="panel"><div class="panel-head">How to try it</div><div class="panel-body markdown">' + markdownToHtml(d.sections.kickstarter) + '</div></div>' : ""}
-              \${!state.privateUnlocked ? '<div class="panel"><div class="panel-head">Sid-specific layer</div><div class="panel-body">Unlock when you want to see project fit, recommended action, and implementation notes. The public research above stays open for everyone.</div></div>' : ""}
+              \${mainSections}
               <div class="panel"><div class="panel-head">Raw extraction</div>\${extractionDetails(d)}</div>
             </div>
             <aside class="side">
               <div class="panel"><div class="panel-head">Source check</div><div class="panel-body">
                 <div class="row"><div class="row-label">Confidence</div><div class="badge">\${f.quality.score}/100</div></div>
-                <div class="row"><div class="row-label">Caption</div><div class="badge">\${f.evidence.caption ? "yes" : "no"}</div></div>
-                <div class="row"><div class="row-label">Transcript</div><div class="badge">\${f.evidence.transcript ? "yes" : "no"}</div></div>
-                <div class="row"><div class="row-label">OCR</div><div class="badge">\${f.evidence.ocr ? "yes" : "no"}</div></div>
-                <div class="row"><div class="row-label">Repo or docs</div><div class="badge">\${f.evidence.repo || f.evidence.docs ? "yes" : "no"}</div></div>
+                <div class="row"><div class="row-label">Caption</div><div class="badge">\${evidenceBadge(f.evidence.caption)}</div></div>
+                <div class="row"><div class="row-label">Transcript</div><div class="badge">\${evidenceBadge(f.evidence.transcript)}</div></div>
+                <div class="row"><div class="row-label">OCR</div><div class="badge">\${evidenceBadge(f.evidence.ocr, "captured", "not captured")}</div></div>
+                <div class="row"><div class="row-label">Repo or docs</div><div class="badge">\${evidenceBadge(f.evidence.repo || f.evidence.docs)}</div></div>
               </div></div>
               <div class="panel"><div class="panel-head">Why surfaced</div><div class="panel-body">\${escapeHtml(f.quality.reasons.join(", ") || "Needs manual review.")}</div></div>
             </aside>
@@ -743,13 +790,18 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     async function loadFindings() {
+      state.loading = true;
+      renderList();
+      renderDetail();
       const res = await fetch(state.privateUnlocked ? "/api/findings" : "/api/public/findings", { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
       if (!res.ok) {
+        state.loading = false;
         $("finding-list").innerHTML = '<div class="empty">Could not load findings.</div>';
         return;
       }
       const body = await res.json();
       state.findings = body.findings || [];
+      state.loading = false;
       selectFirstVisibleIfNeeded();
       renderList();
       if (state.selectedId) await selectFinding(state.selectedId);
@@ -805,6 +857,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       showToast(res.ok ? "Queued for research." : "Could not queue URL.");
     });
 
+    renderList();
+    renderDetail();
     syncSession().finally(() => loadFindings());
     if ((window.__RUNS__ || []).some((r) => r.status === "running" || r.status === "pending")) {
       setTimeout(loadFindings, 8000);
