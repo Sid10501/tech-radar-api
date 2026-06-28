@@ -72,4 +72,10 @@ Use when a Claude Code session approaches **300–400K tokens**. Run `./scripts/
 
 <!-- Overwrite each session: what branch, what feature, what's blocked -->
 
-_Update before compacting if the goal of the session changed._
+- 2026-06-28: Dashboard parser/detail bug fixed, committed, pushed, and deployed on `main`.
+- Latest shipped commit: `0e1f949 fix: render complete finding detail sections`.
+- Latest Railway deployment verified: `d31baf31-d3ff-4601-8a14-eba997e4975a`.
+- Production checks after deploy: public Max Kelley detail has full `shown` section with transcript; private detail has implementation text and `Create task`.
+- Next-session plan: `docs/superpowers/plans/2026-06-28-dashboard-enrichment-and-audit.md`.
+- Recommended next subset: batch audit model, audit endpoints, dashboard filter counts/needs-enrichment queue.
+- Known local noise: untracked `tech-radar-api.cursor.code-workspace`; do not remove unless user asks.
