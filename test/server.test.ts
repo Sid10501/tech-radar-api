@@ -89,6 +89,57 @@ describe("server routes", () => {
     expect(body.findings[0]).not.toHaveProperty("targetProject");
   });
 
+  it("GET /api/public/audit returns latest batch health without auth", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-public-audit-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "sample.md"),
+      [
+        "# Public Audit Sample",
+        "",
+        "**Source:** instagram",
+        "**Saved:** 20260615",
+        "**Tags:** instagram, ai",
+        "",
+        "## TL;DR",
+        "",
+        "A promising workflow needs source enrichment.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: useful dashboard automation pattern",
+        "",
+        "Key claims from transcript:",
+        "(no transcript available)",
+        "",
+        "## Links",
+        "",
+        "No links found.",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: tech-radar-api",
+        "- Verdict: `#try-soon`",
+      ].join("\n"),
+    );
+    process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+    const res = await app.inject({ method: "GET", url: "/api/public/audit" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.audit.total).toBe(1);
+    expect(body.audit.quality.weak).toBe(1);
+    expect(body.audit.needsEnrichment).toBe(1);
+    expect(body.audit.missingTranscript).toBe(1);
+    expect(body.audit.missingRepoOrDocs).toBe(1);
+    expect(body.filters.all).toBe(1);
+    expect(body.filters.enrich).toBe(1);
+    expect(body.filters.repo).toBe(0);
+    expect(body.audit).not.toHaveProperty("actions");
+  });
+
   it("GET /api/public/findings/:id returns sanitized markdown without auth", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-public-detail-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
@@ -285,6 +336,47 @@ describe("server routes", () => {
       expect(body.findings).toHaveLength(1);
       expect(body.findings[0].title).toBe("Ponytail agent rubric");
       expect(body.findings[0].quality.score).toBeGreaterThan(70);
+    });
+
+    it("GET /api/audit returns private action counts with valid auth", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-audit-"));
+      const findingsDir = path.join(dir, "tech-radar", "findings");
+      fs.mkdirSync(findingsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(findingsDir, "sample.md"),
+        [
+          "# Private Audit Sample",
+          "",
+          "**Source:** instagram",
+          "**Saved:** 20260615",
+          "**Tags:** instagram, ai",
+          "",
+          "## TL;DR",
+          "",
+          "A sample that should be skipped.",
+          "",
+          "## What the post showed",
+          "",
+          "> Caption: useful but not a fit",
+          "",
+          "## Fit for Sid",
+          "",
+          "- Target project: none",
+          "- Verdict: `#skip`",
+        ].join("\n"),
+      );
+      process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/audit",
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.audit.actions.Skip).toBe(1);
+      expect(body.filters.skip).toBe(1);
     });
 
     it("GET /api/findings/:id returns markdown for a selected finding", async () => {

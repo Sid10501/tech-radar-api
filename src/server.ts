@@ -4,6 +4,7 @@ import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError 
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 import { getAiMemoryDir, getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings } from "./findings.js";
+import { auditFindings, auditPublicFindings, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 
 function getCookieValue(cookieHeader: unknown, name: string): string | undefined {
@@ -150,6 +151,12 @@ export function buildServer() {
     return { findings: listPublicFindings() };
   });
 
+  app.get("/api/public/audit", async () => {
+    await ensureAiMemoryCheckout();
+    const findings = listPublicFindings();
+    return { audit: auditPublicFindings(findings), filters: filterCountsFromPublic(findings) };
+  });
+
   app.get<{ Params: { id: string } }>("/api/public/findings/:id", async (request, reply) => {
     await ensureAiMemoryCheckout();
     const detail = getPublicFindingDetail(request.params.id);
@@ -160,6 +167,12 @@ export function buildServer() {
   app.get("/api/findings", { preHandler: authMiddleware }, async () => {
     await ensureAiMemoryCheckout();
     return { findings: listFindings() };
+  });
+
+  app.get("/api/audit", { preHandler: authMiddleware }, async () => {
+    await ensureAiMemoryCheckout();
+    const findings = listFindings();
+    return { audit: auditFindings(findings), filters: filterCounts(findings) };
   });
 
   app.get<{ Params: { id: string } }>(
