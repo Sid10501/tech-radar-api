@@ -116,7 +116,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       min-width: 0;
       min-height: 0;
       display: grid;
-      grid-template-rows: auto auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto auto minmax(0, 1fr);
     }
     .queue-head {
       padding: 16px;
@@ -167,6 +167,27 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       font-size: 12px;
       line-height: 1.4;
     }
+    .batch-health {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      padding: 10px 16px;
+      border-bottom: 1px solid #edf1ec;
+      background: #fbfcf8;
+    }
+    .health-chip {
+      min-width: 0;
+      color: #314138;
+      background: #f7f8f3;
+      border: 1px solid #dfe7dd;
+      border-radius: 8px;
+      padding: 7px 8px;
+      font-size: 11px;
+      font-weight: 800;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .filters {
       display: flex;
       align-items: center;
@@ -194,6 +215,14 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       background: var(--green);
       border-color: var(--green);
       color: #fff9eb;
+    }
+    .filter[disabled] {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+    .filter span {
+      color: inherit;
+      opacity: .72;
     }
     .private-only-filter { display: none; }
     .sid-unlocked .private-only-filter { display: inline-flex; }
@@ -512,14 +541,17 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           </div>
         </div>
         <div id="mode-note" class="mode-note">Public research is open. Unlock Sid view only when you want project fit and next actions.</div>
+        <div id="batch-health" class="batch-health" aria-label="Latest batch health"></div>
         <div class="filters" aria-label="Filter findings">
-          <button class="filter active" data-filter="all">All</button>
-          <button class="filter" data-filter="strong">Strong</button>
-          <button class="filter" data-filter="review">Review</button>
-          <button class="filter" data-filter="weak">Weak</button>
-          <button class="filter" data-filter="repo">Repo/docs</button>
-          <button class="filter private-only-filter" data-filter="project">Project fit</button>
-          <button class="filter" data-filter="ocr">OCR</button>
+          <button class="filter active" data-filter="all">All <span data-count-for="all">0</span></button>
+          <button class="filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
+          <button class="filter" data-filter="review">Review <span data-count-for="review">0</span></button>
+          <button class="filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
+          <button class="filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
+          <button class="filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
+          <button class="filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
+          <button class="filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
+          <button class="filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
         </div>
         <div id="finding-list" class="list"></div>
       </aside>
@@ -529,7 +561,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map() };
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {} };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -584,8 +616,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (state.filter === "review") return f.quality.level === "review";
       if (state.filter === "weak") return f.quality.level === "weak";
       if (state.filter === "repo") return f.evidence.repo || f.evidence.docs;
+      if (state.filter === "enrich") return !(state.privateUnlocked && f.recommendedAction === "Skip") && (f.quality.level === "weak" || !(f.evidence.repo || f.evidence.docs));
       if (state.filter === "project") return state.privateUnlocked && f.targetProject && f.targetProject !== "none" && f.targetProject !== "unknown";
       if (state.filter === "ocr") return f.evidence.ocr;
+      if (state.filter === "skip") return state.privateUnlocked && f.recommendedAction === "Skip";
       return true;
     }
 
@@ -615,12 +649,53 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       $("strong-count").textContent = counts.strong;
       $("review-count").textContent = counts.review;
       $("weak-count").textContent = counts.weak;
+      document.querySelectorAll("[data-count-for]").forEach((span) => {
+        const key = span.dataset.countFor;
+        span.textContent = state.filterCounts[key] ?? 0;
+      });
+      document.querySelectorAll(".filter").forEach((button) => {
+        const key = button.dataset.filter || "all";
+        const count = state.filterCounts[key] ?? 0;
+        button.disabled = key !== "all" && count === 0;
+        if (button.disabled && button.classList.contains("active")) {
+          button.classList.remove("active");
+          state.filter = "all";
+          document.querySelector('[data-filter="all"]')?.classList.add("active");
+        }
+      });
+      const audit = state.audit;
+      $("batch-health").innerHTML = audit
+        ? [
+            ["Latest", audit.total ?? 0],
+            ["Repo/docs", (audit.evidence?.repo ?? 0) + (audit.evidence?.docs ?? 0)],
+            ["Transcript", audit.evidence?.transcript ?? 0],
+            ["Enrich", audit.needsEnrichment ?? 0],
+          ].map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ': ' + escapeHtml(value) + '</div>').join("")
+        : "";
       $("count").textContent = state.loading ? "Loading" : visibleFindings().length + " of " + state.findings.length;
       $("mode-note").textContent = state.privateUnlocked
         ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
         : "Public research is open. Unlock Sid view only when you want project fit and next actions.";
       $("unlock").textContent = state.privateUnlocked ? "Sid view unlocked" : "Unlock Sid view";
       $("dashboard-root").classList.toggle("sid-unlocked", state.privateUnlocked);
+    }
+
+    async function loadAudit() {
+      const path = state.privateUnlocked ? "/api/audit" : "/api/public/audit";
+      try {
+        const res = await fetch(path, { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
+        if (!res.ok) {
+          state.audit = null;
+          state.filterCounts = {};
+          return;
+        }
+        const body = await res.json();
+        state.audit = body.audit || null;
+        state.filterCounts = body.filters || {};
+      } catch {
+        state.audit = null;
+        state.filterCounts = {};
+      }
     }
 
     function renderList() {
@@ -847,6 +922,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       state.loading = false;
       selectFirstVisibleIfNeeded();
       renderList();
+      loadAudit().then(() => renderList());
       if (state.selectedId) await selectFinding(state.selectedId);
       else renderDetail();
     }
@@ -858,6 +934,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
     });
     document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => {
+      if (button.disabled) return;
       document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
       state.filter = button.dataset.filter || "all";
