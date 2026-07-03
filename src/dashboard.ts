@@ -729,7 +729,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       <input id="search" class="search" placeholder="Search findings, tools, sources, or project fit">
       <div class="top-actions">
         <button id="refresh" class="button" title="Refresh findings">Refresh</button>
-        <button id="unlock" class="button">Unlock Sid view</button>
+        <button id="unlock" class="button">Unlock</button>
         <button id="add-url" class="button primary">Add URL</button>
       </div>
     </header>
@@ -902,7 +902,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       $("mode-note").textContent = state.privateUnlocked
         ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
         : "Public research is open. Unlock Sid view only when you want project fit and next actions.";
-      $("unlock").textContent = state.privateUnlocked ? "Sid view unlocked" : "Unlock Sid view";
+      $("unlock").textContent = state.privateUnlocked ? "Unlocked" : "Unlock";
       $("dashboard-root").classList.toggle("sid-unlocked", state.privateUnlocked);
     }
 

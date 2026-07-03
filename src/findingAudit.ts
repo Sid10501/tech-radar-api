@@ -29,6 +29,8 @@ export interface FindingFilterCounts {
   skip: number;
 }
 
+export type PublicFindingFilterCounts = Omit<FindingFilterCounts, "project" | "skip">;
+
 export type EnrichmentStatus = "ready" | "needs-enrichment" | "skip";
 
 const evidenceKeys: EvidenceKey[] = ["caption", "transcript", "ocr", "repo", "docs"];
@@ -122,8 +124,16 @@ export function filterCounts(findings: FindingSummary[]): FindingFilterCounts {
   return counts;
 }
 
-export function filterCountsFromPublic(findings: PublicFindingSummary[]): FindingFilterCounts {
-  const counts = emptyFilterCounts();
+export function filterCountsFromPublic(findings: PublicFindingSummary[]): PublicFindingFilterCounts {
+  const counts: PublicFindingFilterCounts = {
+    all: 0,
+    strong: 0,
+    review: 0,
+    weak: 0,
+    repo: 0,
+    ocr: 0,
+    enrich: 0,
+  };
 
   for (const finding of findings) {
     counts.all += 1;

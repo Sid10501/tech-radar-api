@@ -179,6 +179,66 @@ describe("public finding shape", () => {
     expect(detail?.sections.research).toContain("reusable senior-dev prompt");
     expect(detail?.sections.kickstarter).toContain("copy the prompt");
   });
+
+  it("removes embedded private decision blocks from public detail text", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-embedded-private-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    const markdown = SAMPLE_FINDING
+      .replace(
+        "Read the repo and copy the prompt into your agent instructions.",
+        [
+          "Read the repo and copy the prompt into your agent instructions.",
+          "",
+          "- This is directly relevant because Sid runs tech-radar-api.",
+          "- Verdict: `#try-soon`",
+          "",
+          "## Palmier as a tech-radar-api workflow accelerator",
+          "",
+          "Use this in Cross-Tax and Sid's video workflow.",
+        ].join("\n"),
+      )
+      .replace(
+        "Add this to Sid's shared rubric.",
+        "## Private implementation heading\n\nUse this in Cross-Tax and Sid's video workflow.",
+      );
+    fs.writeFileSync(path.join(findingsDir, "20260619-palmier.md"), markdown);
+
+    const detail = getPublicFindingDetail("20260619-palmier.md", dir);
+
+    expect(detail?.sections.kickstarter).toContain("Read the repo");
+    expect(detail?.sections.kickstarter).not.toContain("Sid");
+    expect(detail?.sections.kickstarter).not.toContain("Verdict");
+    expect(detail?.sections.kickstarter).not.toContain("Cross-Tax");
+    expect(detail?.markdown).not.toContain("Target project");
+    expect(detail?.markdown).not.toContain("Verdict");
+    expect(detail?.markdown).not.toContain("Sid");
+    expect(detail?.markdown).not.toContain("Cross-Tax");
+  });
+
+  it("removes private verdict scoring reasons from public finding quality", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-skip-quality-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#skip`"),
+    );
+    const privateFinding = parseFindingMarkdown(
+      "20260615-video-by-shawnchee.md",
+      SAMPLE_FINDING
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#skip`"),
+    );
+
+    const [publicFinding] = listPublicFindings(dir);
+
+    expect(privateFinding.quality.reasons).toContain("skip verdict");
+    expect(publicFinding.quality.reasons).not.toContain("skip verdict");
+    expect(publicFinding.quality.score).toBeGreaterThan(privateFinding.quality.score);
+  });
 });
 
 describe("listFindings()", () => {

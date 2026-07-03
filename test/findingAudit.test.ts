@@ -98,11 +98,11 @@ describe("finding audit helpers", () => {
       review: 1,
       weak: 1,
       repo: 1,
-      project: 0,
       ocr: 1,
       enrich: 1,
-      skip: 0,
     });
+    expect(filterCountsFromPublic(rows)).not.toHaveProperty("project");
+    expect(filterCountsFromPublic(rows)).not.toHaveProperty("skip");
   });
 
   it("returns private enrichment states from evidence and project decision fields", () => {

@@ -202,21 +202,54 @@ function hasCapturedText(value: string, unavailable: RegExp): boolean {
 }
 
 function withoutPrivateSections(markdown: string): string {
-  return markdown
-    .replace(/^## Fit for Sid\s*\n[\s\S]*?(?=^## |$)/m, "")
-    .replace(/^## Implementation Idea\s*\n[\s\S]*?(?=^## |$)/m, "")
-    .replace(/^## Follow-ups\s*\n[\s\S]*?(?=^## |$)/m, "")
-    .trim();
+  const withoutSections = removeTemplateSection(
+    removeTemplateSection(removeTemplateSection(markdown, "Fit for .+"), "Implementation Idea"),
+    "Follow-ups",
+  );
+  return withoutEmbeddedPrivateDecisionBlocks(withoutSections).trim();
+}
+
+function removeTemplateSection(markdown: string, headingPattern: string): string {
+  const match = new RegExp(`^## ${headingPattern}\\s*$`, "m").exec(markdown);
+  if (!match) return markdown;
+  const before = markdown.slice(0, match.index);
+  const tail = markdown.slice(match.index + match[0].length);
+  const nextHeading = TEMPLATE_SECTION_HEADING.exec(tail);
+  return before + (nextHeading ? tail.slice(nextHeading.index) : "");
+}
+
+function withoutEmbeddedPrivateDecisionBlocks(markdown: string): string {
+  const lines = markdown.split("\n");
+  const kept: string[] = [];
+  let dropping = false;
+
+  for (const line of lines) {
+    if (!dropping && isPrivateDecisionLine(line)) {
+      dropping = true;
+      continue;
+    }
+    if (dropping && TEMPLATE_SECTION_HEADING.test(line)) {
+      dropping = false;
+    }
+    if (!dropping) kept.push(line);
+  }
+
+  return kept.join("\n");
+}
+
+function isPrivateDecisionLine(line: string): boolean {
+  return /^\s*[-*]?\s*(Target project|Verdict):/i.test(line) || /^\s*[-*]\s+.*\bSid\b/i.test(line);
 }
 
 function publicQuality(finding: FindingSummary): FindingQuality {
   const hasProjectFit = finding.quality.reasons.includes("project fit");
-  const score = Math.max(0, Math.min(100, finding.quality.score - (hasProjectFit ? 10 : 0)));
+  const hasSkipVerdict = finding.quality.reasons.includes("skip verdict");
+  const score = Math.max(0, Math.min(100, finding.quality.score - (hasProjectFit ? 10 : 0) + (hasSkipVerdict ? 25 : 0)));
   const level = score >= 80 ? "strong" : score >= 60 ? "review" : "weak";
   return {
     score,
     level,
-    reasons: finding.quality.reasons.filter((reason) => reason !== "project fit"),
+    reasons: finding.quality.reasons.filter((reason) => reason !== "project fit" && reason !== "skip verdict"),
   };
 }
 
