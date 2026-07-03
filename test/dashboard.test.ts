@@ -34,6 +34,14 @@ describe("dashboard HTML", () => {
     expect(html).not.toContain("next/");
   });
 
+  it("renders mobile triage affordance hooks", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("evidence-chip");
+    expect(html).toContain("mobile-detail-bar");
+    expect(html).toContain("mobile-back");
+  });
+
   it("uses a one-screen mobile queue and detail layout", () => {
     const html = DASHBOARD_HTML([]);
 

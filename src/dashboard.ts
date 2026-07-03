@@ -274,9 +274,22 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       line-height: 1.4;
     }
     .item-evidence {
-      color: #4c5b52;
-      font-size: 11px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
       margin-top: 7px;
+    }
+    .evidence-chip {
+      color: #405146;
+      background: #edf2ec;
+      border: 1px solid #dfe7dd;
+      border-radius: 999px;
+      padding: 3px 6px;
+      font-size: 10px;
+      font-weight: 820;
+    }
+    .evidence-chip.muted {
+      color: var(--muted);
     }
     .content {
       min-width: 0;
@@ -676,6 +689,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         margin-top: 10px;
         padding: 0 10px 14px;
       }
+      .panel {
+        border-radius: 7px;
+      }
+      .panel-head {
+        padding: 10px 12px;
+      }
+      .panel-body {
+        padding: 12px;
+      }
       .side {
         gap: 10px;
       }
@@ -781,6 +803,20 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (f.evidence.repo) bits.push("repo");
       if (f.evidence.docs) bits.push("docs");
       return bits.join(" + ") || "metadata only";
+    }
+
+    function evidenceChips(f) {
+      const items = [
+        ["caption", f.evidence.caption],
+        ["transcript", f.evidence.transcript],
+        ["OCR", f.evidence.ocr],
+        ["repo", f.evidence.repo],
+        ["docs", f.evidence.docs],
+      ];
+      return items
+        .filter(([, present]) => present)
+        .map(([label]) => '<span class="evidence-chip">' + escapeHtml(label) + '</span>')
+        .join("") || '<span class="evidence-chip muted">metadata only</span>';
     }
 
     function evidenceBadge(value, yes = "yes", no = "not captured") {
@@ -907,8 +943,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
             <div class="item-title">\${escapeHtml(f.title)}</div>
             <div class="pill \${f.quality.level}">\${f.quality.level}</div>
           </div>
-          <div class="item-meta">\${escapeHtml(f.saved || "unsaved")} · \${escapeHtml(f.source.platform)}\${state.privateUnlocked && f.targetProject ? " · " + escapeHtml(f.targetProject) : ""}</div>
-          <div class="item-evidence">\${escapeHtml(evidenceText(f))}</div>
+          <div class="item-meta">\${escapeHtml(f.saved || "unsaved")} · \${escapeHtml(f.source.platform)} · \${escapeHtml(f.quality.score)}/100\${state.privateUnlocked && f.targetProject ? " · " + escapeHtml(f.targetProject) : ""}</div>
+          <div class="item-evidence">\${evidenceChips(f)}</div>
         </button>\`).join("");
       list.querySelectorAll(".item").forEach((button) => button.addEventListener("click", () => selectFinding(button.dataset.id, { openDetail: true })));
     }
