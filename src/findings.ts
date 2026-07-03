@@ -69,6 +69,8 @@ export interface PublicFindingDetail {
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 const TEMPLATE_SECTION_HEADING =
   /^## (TL;DR|What the post showed|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Follow-ups)\s*$/m;
+const PRIVATE_PROJECT_REFERENCE =
+  /\b(Cross-Tax|StockBot|Finance Assistant|Kalkine Stocks Tracker|tech-radar-api|ai-video)\b/i;
 
 function textBetween(body: string, heading: string): string {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -206,7 +208,7 @@ function withoutPrivateSections(markdown: string): string {
     removeTemplateSection(removeTemplateSection(markdown, "Fit for .+"), "Implementation Idea"),
     "Follow-ups",
   );
-  return withoutEmbeddedPrivateDecisionBlocks(withoutSections).trim();
+  return withoutPrivateProjectReferences(withoutEmbeddedPrivateDecisionBlocks(withoutSections)).trim();
 }
 
 function removeTemplateSection(markdown: string, headingPattern: string): string {
@@ -239,6 +241,13 @@ function withoutEmbeddedPrivateDecisionBlocks(markdown: string): string {
 
 function isPrivateDecisionLine(line: string): boolean {
   return /^\s*[-*]?\s*(Target project|Verdict):/i.test(line) || /^\s*[-*]\s+.*\bSid\b/i.test(line);
+}
+
+function withoutPrivateProjectReferences(markdown: string): string {
+  return markdown
+    .split(/\n{2,}/)
+    .filter((block) => !PRIVATE_PROJECT_REFERENCE.test(block))
+    .join("\n\n");
 }
 
 function publicQuality(finding: FindingSummary): FindingQuality {

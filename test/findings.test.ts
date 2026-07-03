@@ -239,6 +239,34 @@ describe("public finding shape", () => {
     expect(publicFinding.quality.reasons).not.toContain("skip verdict");
     expect(publicFinding.quality.score).toBeGreaterThan(privateFinding.quality.score);
   });
+
+  it("removes standalone private project references from public guidance", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-project-reference-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING.replace(
+        "Read the repo and copy the prompt into your agent instructions.",
+        [
+          "Read the repo and copy the prompt into your agent instructions.",
+          "",
+          "Drop-in swap in Cross-Tax or StockBot.",
+          "",
+          "Use the public README example first.",
+        ].join("\n"),
+      ),
+    );
+
+    const detail = getPublicFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(detail?.sections.kickstarter).toContain("Read the repo");
+    expect(detail?.sections.kickstarter).toContain("public README");
+    expect(detail?.sections.kickstarter).not.toContain("Cross-Tax");
+    expect(detail?.sections.kickstarter).not.toContain("StockBot");
+    expect(detail?.markdown).not.toContain("Cross-Tax");
+    expect(detail?.markdown).not.toContain("StockBot");
+  });
 });
 
 describe("listFindings()", () => {
