@@ -33,4 +33,13 @@ describe("dashboard HTML", () => {
     expect(html).not.toContain("react");
     expect(html).not.toContain("next/");
   });
+
+  it("uses a one-screen mobile queue and detail layout", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("height: 100dvh");
+    expect(html).toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
+    expect(html).toContain("position: sticky");
+    expect(html).toContain("top: 0");
+  });
 });
