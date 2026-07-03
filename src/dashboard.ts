@@ -288,6 +288,29 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       margin: 0 auto;
       padding: 24px;
     }
+    .mobile-detail-bar {
+      display: none;
+    }
+    .mobile-back {
+      border: 1px solid #d4ddd2;
+      border-radius: 8px;
+      background: var(--paper);
+      color: #24352b;
+      padding: 9px 12px;
+      font-size: 12px;
+      font-weight: 820;
+    }
+    .mobile-detail-context {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      display: flex;
+      gap: 8px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
     .hero {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -505,6 +528,16 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         border-bottom: 1px solid var(--line);
         max-height: 430px;
       }
+      .content { display: none; }
+      .mobile-detail-open .queue { display: none; }
+      .mobile-detail-open .content { display: block; }
+      .mobile-detail-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
       .body-grid { grid-template-columns: 1fr; }
       .private-strip { grid-template-columns: 1fr; }
     }
@@ -561,7 +594,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {} };
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -569,6 +602,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     function requestHeaders() {
       const currentToken = new URLSearchParams(location.search).get("token") || "";
       return currentToken ? { Authorization: "Bearer " + currentToken } : {};
+    }
+
+    function isMobileViewport() {
+      return window.matchMedia("(max-width: 980px)").matches;
+    }
+
+    function setMobileDetailOpen(open) {
+      state.mobileDetailOpen = Boolean(open);
+      $("dashboard-root").classList.toggle("mobile-detail-open", state.mobileDetailOpen);
     }
 
     async function syncSession() {
@@ -712,7 +754,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         return;
       }
       list.innerHTML = findings.map((f) => \`
-        <button class="item \${f.id === state.selectedId ? "selected" : ""}" data-id="\${escapeHtml(f.id)}">
+        <button class="item \${f.id === state.selectedId ? "selected" : ""}" data-id="\${escapeHtml(f.id)}" data-mobile-primary="finding">
           <div class="item-top">
             <div class="item-title">\${escapeHtml(f.title)}</div>
             <div class="pill \${f.quality.level}">\${f.quality.level}</div>
@@ -720,7 +762,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           <div class="item-meta">\${escapeHtml(f.saved || "unsaved")} · \${escapeHtml(f.source.platform)}\${state.privateUnlocked && f.targetProject ? " · " + escapeHtml(f.targetProject) : ""}</div>
           <div class="item-evidence">\${escapeHtml(evidenceText(f))}</div>
         </button>\`).join("");
-      list.querySelectorAll(".item").forEach((button) => button.addEventListener("click", () => selectFinding(button.dataset.id)));
+      list.querySelectorAll(".item").forEach((button) => button.addEventListener("click", () => selectFinding(button.dataset.id, { openDetail: true })));
     }
 
     function markdownToHtml(markdown) {
@@ -802,6 +844,13 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       ].filter(Boolean).join("");
       detail.innerHTML = \`
         <div class="detail">
+          <div class="mobile-detail-bar">
+            <button id="mobile-back" class="mobile-back" data-action="mobile-back">Findings</button>
+            <div class="mobile-detail-context">
+              <span>\${escapeHtml(f.quality.level)} signal</span>
+              <span>\${escapeHtml(f.source.platform)}</span>
+            </div>
+          </div>
           <section class="hero">
             <div class="hero-main">
               <div class="breadcrumb">\${personal ? "Sid view" : "Public radar"} / \${escapeHtml(f.source.platform)} / \${escapeHtml(f.quality.level)} signal</div>
@@ -833,6 +882,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           </section>
         </div>\`;
       detail.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => {
+        if (button.dataset.action === "mobile-back") setMobileDetailOpen(false);
         if (button.dataset.action === "unlock") unlockPrivateView();
         if (button.dataset.action === "copy-next") {
           const text = nextTaskText(f);
@@ -881,8 +931,9 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return "Review source evidence, then decide whether this belongs in backlog or should be skipped.";
     }
 
-    async function selectFinding(id) {
+    async function selectFinding(id, options = {}) {
       state.selectedId = id;
+      if (options.openDetail && isMobileViewport()) setMobileDetailOpen(true);
       const requestId = ++state.requestSeq;
       renderList();
       const cached = state.detailCache.get(detailCacheKey(id));
@@ -930,6 +981,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     $("search").addEventListener("input", (event) => {
       state.query = event.target.value;
       const previousId = state.selectedId;
+      setMobileDetailOpen(false);
       renderList();
       if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
     });
@@ -939,6 +991,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       button.classList.add("active");
       state.filter = button.dataset.filter || "all";
       const previousId = state.selectedId;
+      setMobileDetailOpen(false);
       renderList();
       if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
     }));
@@ -975,6 +1028,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (!url) return;
       const res = await fetch("/runs", { method: "POST", headers: { ...requestHeaders(), "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ url }) });
       showToast(res.ok ? "Queued for research." : "Could not queue URL.");
+    });
+
+    window.addEventListener("resize", () => {
+      if (!isMobileViewport()) setMobileDetailOpen(false);
     });
 
     renderList();

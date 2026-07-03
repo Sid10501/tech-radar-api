@@ -12,4 +12,25 @@ describe("dashboard HTML", () => {
     expect(html).toContain("batch-health");
     expect(html).not.toContain('class="tabs"');
   });
+
+  it("keeps the desktop split explorer hooks", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('class="workspace"');
+    expect(html).toContain('class="queue"');
+    expect(html).toContain('id="detail" class="content"');
+    expect(html).toContain("grid-template-columns: minmax(300px, 390px) minmax(0, 1fr)");
+  });
+
+  it("defines mobile drill-in hooks without changing frameworks", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('id="mobile-back"');
+    expect(html).toContain("mobile-detail-open");
+    expect(html).toContain("isMobileViewport");
+    expect(html).toContain("setMobileDetailOpen");
+    expect(html).toContain("data-mobile-primary");
+    expect(html).not.toContain("react");
+    expect(html).not.toContain("next/");
+  });
 });
