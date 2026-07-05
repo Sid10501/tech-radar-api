@@ -1,6 +1,6 @@
 # iOS Shortcut — Research This
 
-One tap from any Instagram, TikTok, or YouTube post to a structured finding in your knowledge base.
+One tap from any Instagram, TikTok, YouTube, or public Google Drive PDF link to a structured finding in your knowledge base.
 
 ---
 
@@ -21,7 +21,7 @@ Have these ready before building the shortcut.
 2. Build the 3 actions below in order
 3. Tap **ⓘ** → enable **Show in Share Sheet** → Receive: **URLs**
 
-Then: on any Instagram/TikTok/YouTube post, tap **Share** → **Research This** → done.
+Then: on any Instagram/TikTok/YouTube post or public Drive PDF, tap **Share** → **Research This** → done.
 
 ---
 

@@ -6,6 +6,8 @@ dist/
 tmp/
 *.log
 *.tsbuildinfo
+.playwright-cli/
+output/
 .superpowers/
 MEMORY.md
 CLAUDE.md

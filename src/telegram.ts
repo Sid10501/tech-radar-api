@@ -38,7 +38,7 @@ export async function handleTelegramUpdate(update: Record<string, unknown>): Pro
     reply(chatId, [
       "🔭 *Tech Radar Bot*",
       "",
-      "Send any Instagram, YouTube, or TikTok URL to research it\\.",
+      "Send any Instagram, YouTube, TikTok, or public Google Drive PDF URL to research it\\.",
       "",
       "Commands:",
       "`/status` — last 5 runs",
