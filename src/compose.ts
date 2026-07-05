@@ -42,6 +42,25 @@ export function composeFinding(input: {
   const visualTextBlock = extract.visual_text?.trim()
     ? `\nOn-screen text / OCR:\n${extract.visual_text.slice(0, 400)}\n`
     : "";
+  const chaptersBlock = (extract.chapters ?? []).length > 0
+    ? `\nLearning chapters:\n${extract.chapters!.slice(0, 20).map((chapter) => {
+        const title = chapter.title.trim() || "Untitled";
+        return `- ${formatTimestamp(chapter.start_time)} ${title}`;
+      }).join("\n")}\n`
+    : "";
+  const extractionMethodsBlock = (extract.extraction_methods ?? []).length > 0
+    ? `\nExtraction path:\n${extract.extraction_methods!.map((method) => `- ${method}`).join("\n")}\n`
+    : "";
+  const sourceLinksBlock = (extract.source_links ?? []).length > 0
+    ? `\nSource links found:\n${extract.source_links!.map((link) => `- ${link}`).join("\n")}\n`
+    : "";
+  const topCommentsBlock = (extract.top_comments ?? []).length > 0
+    ? `\nTop comments:\n${extract.top_comments!.slice(0, 5).map((comment) => {
+        const author = comment.author?.trim() || "unknown";
+        const likes = typeof comment.like_count === "number" ? ` · ${comment.like_count} likes` : "";
+        return `- ${author}${likes}: ${comment.text.slice(0, 220)}`;
+      }).join("\n")}\n`
+    : "";
 
   const body = `# ${title}
 
@@ -59,7 +78,11 @@ ${research.what} ${research.why}
 
 Key claims from transcript:
 ${(extract.transcript ?? "").slice(0, 400) || "- (no transcript available)"}
+${chaptersBlock}
 ${visualTextBlock}
+${extractionMethodsBlock}
+${sourceLinksBlock}
+${topCommentsBlock}
 
 ## What it actually is
 
@@ -95,4 +118,15 @@ ${implementation.follow_ups.map((f) => `- [ ] ${f}`).join("\n")}
 `;
 
   return { filename, body };
+}
+
+function formatTimestamp(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds || 0));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const rest = safe % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+  }
+  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
 }

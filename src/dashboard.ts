@@ -496,6 +496,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       <div class="logo"><div class="mark">TR</div><div>Tech Radar</div></div>
       <input id="search" class="search" placeholder="Search findings, tools, sources, or project fit">
       <div class="top-actions">
+        <button id="release-notes" class="button">Release notes</button>
         <button id="refresh" class="button" title="Refresh findings">Refresh</button>
         <button id="unlock" class="button">Unlock Sid view</button>
         <button id="add-url" class="button primary">Add URL</button>
@@ -529,7 +530,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map() };
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), view: "findings", releaseNotes: [], releaseNotesLoading: false };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -676,21 +677,71 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     function extractionDetails(d) {
       const shown = d.sections.shown || "";
-      const transcript = textAfter(shown, "Key claims from transcript:", "On-screen text / OCR:");
-      const ocr = textAfter(shown, "On-screen text / OCR:");
+      const transcript = textAfterAny(shown, "Key claims from transcript:", ["Learning chapters:", "On-screen text / OCR:", "Extraction path:", "Source links found:", "Top comments:"]);
+      const chapters = textAfterAny(shown, "Learning chapters:", ["On-screen text / OCR:", "Extraction path:", "Source links found:", "Top comments:"]);
+      const ocr = textAfterAny(shown, "On-screen text / OCR:", ["Extraction path:", "Source links found:", "Top comments:"]);
+      const extractionPath = textAfterAny(shown, "Extraction path:", ["Source links found:", "Top comments:"]);
+      const sourceLinks = textAfterAny(shown, "Source links found:", ["Top comments:"]);
+      const comments = textAfterAny(shown, "Top comments:", []);
       const caption = textAfter(shown, "> Caption:", "Key claims from transcript:");
       const blocks = [];
       if (caption) blocks.push(\`<details><summary>Caption</summary><div class="details-content markdown">\${markdownToHtml(caption)}</div></details>\`);
       if (transcript) blocks.push(\`<details><summary>Transcript</summary><div class="details-content markdown">\${markdownToHtml(transcript)}</div></details>\`);
+      if (chapters) blocks.push(\`<details open><summary>Learning chapters</summary><div class="details-content markdown">\${markdownToHtml(chapters)}</div></details>\`);
       if (ocr) blocks.push(\`<details><summary>OCR text</summary><div class="details-content markdown">\${markdownToHtml(ocr)}</div></details>\`);
       else blocks.push('<details><summary>OCR text</summary><div class="details-content">No on-screen text was captured for this finding.</div></details>');
+      if (extractionPath) blocks.push(\`<details><summary>Extraction path</summary><div class="details-content markdown">\${markdownToHtml(extractionPath)}</div></details>\`);
+      if (sourceLinks) blocks.push(\`<details><summary>Source links</summary><div class="details-content markdown">\${markdownToHtml(sourceLinks)}</div></details>\`);
+      if (comments) blocks.push(\`<details><summary>Top comments</summary><div class="details-content markdown">\${markdownToHtml(comments)}</div></details>\`);
       blocks.push(\`<details><summary>Full finding markdown</summary><div class="details-content markdown">\${markdownToHtml(d.markdown)}</div></details>\`);
       return blocks.join("");
+    }
+
+    function textAfterAny(source, marker, untilMarkers) {
+      const value = source || "";
+      const start = value.indexOf(marker);
+      if (start < 0) return "";
+      const after = value.slice(start + marker.length);
+      const indexes = (untilMarkers || []).map((until) => after.indexOf(until)).filter((index) => index >= 0);
+      const end = indexes.length ? Math.min(...indexes) : after.length;
+      return after.slice(0, end).trim();
     }
 
     function sectionPanel(title, markdown) {
       if (!markdown || !markdown.trim()) return "";
       return '<div class="panel"><div class="panel-head">' + escapeHtml(title) + '</div><div class="panel-body markdown">' + markdownToHtml(markdown) + '</div></div>';
+    }
+
+    function renderReleaseNotes() {
+      const detail = $("detail");
+      if (state.releaseNotesLoading) {
+        detail.innerHTML = '<div class="detail"><section class="hero"><div class="hero-main"><div class="skeleton detail-line" style="width: 180px"></div><div class="skeleton detail-line" style="height: 54px; width: 72%; max-width: 760px"></div><div class="skeleton detail-line" style="width: 86%"></div></div></section></div>';
+        return;
+      }
+      const panels = state.releaseNotes.map((release) => sectionPanel(
+        release.date + " - " + release.title,
+        release.bodyMarkdown,
+      )).join("");
+      detail.innerHTML = \`
+        <div class="detail">
+          <section class="hero">
+            <div class="hero-main">
+              <div class="breadcrumb">Product loop / Release notes</div>
+              <div class="headline">Release notes</div>
+              <div class="summary">Improvements shipped into the radar pipeline and dashboard.</div>
+              <div class="hero-actions">
+                <button class="inline-action primary" data-action="back-findings">Back to findings</button>
+              </div>
+            </div>
+          </section>
+          <section class="body-grid">
+            <div>\${panels || '<div class="empty">No release notes published yet.</div>'}</div>
+          </section>
+        </div>\`;
+      detail.querySelector("[data-action='back-findings']")?.addEventListener("click", () => {
+        state.view = "findings";
+        renderDetail();
+      });
     }
 
     function privateSummary(f, d) {
@@ -704,6 +755,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     function renderDetail() {
+      if (state.view === "release-notes") {
+        renderReleaseNotes();
+        return;
+      }
       const detail = $("detail");
       if (state.loading) {
         detail.innerHTML = '<div class="detail"><section class="hero"><div class="hero-main"><div class="skeleton detail-line" style="width: 180px"></div><div class="skeleton detail-line" style="height: 54px; width: 72%; max-width: 760px"></div><div class="skeleton detail-line" style="width: 86%"></div><div class="skeleton detail-line" style="width: 64%"></div></div></section></div>';
@@ -832,6 +887,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     async function loadFindings() {
+      state.view = "findings";
       state.loading = true;
       renderList();
       renderDetail();
@@ -851,6 +907,23 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       else renderDetail();
     }
 
+    async function loadReleaseNotes() {
+      state.view = "release-notes";
+      state.releaseNotesLoading = true;
+      renderReleaseNotes();
+      const res = await fetch("/api/public/release-notes", { credentials: "same-origin" });
+      state.releaseNotesLoading = false;
+      if (!res.ok) {
+        state.releaseNotes = [];
+        showToast("Could not load release notes.");
+        renderReleaseNotes();
+        return;
+      }
+      const body = await res.json();
+      state.releaseNotes = body.releases || [];
+      renderReleaseNotes();
+    }
+
     $("search").addEventListener("input", (event) => {
       state.query = event.target.value;
       const previousId = state.selectedId;
@@ -865,7 +938,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       renderList();
       if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
     }));
-    $("refresh").addEventListener("click", () => loadFindings());
+    $("refresh").addEventListener("click", () => state.view === "release-notes" ? loadReleaseNotes() : loadFindings());
+    $("release-notes").addEventListener("click", () => loadReleaseNotes());
 
     async function unlockPrivateView() {
       if (state.privateUnlocked) return true;

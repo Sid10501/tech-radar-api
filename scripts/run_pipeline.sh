@@ -17,12 +17,14 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP_DIR="${TMPDIR:-/tmp}/tech-radar-deps"
-STAMP_FILE="$STAMP_DIR/installed.v1"
+STAMP_FILE="$STAMP_DIR/installed.v2"
 
 deps_available() {
   python3 - <<'PY' >/dev/null 2>&1
 import curl_cffi
 import faster_whisper
+import pypdf
+import youtube_transcript_api
 import yt_dlp
 PY
 }
@@ -43,6 +45,8 @@ if [[ ! -f "$STAMP_FILE" ]] || ! deps_available; then
       fi
       python3 -m pip install "${PIP_FLAGS[@]}" \
         "yt-dlp>=2025.1.1" \
+        "youtube-transcript-api>=1.2.4" \
+        "pypdf>=5.0.0" \
         "faster-whisper>=1.0" \
         "curl_cffi>=0.7" >&2 || {
           echo "[tech-radar] WARNING: dependency install failed; extraction may be limited" >&2

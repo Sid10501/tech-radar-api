@@ -24,6 +24,33 @@ export function llmVisualTextBlock(extract: ExtractResult): string {
   return wrapAsUntrusted(raw, { label: "post on-screen text / OCR" });
 }
 
+export function llmCommentsBlock(extract: ExtractResult): string {
+  const comments = extract.top_comments ?? [];
+  if (comments.length === 0) return "";
+  const raw = comments
+    .map((comment, index) => {
+      const author = comment.author?.trim() || "unknown";
+      const likes = typeof comment.like_count === "number" ? `, ${comment.like_count} likes` : "";
+      return `${index + 1}. ${author}${likes}: ${comment.text}`;
+    })
+    .join("\n");
+  return wrapAsUntrusted(raw, { label: "YouTube comments" });
+}
+
+export function llmChaptersBlock(extract: ExtractResult): string {
+  const chapters = extract.chapters ?? [];
+  if (chapters.length === 0) return "";
+  const raw = chapters
+    .slice(0, 30)
+    .map((chapter, index) => {
+      const start = formatTimestamp(chapter.start_time);
+      const end = typeof chapter.end_time === "number" ? `-${formatTimestamp(chapter.end_time)}` : "";
+      return `${index + 1}. ${start}${end}: ${chapter.title}`;
+    })
+    .join("\n");
+  return wrapAsUntrusted(raw, { label: "YouTube chapters" });
+}
+
 export function llmTitleBlock(extract: ExtractResult): string {
   if (extract.title_for_llm) return extract.title_for_llm;
   if (extract.title?.trim()) {
@@ -37,7 +64,10 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
   const transcript = llmTranscriptBlock(extract);
   const visualText = llmVisualTextBlock(extract);
   const title = llmTitleBlock(extract);
+  const comments = llmCommentsBlock(extract);
+  const chapters = llmChaptersBlock(extract);
   const hashtags = (extract.hashtags ?? []).join(", ") || "(none)";
+  const sourceLinks = (extract.source_links ?? []).filter(Boolean);
 
   const parts = [
     "Research the following technology extracted from a social media post.",
@@ -51,14 +81,24 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
     title,
   ];
 
+  if (sourceLinks.length > 0) {
+    parts.push("", "Source links found:", sourceLinks.map((link) => `- ${link}`).join("\n"));
+  }
+
   if (caption) {
     parts.push("", "Post caption:", caption);
   }
   if (transcript) {
     parts.push("", "Transcript excerpt:", transcript);
   }
+  if (chapters) {
+    parts.push("", "Learning chapters:", chapters);
+  }
   if (visualText) {
     parts.push("", "On-screen text / OCR:", visualText);
+  }
+  if (comments) {
+    parts.push("", "Top comments:", comments);
   }
 
   parts.push(
@@ -67,4 +107,11 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
   );
 
   return parts.join("\n");
+}
+
+function formatTimestamp(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds || 0));
+  const minutes = Math.floor(safe / 60);
+  const rest = safe % 60;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
 }

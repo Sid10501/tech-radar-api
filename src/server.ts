@@ -4,6 +4,7 @@ import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError 
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 import { getAiMemoryDir, getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings } from "./findings.js";
+import { listReleaseNotes } from "./releaseNotes.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 
 function getCookieValue(cookieHeader: unknown, name: string): string | undefined {
@@ -148,6 +149,10 @@ export function buildServer() {
   app.get("/api/public/findings", async () => {
     await ensureAiMemoryCheckout();
     return { findings: listPublicFindings() };
+  });
+
+  app.get("/api/public/release-notes", async () => {
+    return { releases: listReleaseNotes() };
   });
 
   app.get<{ Params: { id: string } }>("/api/public/findings/:id", async (request, reply) => {

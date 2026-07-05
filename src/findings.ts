@@ -26,6 +26,7 @@ export interface FindingSummary {
     platform: string;
     label: string | null;
     url: string | null;
+    classification: "public_artifact" | "dm_gated" | "unknown";
   };
   targetProject: string;
   verdict: string;
@@ -126,7 +127,66 @@ function firstUrl(body: string, label: string): string | null {
   return match?.[1]?.replace(/[),.]+$/, "") ?? null;
 }
 
-function scoreFinding(body: string, evidence: FindingEvidence, targetProject: string, verdict: string): FindingQuality {
+function isRealGithubRepoUrl(rawUrl: string | null | undefined): boolean {
+  if (!rawUrl) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    if (host !== "github.com") return false;
+    const [owner, repo] = parsed.pathname.split("/").filter(Boolean);
+    if (!owner || !repo) return false;
+    const blocked = new Set([
+      "about",
+      "collections",
+      "contact",
+      "enterprise",
+      "events",
+      "explore",
+      "features",
+      "github-copilot",
+      "login",
+      "marketplace",
+      "new",
+      "notifications",
+      "orgs",
+      "pricing",
+      "search",
+      "settings",
+      "signup",
+      "sponsors",
+      "topics",
+      "trending",
+    ]);
+    return !blocked.has(owner.toLowerCase()) && !blocked.has(repo.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function githubUrls(body: string): string[] {
+  return [...body.matchAll(/https?:\/\/github\.com\/[^\s)\],]+/gi)].map((match) => match[0]);
+}
+
+function hasDmGatedSignal(body: string): boolean {
+  return /\b(comment|reply|send|sent|dm|dms)\b.{0,80}\b(dm|dms|repo|link|access|agent|template)\b|\b(dm|dms)\b.{0,80}\b(comment|reply|send|sent|repo|link|access)/i.test(body);
+}
+
+function classifySourceEvidence(
+  body: string,
+  evidence: FindingEvidence,
+): FindingSummary["source"]["classification"] {
+  if (evidence.repo || evidence.docs) return "public_artifact";
+  if (hasDmGatedSignal(body)) return "dm_gated";
+  return "unknown";
+}
+
+function scoreFinding(
+  body: string,
+  evidence: FindingEvidence,
+  targetProject: string,
+  verdict: string,
+  classification: FindingSummary["source"]["classification"],
+): FindingQuality {
   const reasons: string[] = [];
   let score = 20;
 
@@ -154,6 +214,14 @@ function scoreFinding(body: string, evidence: FindingEvidence, targetProject: st
     score += 10;
     reasons.push("project fit");
   }
+  if (classification === "public_artifact") {
+    score += 35;
+    reasons.push("source-backed");
+  }
+  if (classification === "dm_gated") {
+    score -= 20;
+    reasons.push("dm gated");
+  }
 
   const lower = body.toLowerCase();
   if (lower.includes("no links found") || lower.includes("no confirmed github url") || lower.includes("unverified")) {
@@ -164,7 +232,7 @@ function scoreFinding(body: string, evidence: FindingEvidence, targetProject: st
     score -= 10;
     reasons.push("low repo signal");
   }
-  if (verdict.includes("#skip")) {
+  if (verdict.includes("#skip") && classification !== "public_artifact") {
     score -= 25;
     reasons.push("skip verdict");
   }
@@ -174,9 +242,19 @@ function scoreFinding(body: string, evidence: FindingEvidence, targetProject: st
   return { score, level, reasons };
 }
 
-function recommendedAction(quality: FindingQuality, targetProject: string, verdict: string): FindingSummary["recommendedAction"] {
-  if (verdict.includes("#skip") || targetProject === "none") return "Skip";
+function recommendedAction(
+  quality: FindingQuality,
+  targetProject: string,
+  verdict: string,
+  evidence: FindingEvidence,
+  classification: FindingSummary["source"]["classification"],
+): FindingSummary["recommendedAction"] {
+  if (classification === "dm_gated") return "Skip";
+  if ((verdict.includes("#skip") || targetProject === "none") && !(classification === "public_artifact" && (evidence.repo || evidence.docs))) {
+    return "Skip";
+  }
   if (quality.level === "weak") return "Retry";
+  if (verdict.includes("#skip") || targetProject === "none") return "Review";
   if (quality.level === "strong" && targetProject && targetProject !== "unknown") return "Create task";
   if (quality.level === "review") return "Review";
   return "Backlog";
@@ -244,17 +322,30 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const verdict = markdown.match(/^- Verdict:\s*`?([^`\n]+)`?/m)?.[1]?.trim() || "unknown";
   const repoUrl = firstUrl(markdown, "Repo");
   const docsUrl = firstUrl(markdown, "Docs");
-  const captionText = markerText(shown, "> Caption:", ["Key claims from transcript:", "On-screen text / OCR:"]);
-  const transcriptText = markerText(shown, "Key claims from transcript:", ["On-screen text / OCR:"]);
-  const ocrText = markerText(shown, "On-screen text / OCR:");
+  const evidenceMarkers = [
+    "Learning chapters:",
+    "On-screen text / OCR:",
+    "Extraction path:",
+    "Source links found:",
+    "Top comments:",
+  ];
+  const captionText = markerText(shown, "> Caption:", ["Key claims from transcript:", ...evidenceMarkers]);
+  const transcriptText = markerText(shown, "Key claims from transcript:", evidenceMarkers);
+  const ocrText = markerText(shown, "On-screen text / OCR:", [
+    "Extraction path:",
+    "Source links found:",
+    "Top comments:",
+    "Learning chapters:",
+  ]);
   const evidence: FindingEvidence = {
     caption: hasCapturedText(captionText, /^(none|no caption available)$/i),
     transcript: hasCapturedText(transcriptText, /^[-\s]*(\(no transcript available\)|no transcript available)$/i),
     ocr: hasCapturedText(ocrText, /^[-\s]*(\(no on-screen text available\)|no on-screen text available|not captured)$/i),
-    repo: Boolean(repoUrl) || /https?:\/\/github\.com\//i.test(markdown),
+    repo: isRealGithubRepoUrl(repoUrl) || isRealGithubRepoUrl(sourceUrl) || githubUrls(markdown).some(isRealGithubRepoUrl),
     docs: Boolean(docsUrl),
   };
-  const quality = scoreFinding(markdown, evidence, targetProject, verdict);
+  const classification = classifySourceEvidence(markdown, evidence);
+  const quality = scoreFinding(markdown, evidence, targetProject, verdict, classification);
   const summary = stripMarkdown(tldr).slice(0, 420) || "No summary available.";
 
   return {
@@ -264,13 +355,13 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     title,
     saved,
     tags,
-    source: { platform, label: sourceLabel, url: sourceUrl },
+    source: { platform, label: sourceLabel, url: sourceUrl, classification },
     targetProject,
     verdict,
     summary,
     evidence,
     quality,
-    recommendedAction: recommendedAction(quality, targetProject, verdict),
+    recommendedAction: recommendedAction(quality, targetProject, verdict, evidence, classification),
   };
 }
 

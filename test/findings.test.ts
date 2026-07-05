@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings, parseFindingMarkdown } from "../src/findings.js";
+import { getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings, parseFindingMarkdown, toPublicFinding } from "../src/findings.js";
 
 const SAMPLE_FINDING = `# Ponytail agent rubric
 
@@ -136,6 +136,28 @@ describe("parseFindingMarkdown()", () => {
     expect(finding.evidence.ocr).toBe(false);
   });
 
+  it("does not fold learning evidence blocks into OCR evidence", () => {
+    const finding = parseFindingMarkdown(
+      "20260615-video-by-shawnchee.md",
+      SAMPLE_FINDING.replace(
+        "On-screen text / OCR:\nToken usage down\nsmallest useful diff",
+        [
+          "On-screen text / OCR:",
+          "not captured",
+          "",
+          "Learning chapters:",
+          "- 00:00 Setup",
+          "",
+          "Extraction path:",
+          "- youtube-transcript-api",
+        ].join("\n"),
+      ),
+    );
+
+    expect(finding.evidence.transcript).toBe(true);
+    expect(finding.evidence.ocr).toBe(false);
+  });
+
   it("treats skip verdicts as skip actions even when quality is weak", () => {
     const finding = parseFindingMarkdown(
       "20260615-video-by-shawnchee.md",
@@ -158,6 +180,84 @@ describe("parseFindingMarkdown()", () => {
     );
 
     expect(finding.tags).toEqual(["instagram", "coding"]);
+  });
+
+  it("treats direct GitHub findings as source-backed without requiring video evidence", () => {
+    const finding = parseFindingMarkdown(
+      "20260705-github-agent.md",
+      [
+        "# GitHub Agent",
+        "",
+        "**Source:** github · [Repo](https://github.com/example/github-agent)",
+        "**Saved:** 20260705",
+        "**Tags:** github, agent",
+        "",
+        "## TL;DR",
+        "",
+        "A direct repository for an agent workflow helper.",
+        "",
+        "## What it actually is",
+        "",
+        "- What: A source-backed GitHub project.",
+        "- GitHub stars: 450 · License: MIT · Archived: no",
+        "",
+        "## Links",
+        "",
+        "- Repo: https://github.com/example/github-agent",
+        "- Docs: https://github.com/example/github-agent#readme",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: ai-memory",
+        "- Verdict: `#try-soon`",
+      ].join("\n"),
+    );
+
+    expect(finding.source.classification).toBe("public_artifact");
+    expect(finding.evidence.repo).toBe(true);
+    expect(finding.quality.level).toBe("strong");
+    expect(finding.recommendedAction).toBe("Create task");
+    expect(toPublicFinding(finding).quality.level).not.toBe("weak");
+  });
+
+  it("does not count GitHub search pages as repository evidence", () => {
+    const finding = parseFindingMarkdown(
+      "20260705-search-placeholder.md",
+      SAMPLE_FINDING.replace("- Repo: https://github.com/example/ponytail", "- Repo: https://github.com/search?q=ponytail+agent"),
+    );
+
+    expect(finding.evidence.repo).toBe(false);
+    expect(finding.source.classification).toBe("unknown");
+  });
+
+  it("classifies DM-gated posts with no public artifact as weak skip candidates", () => {
+    const finding = parseFindingMarkdown(
+      "20260705-dm-gated.md",
+      SAMPLE_FINDING
+        .replace("Ponytail is useful as operating-system guidance, not a replacement for Superpowers.", "The post asks viewers to comment AGENT and says the repo will be sent by DM.")
+        .replace("this skill mimics that one senior dev with glasses and ponytail", "comment AGENT and I will DM you the repo")
+        .replace("- Repo: https://github.com/example/ponytail", "- (no links found)")
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#skip`"),
+    );
+
+    expect(finding.source.classification).toBe("dm_gated");
+    expect(finding.quality.level).toBe("weak");
+    expect(finding.quality.reasons).toContain("dm gated");
+    expect(finding.recommendedAction).toBe("Skip");
+  });
+
+  it("routes stale skip verdicts with a real public artifact back to review", () => {
+    const finding = parseFindingMarkdown(
+      "20260705-stale-skip.md",
+      SAMPLE_FINDING
+        .replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** github · [Repo](https://github.com/example/ponytail)")
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#skip`"),
+    );
+
+    expect(finding.source.classification).toBe("public_artifact");
+    expect(finding.recommendedAction).toBe("Review");
   });
 });
 

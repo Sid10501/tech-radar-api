@@ -44,6 +44,8 @@ describe("server routes", () => {
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.body).toContain("Tech Radar");
     expect(res.body).toContain("dashboard-root");
+    expect(res.body).toContain("Release notes");
+    expect(res.body).toContain("/api/public/release-notes");
     expect(res.body).toContain("Raw extraction");
     expect(res.body).toContain("data-filter=\"repo\"");
     expect(res.body).toContain("data-filter=\"project\"");
@@ -87,6 +89,19 @@ describe("server routes", () => {
     expect(body.findings).toHaveLength(1);
     expect(body.findings[0].title).toBe("Public Sample");
     expect(body.findings[0]).not.toHaveProperty("targetProject");
+  });
+
+  it("GET /api/public/release-notes returns release notes without auth", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/public/release-notes" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body.releases)).toBe(true);
+    expect(body.releases.length).toBeGreaterThan(0);
+    expect(body.releases[0]).toMatchObject({
+      date: "2026-07-05",
+      title: "Ever-Improving Product Loop",
+    });
   });
 
   it("GET /api/public/findings/:id returns sanitized markdown without auth", async () => {

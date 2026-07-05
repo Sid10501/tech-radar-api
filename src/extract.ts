@@ -5,7 +5,7 @@ import path from "node:path";
 
 export interface ExtractResult {
   url: string;
-  platform: "tiktok" | "instagram" | "youtube" | "other";
+  platform: "tiktok" | "instagram" | "youtube" | "google_drive" | "other";
   status: "ok" | "partial" | "failed";
   error: string | null;
   title: string | null;
@@ -14,11 +14,24 @@ export interface ExtractResult {
   hashtags: string[];
   duration_sec: number | null;
   transcript: string | null;
-  transcript_source: "whisper" | "subs" | null;
+  transcript_source: "whisper" | "subs" | "document" | null;
   visual_text: string | null;
   visual_text_source: "ocr" | null;
   upload_date: string | null;
   raw_metadata_keys: string[];
+  source_links?: string[];
+  extraction_methods?: string[];
+  chapters?: Array<{
+    title: string;
+    start_time: number;
+    end_time?: number | null;
+  }>;
+  top_comments?: Array<{
+    author: string | null;
+    text: string;
+    like_count: number | null;
+    timestamp?: number | string | null;
+  }>;
   /** Pre-wrapped by extract_post.py when pipeline uses ai-memory llm-defense */
   caption_for_llm?: string | null;
   transcript_for_llm?: string | null;
