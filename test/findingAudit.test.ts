@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FindingSummary, PublicFindingSummary } from "../src/findings.js";
-import { auditFindings, auditPublicFindings, enrichmentStatus, filterCounts, filterCountsFromPublic } from "../src/findingAudit.js";
+import { auditFindings, auditPublicFindings, enrichmentProfile, enrichmentStatus, filterCounts, filterCountsFromPublic } from "../src/findingAudit.js";
 
 function finding(overrides: Partial<FindingSummary> = {}): FindingSummary {
   return {
@@ -68,6 +68,14 @@ describe("finding audit helpers", () => {
       needsEnrichment: 1,
       missingTranscript: 2,
       missingRepoOrDocs: 1,
+      enrichmentReasons: {
+        weak_quality: 1,
+        missing_repo_or_docs: 1,
+        missing_transcript: 2,
+        missing_ocr: 2,
+        source_uncertainty: 0,
+        low_repo_signal: 0,
+      },
     });
   });
 
@@ -90,6 +98,14 @@ describe("finding audit helpers", () => {
       needsEnrichment: 1,
       missingTranscript: 2,
       missingRepoOrDocs: 1,
+      enrichmentReasons: {
+        weak_quality: 1,
+        missing_repo_or_docs: 1,
+        missing_transcript: 2,
+        missing_ocr: 1,
+        source_uncertainty: 0,
+        low_repo_signal: 0,
+      },
     });
     expect(audit).not.toHaveProperty("actions");
     expect(filterCountsFromPublic(rows)).toEqual({
@@ -118,6 +134,24 @@ describe("finding audit helpers", () => {
         }),
       ),
     ).toBe("ready");
+  });
+
+  it("returns public-safe enrichment reasons separately from private skip reasons", () => {
+    const profile = enrichmentProfile(
+      finding({
+        targetProject: "none",
+        verdict: "#skip",
+        recommendedAction: "Skip",
+        quality: { score: 12, level: "weak", reasons: ["source uncertainty", "low repo signal"] },
+      }),
+    );
+
+    expect(profile).toEqual({
+      status: "skip",
+      publicStatus: "needs-enrichment",
+      reasons: ["weak_quality", "missing_repo_or_docs", "missing_transcript", "missing_ocr", "source_uncertainty", "low_repo_signal"],
+      privateReasons: ["target_project_none", "skip_verdict", "recommended_skip"],
+    });
   });
 
   it("computes filter counts used by the dashboard", () => {

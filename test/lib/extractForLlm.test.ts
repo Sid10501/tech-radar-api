@@ -55,4 +55,30 @@ describe("extractForLlm", () => {
     expect(msg).toContain("On-screen text / OCR:");
     expect(msg).toContain("FrameAgent");
   });
+
+  it("includes enriched link candidates as untrusted evidence", () => {
+    const msg = buildResearchUserMessage({
+      ...baseExtract,
+      enriched_links: {
+        confirmed: {
+          github: "https://github.com/marcosricopeng/palmier",
+          docs: "https://palmier.app/docs",
+          npm: null,
+        },
+        candidates: [
+          {
+            kind: "github",
+            url: "https://github.com/marcosricopeng/palmier",
+            source: "visual_text",
+            confidence: "confirmed",
+          },
+        ],
+        warnings: [],
+      },
+    });
+
+    expect(msg).toContain("Enriched links:");
+    expect(msg).toContain("<external_content");
+    expect(msg).toContain("marcosricopeng/palmier");
+  });
 });

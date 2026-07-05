@@ -890,12 +890,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         }
       });
       const audit = state.audit;
+      const enrichmentReasons = audit?.enrichmentReasons || {};
       $("batch-health").innerHTML = audit
         ? [
             ["Latest", audit.total ?? 0],
             ["Repo/docs", (audit.evidence?.repo ?? 0) + (audit.evidence?.docs ?? 0)],
             ["Transcript", audit.evidence?.transcript ?? 0],
             ["Enrich", audit.needsEnrichment ?? 0],
+            ["Missing links", enrichmentReasons.missing_repo_or_docs ?? 0],
+            ["Source uncertainty", enrichmentReasons.source_uncertainty ?? 0],
           ].map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ': ' + escapeHtml(value) + '</div>').join("")
         : "";
       $("count").textContent = state.loading ? "Loading" : visibleFindings().length + " of " + state.findings.length;
@@ -1042,7 +1045,6 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
               <div class="summary">\${escapeHtml(f.summary)}</div>
               <div class="hero-actions">
                 \${f.source.url ? '<a class="inline-action primary" href="' + escapeHtml(f.source.url) + '" target="_blank" rel="noopener">Open source</a>' : ""}
-                <a class="inline-action" href="https://github.com/Sid10501/ai-memory/blob/master/\${escapeHtml(f.path)}" target="_blank" rel="noopener">Open markdown</a>
                 \${state.privateUnlocked ? '<button class="inline-action" data-action="copy-next">Copy next step</button>' : '<button class="inline-action" data-action="unlock">Unlock Sid fit</button>'}
               </div>
             </div>

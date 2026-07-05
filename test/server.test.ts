@@ -25,6 +25,7 @@ vi.mock("../src/git.js", () => ({
 }));
 
 const { buildServer } = await import("../src/server.js");
+const runnerMock = await import("../src/runner.js");
 
 describe("server routes", () => {
   const app = buildServer();
@@ -394,6 +395,92 @@ describe("server routes", () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.json().markdown).toContain("# Sample");
+    });
+
+    it("POST /api/admin/enrich/:id force-requeues the finding source URL", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-enrich-one-"));
+      const findingsDir = path.join(dir, "tech-radar", "findings");
+      fs.mkdirSync(findingsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(findingsDir, "sample.md"),
+        [
+          "# Sample",
+          "",
+          "**Source:** instagram · [Creator](https://www.instagram.com/p/sample/)",
+          "**Saved:** 20260619",
+          "**Tags:** instagram",
+          "",
+          "## TL;DR",
+          "",
+          "Weak sample.",
+        ].join("\n"),
+      );
+      process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/admin/enrich/sample.md",
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(202);
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.instagram.com/p/sample/", { force: true });
+      expect(res.json()).toMatchObject({ queued: true, runId: "mock-run-id" });
+    });
+
+    it("POST /api/admin/enrich-weak force-requeues weak non-skip findings only", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-enrich-weak-"));
+      const findingsDir = path.join(dir, "tech-radar", "findings");
+      fs.mkdirSync(findingsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(findingsDir, "weak.md"),
+        [
+          "# Weak",
+          "",
+          "**Source:** instagram · [Creator](https://www.instagram.com/p/weak/)",
+          "**Saved:** 20260619",
+          "**Tags:** instagram",
+          "",
+          "## TL;DR",
+          "",
+          "Weak sample.",
+          "",
+          "## What the post showed",
+          "",
+          "> Caption: weak",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(findingsDir, "skip.md"),
+        [
+          "# Skip",
+          "",
+          "**Source:** instagram · [Creator](https://www.instagram.com/p/skip/)",
+          "**Saved:** 20260618",
+          "**Tags:** instagram",
+          "",
+          "## TL;DR",
+          "",
+          "Skipped sample.",
+          "",
+          "## Fit for Sid",
+          "",
+          "- Target project: none",
+          "- Verdict: `#skip`",
+        ].join("\n"),
+      );
+      process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/admin/enrich-weak",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { limit: 10 },
+      });
+
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toMatchObject({ queued: 1 });
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.instagram.com/p/weak/", { force: true });
     });
   });
 });

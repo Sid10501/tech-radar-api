@@ -50,4 +50,19 @@ describe("dashboard HTML", () => {
     expect(html).toContain("position: sticky");
     expect(html).toContain("top: 0");
   });
+
+  it("does not link public users to raw unsanitized markdown", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).not.toContain("Open markdown");
+    expect(html).not.toContain("github.com/Sid10501/ai-memory/blob/master");
+  });
+
+  it("renders enrichment reason count hooks from audit data", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("enrichmentReasons");
+    expect(html).toContain("Missing links");
+    expect(html).toContain("Source uncertainty");
+  });
 });

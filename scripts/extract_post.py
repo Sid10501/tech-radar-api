@@ -36,6 +36,7 @@ JSON schema:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -201,6 +202,8 @@ def transcribe(audio_path: Path) -> tuple[str | None, str | None]:
 
 # --- On-screen text OCR ------------------------------------------------------
 
+IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "avif"}
+
 def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:
     try:
         value = int(os.environ.get(name, str(default)))
@@ -215,6 +218,134 @@ def _float_env(name: str, default: float, minimum: float, maximum: float) -> flo
     except ValueError:
         return default
     return max(minimum, min(maximum, value))
+
+
+def clean_ocr_line(line: str) -> str:
+    return re.sub(r"\s+", " ", line).strip()
+
+
+def merge_text_blocks(blocks: list[str | None]) -> str:
+    seen: set[str] = set()
+    lines: list[str] = []
+    for block in blocks:
+        if not block:
+            continue
+        for line in block.splitlines():
+            clean = clean_ocr_line(line)
+            if len(clean) < 3:
+                continue
+            key = clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(clean)
+    return "\n".join(lines).strip()
+
+
+def collect_image_urls(info: dict | None, meta: dict | None = None) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: object) -> None:
+        if not isinstance(value, str) or not value.startswith("http"):
+            return
+        clean = html.unescape(value).rstrip("),.;")
+        if clean in seen:
+            return
+        lowered = clean.split("?", 1)[0].rsplit(".", 1)[-1].lower()
+        if lowered not in IMAGE_EXTENSIONS:
+            return
+        seen.add(clean)
+        urls.append(clean)
+
+    def walk(node: object) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        add(node.get("thumbnail"))
+        add(node.get("display_url"))
+        ext = str(node.get("ext") or "").lower()
+        if ext in IMAGE_EXTENSIONS:
+            add(node.get("url"))
+        for thumb in node.get("thumbnails") or []:
+            if isinstance(thumb, dict):
+                add(thumb.get("url"))
+        walk(node.get("entries") or [])
+        walk(node.get("requested_downloads") or [])
+
+    walk(info or {})
+    if meta:
+        add(meta.get("og:image") or meta.get("twitter:image"))
+    return urls
+
+
+def download_image_assets(urls: list[str], out_dir: Path) -> tuple[list[Path], list[dict], list[str]]:
+    max_images = _int_env("OCR_MAX_IMAGES", 8, 1, 20)
+    images_dir = out_dir / "ocr-images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    assets: list[dict] = []
+    warnings: list[str] = []
+
+    for index, url in enumerate(urls[:max_images], start=1):
+        ext = url.split("?", 1)[0].rsplit(".", 1)[-1].lower()
+        if ext not in IMAGE_EXTENSIONS:
+            ext = "jpg"
+        path = images_dir / f"image-{index:03d}.{ext}"
+        body = _http_get_bytes(url, timeout=15)
+        if body is None:
+            warnings.append(f"image download failed: {url}")
+            continue
+        try:
+            path.write_bytes(body)
+        except OSError as e:
+            warnings.append(f"image write failed: {e}")
+            continue
+        paths.append(path)
+        assets.append({
+            "type": "image",
+            "source": "metadata",
+            "url": url,
+            "path": str(path),
+            "ocr_text": None,
+            "confidence": "medium",
+        })
+
+    return paths, assets, warnings
+
+
+def _http_get_bytes(url: str, timeout: int = 10) -> bytes | None:
+    try:
+        req = Request(url, headers={"User-Agent": _UA, "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5"})
+        with urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except (URLError, HTTPError, TimeoutError, OSError):
+        return None
+
+
+def extract_image_text(image_paths: list[Path]) -> tuple[str | None, str | None]:
+    if not shutil.which("tesseract"):
+        return None, "ocr skipped: tesseract not installed"
+    blocks: list[str] = []
+    for image_path in image_paths:
+        if not image_path.exists():
+            continue
+        try:
+            result = subprocess.run(
+                ["tesseract", str(image_path), "stdout", "--psm", "6"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+        except Exception:
+            continue
+        blocks.append(result.stdout)
+    text = merge_text_blocks(blocks)
+    return text or None, None
 
 
 def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, str | None]:
@@ -254,8 +385,7 @@ def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, st
     except Exception as e:
         return None, f"ocr frame extraction error: {e.__class__.__name__}: {e}"
 
-    seen: set[str] = set()
-    lines: list[str] = []
+    blocks: list[str] = []
     for frame in sorted(frames_dir.glob("frame-*.png")):
         try:
             result = subprocess.run(
@@ -267,16 +397,9 @@ def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, st
             )
         except Exception:
             continue
-        for line in result.stdout.splitlines():
-            clean = re.sub(r"\s+", " ", line).strip()
-            if len(clean) < 3:
-                continue
-            key = clean.lower()
-            if key not in seen:
-                seen.add(key)
-                lines.append(clean)
+        blocks.append(result.stdout)
 
-    text = "\n".join(lines).strip()
+    text = merge_text_blocks(blocks)
     return text or None, None
 
 
@@ -302,6 +425,8 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         "visual_text_source": None,
         "upload_date": None,
         "raw_metadata_keys": [],
+        "media_assets": [],
+        "extraction_warnings": [],
     }
 
     info, audio_path, video_path, yt_err = run_ytdlp(
@@ -313,6 +438,8 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
     errors: list[str] = []
     if yt_err:
         errors.append(yt_err)
+
+    html_meta: dict | None = None
 
     if info:
         result["raw_metadata_keys"] = sorted(info.keys())
@@ -331,10 +458,10 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
             result["creator"] = result["creator"] or oembed.get("author_name")
             result["caption"] = result["caption"] or oembed.get("title")
             result["hashtags"] = result["hashtags"] or pull_hashtags(oembed.get("title"))
-        meta = try_html_meta(url)
-        if meta:
-            result["title"] = result["title"] or meta.get("og:title") or meta.get("twitter:title")
-            cap = meta.get("og:description") or meta.get("twitter:description") or meta.get("description")
+        html_meta = try_html_meta(url)
+        if html_meta:
+            result["title"] = result["title"] or html_meta.get("og:title") or html_meta.get("twitter:title")
+            cap = html_meta.get("og:description") or html_meta.get("twitter:description") or html_meta.get("description")
             if cap and not result["caption"]:
                 result["caption"] = cap
                 result["hashtags"] = result["hashtags"] or pull_hashtags(cap)
@@ -347,13 +474,41 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         elif w_err:
             errors.append(w_err)
 
+    visual_blocks: list[str] = []
     if do_ocr and video_path and video_path.exists():
         visual_text, ocr_err = extract_visual_text(video_path, out_dir)
         if visual_text:
-            result["visual_text"] = visual_text
-            result["visual_text_source"] = "ocr"
+            visual_blocks.append(visual_text)
+            result["media_assets"].append({
+                "type": "video",
+                "source": "yt-dlp",
+                "path": str(video_path),
+                "url": None,
+                "ocr_text": visual_text,
+                "confidence": "medium",
+            })
         elif ocr_err:
             errors.append(ocr_err)
+
+    if do_ocr:
+        image_urls = collect_image_urls(info, html_meta)
+        image_paths, image_assets, image_warnings = download_image_assets(image_urls, out_dir)
+        result["media_assets"].extend(image_assets)
+        errors.extend(image_warnings)
+        if image_paths:
+            image_text, image_ocr_err = extract_image_text(image_paths)
+            if image_text:
+                visual_blocks.append(image_text)
+                for asset in result["media_assets"]:
+                    if asset.get("type") == "image" and not asset.get("ocr_text"):
+                        asset["ocr_text"] = image_text
+            elif image_ocr_err:
+                errors.append(image_ocr_err)
+
+    merged_visual_text = merge_text_blocks(visual_blocks)
+    if merged_visual_text:
+        result["visual_text"] = merged_visual_text
+        result["visual_text_source"] = "ocr"
 
     if result["caption"] or result["transcript"] or result["visual_text"]:
         result["status"] = "ok"
@@ -364,6 +519,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
 
     if errors:
         result["error"] = " | ".join(errors)
+        result["extraction_warnings"] = errors
 
     return result
 

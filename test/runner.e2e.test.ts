@@ -352,4 +352,156 @@ describe("runPipeline()", () => {
       fs.rmSync(localDir, { recursive: true, force: true });
     }
   });
+
+  it("enriches extracted links before research runs", async () => {
+    const extractResult = {
+      url: "https://www.instagram.com/p/repo-visible/",
+      platform: "instagram",
+      status: "ok",
+      error: null,
+      title: "Palmier carousel",
+      creator: "uncover.ai",
+      caption: "Palmier is open source.",
+      hashtags: [],
+      duration_sec: null,
+      transcript: null,
+      transcript_source: null,
+      visual_text: "Repo: https://github.com/marcosricopeng/palmier",
+      visual_text_source: "ocr",
+      upload_date: "2026-06-19",
+      raw_metadata_keys: [],
+    };
+    const enrichedLinks = {
+      confirmed: { github: "https://github.com/marcosricopeng/palmier", docs: null, npm: null },
+      candidates: [{ kind: "github", url: "https://github.com/marcosricopeng/palmier", source: "visual_text", confidence: "confirmed" }],
+      warnings: [],
+    };
+    let researchExtract: any;
+
+    vi.doMock("../src/extract.js", () => ({
+      extract: vi.fn(async () => extractResult),
+      ExtractError: class ExtractError extends Error {},
+    }));
+    vi.doMock("../src/linkEnrichment.js", () => ({
+      enrichLinksFromExtract: vi.fn(async () => enrichedLinks),
+    }));
+    vi.doMock("../src/agents/research.js", () => ({
+      runResearch: vi.fn(async (extract: any) => {
+        researchExtract = extract;
+        return {
+          what: "Palmier is a local AI video editor.",
+          who: "Marcos Rico Peng",
+          status: "unknown",
+          why: "It exposes timeline editing through Claude.",
+          comparisons: [],
+          links: { github: "https://github.com/marcosricopeng/palmier", docs: null, npm: null },
+          kickstarter: "Clone the repo and test the macOS app.",
+          viability_signals: { github_stars: 42, last_pushed: "2026-06-20T00:00:00Z", open_issues: 2, license: "MIT", archived: false },
+        };
+      }),
+    }));
+    vi.doMock("../src/agents/implementation.js", () => ({
+      runImplementation: vi.fn(async () => ({
+        fit_for_owner: "Good fit for tech-radar-api media enrichment validation.",
+        target_project: "tech-radar-api",
+        implementation_idea_markdown: "Use this as a regression fixture for carousel OCR.",
+        follow_ups: ["Verify the repo still exists"],
+      })),
+    }));
+
+    const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-enrich-"));
+    try {
+      const { runPipeline } = await import("../src/runner.js");
+
+      await runPipeline("https://www.instagram.com/p/repo-visible/", {
+        remoteUrl: bareDir,
+        localDir,
+        aiMemoryDir: FIXTURE_DIR,
+      });
+
+      expect(researchExtract.enriched_links).toEqual(enrichedLinks);
+    } finally {
+      fs.rmSync(localDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses vision OCR fallback before research when media images have no OCR text", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    const extractResult = {
+      url: "https://www.instagram.com/p/vision-fallback/",
+      platform: "instagram",
+      status: "partial",
+      error: null,
+      title: "Carousel with visible repo",
+      creator: "uncover.ai",
+      caption: "New video editor.",
+      hashtags: [],
+      duration_sec: null,
+      transcript: null,
+      transcript_source: null,
+      visual_text: null,
+      visual_text_source: null,
+      upload_date: "2026-06-19",
+      raw_metadata_keys: [],
+      media_assets: [{ type: "image", source: "metadata", path: "/tmp/post.png", url: null, ocr_text: null, confidence: "medium" }],
+    };
+    let researchExtract: any;
+
+    vi.doMock("../src/extract.js", () => ({
+      extract: vi.fn(async () => extractResult),
+      ExtractError: class ExtractError extends Error {},
+    }));
+    vi.doMock("../src/visionOcr.js", () => ({
+      extractTextWithVision: vi.fn(async () => ({
+        text: "Repo: https://github.com/marcosricopeng/palmier",
+        warning: null,
+      })),
+    }));
+    vi.doMock("../src/linkEnrichment.js", () => ({
+      enrichLinksFromExtract: vi.fn(async (extract: any) => ({
+        confirmed: { github: extract.visual_text?.includes("github.com") ? "https://github.com/marcosricopeng/palmier" : null, docs: null, npm: null },
+        candidates: [],
+        warnings: [],
+      })),
+    }));
+    vi.doMock("../src/agents/research.js", () => ({
+      runResearch: vi.fn(async (extract: any) => {
+        researchExtract = extract;
+        return {
+          what: "Palmier is a local AI video editor.",
+          who: "Marcos Rico Peng",
+          status: "unknown",
+          why: "It exposes timeline editing through Claude.",
+          comparisons: [],
+          links: { github: "https://github.com/marcosricopeng/palmier", docs: null, npm: null },
+          kickstarter: "Clone the repo.",
+          viability_signals: { github_stars: 42, last_pushed: "2026-06-20T00:00:00Z", open_issues: 2, license: "MIT", archived: false },
+        };
+      }),
+    }));
+    vi.doMock("../src/agents/implementation.js", () => ({
+      runImplementation: vi.fn(async () => ({
+        fit_for_owner: "Good fit for tech-radar-api media enrichment validation.",
+        target_project: "tech-radar-api",
+        implementation_idea_markdown: "Use this as a regression fixture for vision OCR.",
+        follow_ups: ["Verify the repo still exists"],
+      })),
+    }));
+
+    const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-vision-"));
+    try {
+      const { runPipeline } = await import("../src/runner.js");
+
+      await runPipeline("https://www.instagram.com/p/vision-fallback/", {
+        remoteUrl: bareDir,
+        localDir,
+        aiMemoryDir: FIXTURE_DIR,
+      });
+
+      expect(researchExtract.visual_text).toContain("marcosricopeng/palmier");
+      expect(researchExtract.visual_text_source).toBe("vision_ocr");
+    } finally {
+      fs.rmSync(localDir, { recursive: true, force: true });
+    }
+  });
 });

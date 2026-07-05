@@ -8,6 +8,9 @@ import { runImplementation } from "./agents/implementation.js";
 import { composeFinding } from "./compose.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 import type { AiMemoryRepoOptions } from "./git.js";
+import { enrichLinksFromExtract } from "./linkEnrichment.js";
+import { extractTextWithVision } from "./visionOcr.js";
+import type { ExtractResult } from "./extract.js";
 
 export interface Run {
   id: string;
@@ -77,6 +80,28 @@ function storeRun(run: Run): void {
     const oldest = runs.keys().next().value!;
     runs.delete(oldest);
   }
+}
+
+async function withVisionFallback(extractResult: ExtractResult): Promise<ExtractResult> {
+  if (extractResult.visual_text?.trim()) return extractResult;
+  const imagePaths = (extractResult.media_assets ?? [])
+    .filter((asset) => (asset.type === "image" || asset.type === "screenshot") && asset.path)
+    .map((asset) => asset.path!)
+    .slice(0, 4);
+  if (imagePaths.length === 0) return extractResult;
+
+  const vision = await extractTextWithVision(imagePaths);
+  const warnings = [...(extractResult.extraction_warnings ?? [])];
+  if (vision.warning) warnings.push(vision.warning);
+  if (!vision.text) {
+    return warnings.length ? { ...extractResult, extraction_warnings: warnings } : extractResult;
+  }
+  return {
+    ...extractResult,
+    visual_text: vision.text,
+    visual_text_source: "vision_ocr",
+    extraction_warnings: warnings,
+  };
 }
 
 // Single-slot queue: only one pipeline run at a time (git pushes must serialize)
@@ -202,8 +227,14 @@ export async function runPipeline(
       return { runId, findingPath: "" };
     }
 
+    const visionEnhancedExtract = await withVisionFallback(extractResult);
+    const enrichedExtract = {
+      ...visionEnhancedExtract,
+      enriched_links: await enrichLinksFromExtract(visionEnhancedExtract),
+    };
+
     // Step 2: Research
-    const researchResult = await runResearch(extractResult);
+    const researchResult = await runResearch(enrichedExtract);
 
     // Step 3: Implementation
     const implementationMemoryDir =
@@ -220,7 +251,7 @@ export async function runPipeline(
 
     // Step 4: Compose
     const { filename, body } = composeFinding({
-      extract: extractResult,
+      extract: enrichedExtract,
       research: researchResult,
       implementation: implementationResult,
     });

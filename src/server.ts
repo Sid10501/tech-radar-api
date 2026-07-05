@@ -4,7 +4,7 @@ import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError 
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 import { getAiMemoryDir, getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings } from "./findings.js";
-import { auditFindings, auditPublicFindings, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
+import { auditFindings, auditPublicFindings, enrichmentStatus, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 
 function getCookieValue(cookieHeader: unknown, name: string): string | undefined {
@@ -174,6 +174,37 @@ export function buildServer() {
     const findings = listFindings();
     return { audit: auditFindings(findings), filters: filterCounts(findings) };
   });
+
+  app.post<{ Params: { id: string } }>(
+    "/api/admin/enrich/:id",
+    { preHandler: authMiddleware },
+    async (request, reply) => {
+      await ensureAiMemoryCheckout();
+      const detail = getFindingDetail(request.params.id);
+      const sourceUrl = detail?.finding.source.url;
+      if (!detail) return reply.code(404).send({ error: "Finding not found" });
+      if (!sourceUrl) return reply.code(400).send({ error: "Finding has no source URL" });
+      const result = await runPipeline(sourceUrl, { force: true });
+      return reply.code(202).send({ queued: true, ...result });
+    },
+  );
+
+  app.post<{ Body: { limit?: number } }>(
+    "/api/admin/enrich-weak",
+    { preHandler: authMiddleware },
+    async (request, reply) => {
+      await ensureAiMemoryCheckout();
+      const limit = Math.max(1, Math.min(50, Number(request.body?.limit ?? 10)));
+      const findings = listFindings()
+        .filter((finding) => enrichmentStatus(finding) === "needs-enrichment" && finding.source.url)
+        .slice(0, limit);
+      const runs = [];
+      for (const finding of findings) {
+        runs.push(await runPipeline(finding.source.url!, { force: true }));
+      }
+      return reply.code(202).send({ queued: runs.length, runs });
+    },
+  );
 
   app.get<{ Params: { id: string } }>(
     "/api/findings/:id",

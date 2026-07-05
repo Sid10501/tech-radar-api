@@ -16,14 +16,51 @@ export interface ExtractResult {
   transcript: string | null;
   transcript_source: "whisper" | "subs" | null;
   visual_text: string | null;
-  visual_text_source: "ocr" | null;
+  visual_text_source: "ocr" | "browser_ocr" | "vision_ocr" | null;
   upload_date: string | null;
   raw_metadata_keys: string[];
+  media_assets?: ExtractedMediaAsset[];
+  extraction_warnings?: string[];
+  enriched_links?: EnrichedLinks | null;
   /** Pre-wrapped by extract_post.py when pipeline uses ai-memory llm-defense */
   caption_for_llm?: string | null;
   transcript_for_llm?: string | null;
   title_for_llm?: string | null;
   visual_text_for_llm?: string | null;
+}
+
+export interface ExtractedMediaAsset {
+  type: "image" | "video" | "screenshot" | "thumbnail";
+  source: string;
+  path?: string | null;
+  url?: string | null;
+  ocr_text?: string | null;
+  confidence?: "high" | "medium" | "low";
+}
+
+export interface EnrichedLinkCandidate {
+  kind: "github" | "docs" | "npm";
+  url: string;
+  source: "caption" | "transcript" | "visual_text" | "title" | "source_url";
+  confidence: "confirmed" | "candidate";
+}
+
+export interface EnrichedLinks {
+  confirmed: {
+    github: string | null;
+    docs: string | null;
+    npm: string | null;
+  };
+  candidates: EnrichedLinkCandidate[];
+  warnings: string[];
+  github?: {
+    stars: number;
+    lastPushed: string;
+    openIssues: number;
+    language: string | null;
+    license: string | null;
+    archived: boolean;
+  } | null;
 }
 
 export class ExtractError extends Error {

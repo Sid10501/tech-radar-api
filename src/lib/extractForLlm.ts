@@ -32,11 +32,20 @@ export function llmTitleBlock(extract: ExtractResult): string {
   return "unknown";
 }
 
+export function llmEnrichedLinksBlock(extract: ExtractResult): string {
+  if (!extract.enriched_links) return "";
+  return wrapAsUntrusted(JSON.stringify(extract.enriched_links, null, 2), {
+    label: "deterministic link enrichment evidence",
+    maxChars: 4_000,
+  });
+}
+
 export function buildResearchUserMessage(extract: ExtractResult): string {
   const caption = llmCaptionBlock(extract);
   const transcript = llmTranscriptBlock(extract);
   const visualText = llmVisualTextBlock(extract);
   const title = llmTitleBlock(extract);
+  const enrichedLinks = llmEnrichedLinksBlock(extract);
   const hashtags = (extract.hashtags ?? []).join(", ") || "(none)";
 
   const parts = [
@@ -59,6 +68,15 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
   }
   if (visualText) {
     parts.push("", "On-screen text / OCR:", visualText);
+  }
+  if (enrichedLinks) {
+    parts.push(
+      "",
+      "Enriched links:",
+      enrichedLinks,
+      "",
+      "Use confirmed GitHub/docs/npm links when present. Treat candidate links as leads that must be verified before reporting them as confirmed.",
+    );
   }
 
   parts.push(
