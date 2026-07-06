@@ -53,6 +53,33 @@ const CURATED_PROJECTS: CuratedProject[] = [
     docs: "https://cobusgreyling.github.io/loop-engineering/",
   },
   {
+    aliases: [/\bponytail\b/i],
+    evidence: [
+      /\bsenior dev\b[\s\S]{0,120}\bponytail\b/i,
+      /\bhe says nothing\b[\s\S]{0,100}\bhe writes one line\b/i,
+      /\b80\s*-\s*94%\s+less code\b[\s\S]{0,80}\b3\s*-\s*6x faster\b/i,
+      /\b13 agents?\b[\s\S]{0,80}\b(less code|faster|cheaper)\b/i,
+      /\bsave tokens?\b[\s\S]{0,120}\barchitecture decisions?\b/i,
+    ],
+    github: "https://github.com/DietrichGebert/ponytail",
+    docs: "https://github.com/DietrichGebert/ponytail#readme",
+  },
+  {
+    aliases: [
+      /\bkronos\b/i,
+      /\bK-line\s+Tokenization\b/i,
+      /\breads?\s+candlestick charts?\b/i,
+    ],
+    evidence: [
+      /\b12\s+billion records\b[\s\S]{0,80}\b45 exchanges\b/i,
+      /\bK-line\s+Tokenization\b[\s\S]{0,160}\bAutoregressive Pre-training\b/i,
+      /\bcoarse-grained subtoken\b[\s\S]{0,120}\bfine-grained subtoken\b/i,
+      /\bdecoder-only foundation models?\b[\s\S]{0,120}\bK-line sequences?\b/i,
+    ],
+    github: "https://github.com/shiyu-coder/Kronos",
+    docs: "https://github.com/shiyu-coder/Kronos#readme",
+  },
+  {
     aliases: [
       /\b(?:mcp|gen\s*ai)\s+toolbox\s+for\s+databases\b/i,
       /\bgoogle\b[\s\S]{0,120}\b(?:mcp|gen\s*ai)\s+toolbox\b/i,
