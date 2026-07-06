@@ -48,6 +48,15 @@ function authMiddleware(request: any, reply: any, done: () => void): void {
   reply.code(401).send({ error: "Unauthorized" });
 }
 
+function publicFeedAllowedOrigins(): Set<string> {
+  return new Set(
+    (process.env["PUBLIC_FEED_ALLOWED_ORIGINS"] ?? "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  );
+}
+
 let aiMemorySync: Promise<void> | null = null;
 let aiMemorySyncedAt = 0;
 const AI_MEMORY_SYNC_TTL_MS = Number(process.env["AI_MEMORY_SYNC_TTL_MS"] ?? 60_000);
@@ -88,6 +97,20 @@ export function buildServer() {
       reply.header(name, value);
     }
     reply.header("Cache-Control", NO_STORE_CACHE_CONTROL);
+  });
+
+  // CORS is scoped to the public feed: exact origins from PUBLIC_FEED_ALLOWED_ORIGINS, never a wildcard
+  app.addHook("onRequest", async (request, reply) => {
+    if (!request.url.startsWith("/api/public/")) return;
+    const origin = request.headers.origin;
+    if (typeof origin === "string" && publicFeedAllowedOrigins().has(origin)) {
+      reply.header("Access-Control-Allow-Origin", origin);
+      reply.header("Vary", "Origin");
+    }
+    if (request.method === "OPTIONS") {
+      reply.header("Access-Control-Allow-Methods", "GET");
+      return reply.code(204).send();
+    }
   });
 
   // Set auth token cookie via ?token= query param (one-time web UI flow)

@@ -27,8 +27,8 @@
 
 ## Task 3: CORS for public routes only
 
-- [ ] Test first (extend `test/server.test.ts`): allowed Origin echoed on `/api/public/findings`; disallowed/absent Origin → no ACAO header; `/api/findings` (auth) never has ACAO; OPTIONS preflight on public routes → 204 with allowed methods GET.
-- [ ] Implement via `onRequest`/`onSend` hook scoped to `/api/public/` prefix reading `PUBLIC_FEED_ALLOWED_ORIGINS` (no @fastify/cors dep).
+- [x] Test first (extend `test/server.test.ts`): allowed Origin echoed on `/api/public/findings`; disallowed/absent Origin → no ACAO header; `/api/findings` (auth) never has ACAO; OPTIONS preflight on public routes → 204 with allowed methods GET.
+- [x] Implement via `onRequest`/`onSend` hook scoped to `/api/public/` prefix reading `PUBLIC_FEED_ALLOWED_ORIGINS` (no @fastify/cors dep).
 
 ## Task 4: leak regression + docs
 
