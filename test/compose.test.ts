@@ -76,6 +76,19 @@ describe("composeFinding()", () => {
     // Source metadata
     expect(body).toContain("@colinhacks");
     expect(body).toContain("youtube");
+
+    // Enriched learning evidence
+    expect(body).toContain("Extraction path:");
+    expect(body).toContain("- yt-dlp:metadata");
+    expect(body).toContain("- yt-dlp:subtitles");
+    expect(body).toContain("Learning chapters:");
+    expect(body).toContain("- 00:00 Why Zod 4 matters");
+    expect(body).toContain("- 00:24 Migration notes");
+    expect(body).toContain("Source links found:");
+    expect(body).toContain("- https://github.com/colinhacks/zod");
+    expect(body).toContain("Top comments:");
+    expect(body).toContain("@viewer");
+    expect(body).toContain("migration notes");
   });
 
   it("filename slug is derived from the title", async () => {

@@ -9,9 +9,40 @@
   "hashtags": ["#typescript", "#zod", "#webdev"],
   "duration_sec": 58,
   "transcript": "Zod 4 is now available. It is significantly faster than Zod 3, has a smaller bundle size, and includes much better TypeScript inference. Check it out on GitHub.",
-  "transcript_source": "whisper",
+  "transcript_source": "subs",
   "visual_text": null,
   "visual_text_source": null,
   "upload_date": "2026-04-01",
-  "raw_metadata_keys": ["id", "title", "uploader", "duration", "description"]
+  "raw_metadata_keys": ["id", "title", "uploader", "duration", "description"],
+  "source_links": [
+    "https://github.com/colinhacks/zod",
+    "https://zod.dev/"
+  ],
+  "extraction_methods": ["yt-dlp:metadata", "yt-dlp:subtitles"],
+  "chapters": [
+    {
+      "title": "Why Zod 4 matters",
+      "start_time": 0,
+      "end_time": 24
+    },
+    {
+      "title": "Migration notes",
+      "start_time": 24,
+      "end_time": 58
+    }
+  ],
+  "top_comments": [
+    {
+      "author": "@viewer",
+      "text": "The migration notes are the key thing to check before upgrading.",
+      "like_count": 18,
+      "timestamp": 1775001600
+    },
+    {
+      "author": "@typescriptfan",
+      "text": "The bundle size improvement matters for frontend validation.",
+      "like_count": 7,
+      "timestamp": 1775088000
+    }
+  ]
 }

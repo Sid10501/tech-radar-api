@@ -8,9 +8,9 @@ Built by [Sidharth Grover](https://github.com/Sid10501). Self-host it and point 
 
 ## What it does
 
-You send a TikTok, Instagram, or YouTube URL. Within a few minutes:
+You send a TikTok, Instagram, YouTube, or public Google Drive PDF URL. Within a few minutes:
 
-1. **Extracts** the caption, hashtags, and transcript from the post (yt-dlp + faster-whisper)
+1. **Extracts** the caption, hashtags, transcript, or document text from the source (yt-dlp + faster-whisper + pypdf)
 2. **Researches** the technology — GitHub stars, license, last activity, alternatives (Claude + GitHub API)
 3. **Reads your personal knowledge base** and writes an implementation idea grounded in your actual projects and stack (second Claude agent)
 4. **Commits** a structured markdown finding to your `ai-memory` repo
@@ -36,7 +36,7 @@ Four ways, pick whichever fits your workflow:
 URL
  │
  ▼
-[extract]    yt-dlp + faster-whisper → title, caption, hashtags, transcript
+[extract]    yt-dlp + faster-whisper + pypdf → title, caption, hashtags, transcript/document text
  │
  ▼
 [research]   Claude + GitHub API → what it is, stars, license, comparisons
@@ -136,6 +136,11 @@ Copy `.env.example` to `.env`:
 | `AI_MEMORY_REPO_URL` | No | Public HTTPS URL of your ai-memory repo (for finding links in the UI) |
 | `AI_MEMORY_LOCAL_DIR` | No | Where to clone ai-memory (default: `/tmp/ai-memory`) |
 | `GITHUB_TOKEN` | No | Raises GitHub API rate limit from 60 to 5000 req/hr |
+| `YOUTUBE_API_KEY` | No | Uses the official YouTube comments API before scraper fallback |
+| `YOUTUBE_MAX_COMMENTS` | No | Bounded YouTube comment capture, 0-50 (default: 0) |
+| `GOOGLE_DRIVE_MAX_BYTES` | No | Public Drive download cap in bytes (default: 25 MB) |
+| `PDF_MAX_PAGES` | No | PDF text extraction page cap (default: 20) |
+| `PDF_MAX_CHARS` | No | PDF text extraction character cap (default: 20000) |
 | `TELEGRAM_BOT_TOKEN` | No | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | No | Your chat ID — enables notifications and two-way control |
 | `TELEGRAM_WEBHOOK_SECRET` | No | Random string to verify Telegram webhook requests |
@@ -169,6 +174,11 @@ Key variables to set (see `.env.example` for full list):
 | `GIT_DEPLOY_KEY_B64` | Yes | SSH deploy key (base64) |
 | `AUTH_TOKEN` | Recommended | Protects POST /runs |
 | `GITHUB_TOKEN` | Recommended | GitHub API (5000 req/hr vs 60) |
+| `YOUTUBE_API_KEY` | Optional | Official YouTube comments fetch before yt-dlp fallback |
+| `YOUTUBE_MAX_COMMENTS` | Optional | Bounded YouTube comments captured per video |
+| `GOOGLE_DRIVE_MAX_BYTES` | Optional | Public Drive download cap in bytes |
+| `PDF_MAX_PAGES` | Optional | PDF text extraction page cap |
+| `PDF_MAX_CHARS` | Optional | PDF text extraction character cap |
 | `WHISPER_MODEL` | Optional | Transcription quality: `tiny`/`base`/`small` |
 | `AI_MEMORY_REPO_URL` | Optional | Makes finding links in Telegram clickable |
 | `OWNER_NAME` | Optional | Your name in agent prompts |
@@ -200,7 +210,7 @@ Bot commands: send any URL to queue it, `/status`, `/list`, `/help`.
 
 ## iOS Shortcut
 
-See [shortcuts/README.md](shortcuts/README.md) for step-by-step instructions. Takes about 2 minutes. Once set up, you can trigger a research run directly from Instagram or TikTok's share sheet without leaving the app.
+See [shortcuts/README.md](shortcuts/README.md) for step-by-step instructions. Takes about 2 minutes. Once set up, you can trigger a research run directly from Instagram, TikTok, YouTube, or a public Drive PDF share sheet without leaving the app.
 
 ---
 
@@ -236,7 +246,7 @@ Returns a single run by ID.
 | Runtime | Node.js 20 + TypeScript |
 | HTTP | Fastify |
 | Agents | Anthropic SDK (`claude-sonnet-4-6`) with tool use |
-| Extraction | Python + yt-dlp + faster-whisper |
+| Extraction | Python + yt-dlp + faster-whisper + pypdf |
 | Git | simple-git |
 | Validation | Zod |
 | Tests | Vitest |

@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
     "yt-dlp>=2025.1.1" \
+    "youtube-transcript-api>=1.2.4" \
+    "pypdf>=5.0.0" \
     "faster-whisper>=1.0" \
     "curl_cffi>=0.7"
 
