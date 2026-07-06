@@ -22,8 +22,8 @@
 
 ## Task 2: RSS 2.0 endpoint
 
-- [ ] Test first (`test/rss.test.ts`): valid channel/items against fixture findings; escaping test with `&`, `<`, `"` in a title; ≤20 items newest-first; correct content-type; 200 even with zero findings (empty channel).
-- [ ] Implement `src/rss.ts` (`buildRssXml(findings, opts)` pure function, hand-built XML, no new deps) + `GET /api/public/findings/rss` route in `src/server.ts`.
+- [x] Test first (`test/rss.test.ts`): valid channel/items against fixture findings; escaping test with `&`, `<`, `"` in a title; ≤20 items newest-first; correct content-type; 200 even with zero findings (empty channel).
+- [x] Implement `src/rss.ts` (`buildRssXml(findings, opts)` pure function, hand-built XML, no new deps) + `GET /api/public/findings/rss` route in `src/server.ts`.
 
 ## Task 3: CORS for public routes only
 

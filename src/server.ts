@@ -6,6 +6,7 @@ import { DASHBOARD_HTML } from "./dashboard.js";
 import { getAiMemoryDir, getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings } from "./findings.js";
 import { auditFindings, auditPublicFindings, enrichmentStatus, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
 import { listReleaseNotes } from "./releaseNotes.js";
+import { buildRssXml } from "./rss.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 
 const SECURITY_HEADERS = {
@@ -177,6 +178,13 @@ export function buildServer() {
 
   app.get("/api/public/release-notes", async () => {
     return { releases: listReleaseNotes() };
+  });
+
+  app.get("/api/public/findings/rss", async (request, reply) => {
+    await ensureAiMemoryCheckout();
+    const siteBase = process.env["PUBLIC_SITE_RADAR_BASE"] || `${request.protocol}://${request.headers.host}`;
+    reply.header("Content-Type", "application/rss+xml; charset=utf-8");
+    return buildRssXml(listPublicFindings(), { siteBase });
   });
 
   app.get<{ Params: { id: string } }>("/api/public/findings/:id", async (request, reply) => {
