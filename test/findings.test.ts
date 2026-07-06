@@ -149,6 +149,25 @@ describe("parseFindingMarkdown()", () => {
     expect(detail?.sections.implementation).not.toContain("## Follow-ups");
   });
 
+  it("keeps workflow audit as its own finding detail section", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workflow-audit-section-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260705-kun-workflow.md"),
+      SAMPLE_FINDING.replace(
+        "## What it actually is",
+        "## Workflow Audit\n\nWorkflow type: agentic engineering workflow\n\nRecommended intake:\n- Promote stable rules to memory, reusable instructions to skills.\n\n## What it actually is",
+      ),
+    );
+
+    const detail = getFindingDetail("20260705-kun-workflow.md", dir);
+
+    expect(detail?.sections.workflow).toContain("agentic engineering workflow");
+    expect(detail?.sections.workflow).toContain("Promote stable rules");
+    expect(detail?.sections.research).toContain("reusable senior-dev prompt");
+  });
+
   it("does not count placeholder extraction markers as captured evidence", () => {
     const finding = parseFindingMarkdown(
       "20260615-video-by-shawnchee.md",
@@ -176,6 +195,9 @@ describe("parseFindingMarkdown()", () => {
           "",
           "Extraction path:",
           "- youtube-transcript-api",
+          "",
+          "Linked artifacts:",
+          "- validation_gate · pre-push validation gate: https://github.com/kunchenguid/no-mistakes",
         ].join("\n"),
       ),
     );
