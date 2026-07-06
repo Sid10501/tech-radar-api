@@ -66,6 +66,14 @@ describe("dashboard HTML", () => {
     expect(html).toContain("Source uncertainty");
   });
 
+  it("does not filter source-backed public artifacts into Needs enrichment only for missing repo/docs", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("isSourceBackedPublicArtifact");
+    expect(html).toContain('state.filter === "repo"');
+    expect(html).toContain('state.filter === "enrich"');
+  });
+
   it("renders retry history and extraction warning diagnostics in the existing detail explorer", () => {
     const html = DASHBOARD_HTML([]);
 

@@ -75,8 +75,12 @@ function emptyReasonCounts(): Record<EnrichmentReason, number> {
   };
 }
 
+function hasPublicArtifactEvidence(finding: FindingSummary | PublicFindingSummary): boolean {
+  return finding.evidence.repo || finding.evidence.docs || finding.source.classification === "public_artifact";
+}
+
 function publicNeedsEnrichment(finding: PublicFindingSummary): boolean {
-  return finding.quality.level === "weak" || (!finding.evidence.repo && !finding.evidence.docs);
+  return finding.quality.level === "weak" || !hasPublicArtifactEvidence(finding);
 }
 
 export function enrichmentStatus(finding: FindingSummary): EnrichmentStatus {
@@ -102,7 +106,7 @@ export function enrichmentProfile(finding: FindingSummary): EnrichmentProfile {
 function enrichmentReasonsFor(finding: FindingSummary | PublicFindingSummary): EnrichmentReason[] {
   const reasons: EnrichmentReason[] = [];
   if (finding.quality.level === "weak") reasons.push("weak_quality");
-  if (!finding.evidence.repo && !finding.evidence.docs) reasons.push("missing_repo_or_docs");
+  if (!hasPublicArtifactEvidence(finding)) reasons.push("missing_repo_or_docs");
   if (!finding.evidence.transcript) reasons.push("missing_transcript");
   if (!finding.evidence.ocr) reasons.push("missing_ocr");
   if (finding.quality.reasons.includes("source uncertainty")) reasons.push("source_uncertainty");
@@ -140,7 +144,7 @@ export function auditFindings(findings: FindingSummary[], limit = 15): PrivateFi
     if (profile.status === "needs-enrichment") summary.needsEnrichment += 1;
     countReasons(summary, profile.reasons);
     if (!finding.evidence.transcript) summary.missingTranscript += 1;
-    if (!finding.evidence.repo && !finding.evidence.docs) summary.missingRepoOrDocs += 1;
+    if (!hasPublicArtifactEvidence(finding)) summary.missingRepoOrDocs += 1;
   }
 
   return summary;
@@ -164,7 +168,7 @@ export function auditPublicFindings(findings: PublicFindingSummary[], limit = 15
     if (publicNeedsEnrichment(finding)) summary.needsEnrichment += 1;
     countReasons(summary, enrichmentReasonsFor(finding));
     if (!finding.evidence.transcript) summary.missingTranscript += 1;
-    if (!finding.evidence.repo && !finding.evidence.docs) summary.missingRepoOrDocs += 1;
+    if (!hasPublicArtifactEvidence(finding)) summary.missingRepoOrDocs += 1;
   }
 
   return summary;
@@ -176,7 +180,7 @@ export function filterCounts(findings: FindingSummary[]): FindingFilterCounts {
   for (const finding of findings) {
     counts.all += 1;
     counts[finding.quality.level] += 1;
-    if (finding.evidence.repo || finding.evidence.docs) counts.repo += 1;
+    if (hasPublicArtifactEvidence(finding)) counts.repo += 1;
     if (finding.targetProject && finding.targetProject !== "none" && finding.targetProject !== "unknown") counts.project += 1;
     if (finding.evidence.ocr) counts.ocr += 1;
     const status = enrichmentStatus(finding);
@@ -201,7 +205,7 @@ export function filterCountsFromPublic(findings: PublicFindingSummary[]): Public
   for (const finding of findings) {
     counts.all += 1;
     counts[finding.quality.level] += 1;
-    if (finding.evidence.repo || finding.evidence.docs) counts.repo += 1;
+    if (hasPublicArtifactEvidence(finding)) counts.repo += 1;
     if (finding.evidence.ocr) counts.ocr += 1;
     if (publicNeedsEnrichment(finding)) counts.enrich += 1;
   }

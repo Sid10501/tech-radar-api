@@ -166,6 +166,95 @@ describe("AiMemoryRepo", () => {
     expect(content).toContain("Previous filename: `2026-07-06-same-title.md`");
   });
 
+  it("rewrites Instagram carousel retries that vary only by query params", async () => {
+    const originalSourceUrl = "https://www.instagram.com/p/DZxFPZjjnTN/?img_index=2&igsh=MXdxMzYwMTU3aHU5MA==";
+    await repo.pullLatest();
+    await repo.writeFindingForSource({
+      sourceUrl: originalSourceUrl,
+      filename: "2026-06-19-palmier-carousel.md",
+      body: [
+        "# Palmier carousel",
+        "",
+        `**Source:** instagram · [Palmier](${originalSourceUrl})`,
+        "**Saved:** 20260619",
+        "",
+        "Old body.",
+        "",
+      ].join("\n"),
+      date: "2026-06-19",
+    });
+    await repo.commitAndPush("tech-radar: palmier-carousel");
+
+    await repo.pullLatest();
+    const write = await repo.writeFindingForSource({
+      sourceUrl: "https://instagram.com/p/DZxFPZjjnTN/?utm_source=ig_web_copy_link",
+      filename: "2026-07-06-palmier-pro.md",
+      body: [
+        "# Palmier Pro",
+        "",
+        "**Source:** instagram · [Palmier](https://instagram.com/p/DZxFPZjjnTN/?utm_source=ig_web_copy_link)",
+        "**Saved:** 20260706",
+        "",
+        "New body.",
+        "",
+      ].join("\n"),
+      date: "2026-07-06",
+    });
+
+    expect(write).toEqual({
+      filename: "2026-06-19-palmier-carousel.md",
+      generatedFilename: "2026-07-06-palmier-pro.md",
+      replacedExisting: true,
+    });
+    const content = fs.readFileSync(path.join(workDir, "clone", "tech-radar", "findings", "2026-06-19-palmier-carousel.md"), "utf8");
+    expect(content).toContain("# Palmier Pro");
+    expect(content).toContain("Generated filename: `2026-07-06-palmier-pro.md`");
+  });
+
+  it("does not rewrite a finding that only mentions the same social URL outside Source", async () => {
+    const mentionedUrl = "https://www.instagram.com/p/not-the-source/?img_index=2";
+    await repo.pullLatest();
+    await repo.writeFindingForSource({
+      sourceUrl: "https://www.instagram.com/p/actual-source/",
+      filename: "2026-06-19-actual-source.md",
+      body: [
+        "# Actual source",
+        "",
+        "**Source:** instagram · [Creator](https://www.instagram.com/p/actual-source/)",
+        "**Saved:** 20260619",
+        "",
+        "## Links",
+        "",
+        `- Related post: ${mentionedUrl}`,
+        "",
+      ].join("\n"),
+      date: "2026-06-19",
+    });
+    await repo.commitAndPush("tech-radar: actual-source");
+
+    await repo.pullLatest();
+    const write = await repo.writeFindingForSource({
+      sourceUrl: mentionedUrl,
+      filename: "2026-07-06-new-source.md",
+      body: [
+        "# New source",
+        "",
+        `**Source:** instagram · [Creator](${mentionedUrl})`,
+        "**Saved:** 20260706",
+        "",
+        "New body.",
+        "",
+      ].join("\n"),
+      date: "2026-07-06",
+    });
+
+    expect(write).toEqual({
+      filename: "2026-07-06-new-source.md",
+      generatedFilename: "2026-07-06-new-source.md",
+      replacedExisting: false,
+    });
+  });
+
   it("updates INBOX.md with a new row", async () => {
     await repo.pullLatest();
     await repo.updateInbox({

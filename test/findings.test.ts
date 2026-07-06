@@ -307,6 +307,42 @@ describe("parseFindingMarkdown()", () => {
     expect(toPublicFinding(finding).quality.level).not.toBe("weak");
   });
 
+  it("treats direct GitHub Gist findings as source-backed public artifacts", () => {
+    const finding = parseFindingMarkdown(
+      "20260519-system-prompt-for-coding-agents.md",
+      [
+        "# System prompt for coding agents",
+        "",
+        "**Source:** github · [Gist](https://gist.github.com/acidgreenservers/001185d63e5cd65f9fbe6f7a1c70a200)",
+        "**Saved:** 20260519",
+        "**Tags:** github, agents",
+        "",
+        "## TL;DR",
+        "",
+        "A public Gist containing a coding-agent prompt.",
+        "",
+        "## What it actually is",
+        "",
+        "- What: A source-backed prompt artifact.",
+        "- GitHub stars: unknown · License: unknown · Archived: no",
+        "",
+        "## Links",
+        "",
+        "- (no links found)",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: ai-memory",
+        "- Verdict: `#try-soon`",
+      ].join("\n"),
+    );
+
+    expect(finding.source.classification).toBe("public_artifact");
+    expect(finding.quality.level).toBe("review");
+    expect(finding.quality.reasons).toContain("source-backed");
+    expect(finding.recommendedAction).toBe("Review");
+  });
+
   it("does not count GitHub search pages as repository evidence", () => {
     const finding = parseFindingMarkdown(
       "20260705-search-placeholder.md",
@@ -331,6 +367,21 @@ describe("parseFindingMarkdown()", () => {
     expect(finding.source.classification).toBe("dm_gated");
     expect(finding.quality.level).toBe("weak");
     expect(finding.quality.reasons).toContain("dm gated");
+    expect(finding.recommendedAction).toBe("Skip");
+  });
+
+  it("classifies comment keyword posts that promise to send the resource as DM-gated", () => {
+    const finding = parseFindingMarkdown(
+      "20260504-comment-scrape.md",
+      SAMPLE_FINDING
+        .replace("Ponytail is useful as operating-system guidance, not a replacement for Superpowers.", "The post asks viewers to comment scrape and says I’ll send it over.")
+        .replace("this skill mimics that one senior dev with glasses and ponytail", "comment scrape and I’ll send it over")
+        .replace("- Repo: https://github.com/example/ponytail", "- (no links found)")
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#skip`"),
+    );
+
+    expect(finding.source.classification).toBe("dm_gated");
     expect(finding.recommendedAction).toBe("Skip");
   });
 

@@ -114,9 +114,12 @@ export class AiMemoryRepo {
   private findFindingBySourceUrl(sourceUrl: string): string | null {
     const findingsDir = path.join(this.opts.localDir, "tech-radar", "findings");
     if (!fs.existsSync(findingsDir)) return null;
+    const sourceKey = canonicalSourceKey(sourceUrl);
     for (const file of fs.readdirSync(findingsDir).filter((name) => name.endsWith(".md")).sort()) {
       const content = fs.readFileSync(path.join(findingsDir, file), "utf8");
-      if (content.includes(`](${sourceUrl})`) || content.includes(sourceUrl)) return file;
+      const existingSourceUrl = sourceUrlFromMarkdown(content);
+      if (existingSourceUrl === sourceUrl) return file;
+      if (sourceKey && existingSourceUrl && canonicalSourceKey(existingSourceUrl) === sourceKey) return file;
     }
     return null;
   }
@@ -190,6 +193,43 @@ export class AiMemoryRepo {
       }
     }
   }
+}
+
+function sourceUrlFromMarkdown(content: string): string | null {
+  const sourceLine = content.match(/^\*\*Source:\*\*\s*(.+)$/m)?.[1]?.trim();
+  return sourceLine?.match(/\]\(([^)]+)\)/)?.[1]?.trim() ?? null;
+}
+
+function cleanUrl(rawUrl: string): string {
+  return rawUrl.replace(/[),.;]+$/, "");
+}
+
+function canonicalSourceKey(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(cleanUrl(rawUrl));
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+
+    if (host === "instagram.com") {
+      const [kind, shortcode] = pathParts;
+      if (kind && shortcode && ["p", "reel", "tv"].includes(kind.toLowerCase())) {
+        return `instagram:${kind.toLowerCase()}:${shortcode}`;
+      }
+    }
+
+    if (host === "vt.tiktok.com" && pathParts[0]) return `tiktok:short:${pathParts[0].toLowerCase()}`;
+    if (host.endsWith("tiktok.com")) {
+      const videoIndex = pathParts.findIndex((part) => part.toLowerCase() === "video");
+      if (videoIndex >= 0 && pathParts[videoIndex + 1]) return `tiktok:video:${pathParts[videoIndex + 1]}`;
+    }
+
+    if ((host === "x.com" || host === "twitter.com") && pathParts.length >= 3 && pathParts[1]?.toLowerCase() === "status") {
+      return `x:status:${pathParts[2]}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function appendRetryMetadata(
