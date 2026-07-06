@@ -26,6 +26,26 @@ const CURATED_PROJECTS: CuratedProject[] = [
     github: "https://github.com/Panniantong/Agent-Reach",
     docs: "https://github.com/Panniantong/Agent-Reach/blob/main/docs/README_en.md",
   },
+  {
+    aliases: [/\bpalmier(?:\s+pro)?\b/i],
+    evidence: [
+      /\bopen[-\s]?source\b[\s\S]{0,80}\bvideo editor\b/i,
+      /\bclaude\b[\s\S]{0,120}\b(edit|manage)\b[\s\S]{0,80}\b(video|timeline)/i,
+      /\bvideo timelines?\b[\s\S]{0,80}\bAI\b/i,
+    ],
+    github: "https://github.com/palmier-io/palmier-pro",
+    docs: "https://github.com/palmier-io/palmier-pro#readme",
+  },
+  {
+    aliases: [/\bloop\s+engineering\b/i],
+    evidence: [
+      /\bpractice library\b[\s\S]{0,100}\bAI code agents?\b/i,
+      /\bautomated looping system\b/i,
+      /\bloop(?:ing)?\b[\s\S]{0,80}\bAI code agents?\b/i,
+    ],
+    github: "https://github.com/cobusgreyling/loop-engineering",
+    docs: "https://cobusgreyling.github.io/loop-engineering/",
+  },
 ];
 
 export function extractLinkCandidates(extract: ExtractResult): EnrichedLinkCandidate[] {
@@ -118,6 +138,7 @@ function collectNpmInstallCandidates(value: string, source: TextSource, candidat
 }
 
 function collectCuratedProjectCandidates(extract: ExtractResult, candidates: EnrichedLinkCandidate[]): void {
+  if (candidates.some((candidate) => candidate.kind === "github")) return;
   const texts = sourceTexts(extract);
   const combined = texts.map(([, value]) => value).join("\n");
   if (!combined.trim()) return;
