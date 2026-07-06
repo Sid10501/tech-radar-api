@@ -1,5 +1,14 @@
 # Release Notes
 
+## 2026-07-06 - Audit Completion Ops Polish
+
+Closed the audit-completion polish pass with user-visible diagnostics, clearer triage signals, and an operator-ready verification path.
+
+- Fixed mobile release notes navigation so notes open in the visible mobile detail pane and return cleanly to the findings list.
+- Added duplicate diagnostics and retry history surfacing so repeated source retries do not create duplicate active findings without explanation.
+- Improved triage explainability with quality reason chips, extraction warnings, and enrichment reason counts in the dashboard.
+- Completed security and ops hardening around public/private data boundaries, browser-compatible response headers, conservative cache policy, and repeatable smoke checks.
+
 ## 2026-07-05 - Ever-Improving Product Loop
 
 Turned the radar into a more visible improvement loop with explicit release notes, verification gates, and deterministic quality fixes.

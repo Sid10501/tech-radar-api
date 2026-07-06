@@ -45,6 +45,21 @@ describe("parseReleaseNotesMarkdown()", () => {
 });
 
 describe("listReleaseNotes()", () => {
+  it("keeps audit completion notes latest with ops-polish highlights", () => {
+    const releases = listReleaseNotes();
+
+    expect(releases[0]).toMatchObject({
+      date: "2026-07-06",
+      title: "Audit Completion Ops Polish",
+    });
+    expect(releases[0]?.highlights).toEqual(expect.arrayContaining([
+      expect.stringContaining("mobile release notes"),
+      expect.stringContaining("duplicate diagnostics"),
+      expect.stringContaining("triage explainability"),
+      expect.stringContaining("security and ops hardening"),
+    ]));
+  });
+
   it("returns an empty list when release notes have not been created", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "missing-release-notes-"));
 

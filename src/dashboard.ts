@@ -842,6 +842,18 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         .join("") || '<span class="evidence-chip muted">metadata only</span>';
     }
 
+    function qualityReasonChips(f) {
+      const chips = [];
+      if (f.diagnostics?.duplicateGroup) {
+        chips.push("duplicate");
+      }
+      chips.push(...(f.quality.reasons || []).slice(0, 2));
+      return chips
+        .filter(Boolean)
+        .map((label) => '<span class="evidence-chip muted">' + escapeHtml(label) + '</span>')
+        .join("");
+    }
+
     function evidenceBadge(value, yes = "yes", no = "not captured") {
       return value ? yes : no;
     }
@@ -1009,7 +1021,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
             <div class="pill \${f.quality.level}">\${f.quality.level}</div>
           </div>
           <div class="item-meta">\${escapeHtml(f.saved || "unsaved")} · \${escapeHtml(f.source.platform)} · \${escapeHtml(f.quality.score)}/100\${state.privateUnlocked && f.targetProject ? " · " + escapeHtml(f.targetProject) : ""}</div>
-          <div class="item-evidence">\${evidenceChips(f)}</div>
+          <div class="item-evidence">\${evidenceChips(f)}\${qualityReasonChips(f)}</div>
         </button>\`).join("");
       list.querySelectorAll(".item").forEach((button) => button.addEventListener("click", () => selectFinding(button.dataset.id, { openDetail: true })));
     }
@@ -1107,6 +1119,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         </div>\`;
       detail.querySelector("[data-action='back-findings']")?.addEventListener("click", () => {
         state.view = "findings";
+        setMobileDetailOpen(false);
         renderDetail();
       });
     }
@@ -1262,8 +1275,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
     }
 
-    async function loadFindings() {
-      state.view = "findings";
+    async function loadFindings(options = {}) {
+      if (!options.preserveView) state.view = "findings";
       state.loading = true;
       renderList();
       renderDetail();
@@ -1286,6 +1299,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     async function loadReleaseNotes() {
       state.view = "release-notes";
+      if (isMobileViewport()) setMobileDetailOpen(true);
       state.releaseNotesLoading = true;
       renderReleaseNotes();
       const res = await fetch("/api/public/release-notes", { credentials: "same-origin" });
@@ -1361,7 +1375,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     renderList();
     renderDetail();
-    syncSession().finally(() => loadFindings());
+    syncSession().finally(() => loadFindings({ preserveView: true }));
     if ((window.__RUNS__ || []).some((r) => r.status === "running" || r.status === "pending")) {
       setTimeout(loadFindings, 8000);
     }

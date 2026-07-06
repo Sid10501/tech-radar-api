@@ -8,6 +8,16 @@ import { auditFindings, auditPublicFindings, enrichmentStatus, filterCounts, fil
 import { listReleaseNotes } from "./releaseNotes.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 
+const SECURITY_HEADERS = {
+  "Content-Security-Policy":
+    "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'",
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+} as const;
+const NO_STORE_CACHE_CONTROL = "no-store, max-age=0";
+
 function getCookieValue(cookieHeader: unknown, name: string): string | undefined {
   const raw = Array.isArray(cookieHeader) ? cookieHeader.join(";") : cookieHeader;
   if (typeof raw !== "string") return undefined;
@@ -71,6 +81,13 @@ async function ensureAiMemoryCheckout(): Promise<void> {
 
 export function buildServer() {
   const app = Fastify({ logger: true });
+
+  app.addHook("onRequest", async (request, reply) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      reply.header(name, value);
+    }
+    reply.header("Cache-Control", NO_STORE_CACHE_CONTROL);
+  });
 
   // Set auth token cookie via ?token= query param (one-time web UI flow)
   app.addHook("onRequest", async (request, reply) => {
