@@ -163,4 +163,45 @@ describe("link enrichment", () => {
     });
     expect(enriched.warnings[0]).toContain("GitHub API returned 503");
   });
+
+  it("resolves curated Palmier Pro and Loop Engineering aliases", async () => {
+    const githubLookup = vi.fn(async (repo: string) => ({
+      stars: repo === "palmier-io/palmier-pro" ? 10_000 : 5_900,
+      lastPushed: "2026-07-06T00:00:00Z",
+      openIssues: 12,
+      language: repo === "palmier-io/palmier-pro" ? "Swift" : "JavaScript",
+      license: repo === "palmier-io/palmier-pro" ? "GPL-3.0" : "MIT",
+      archived: false,
+    }));
+
+    const palmier = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "A new open-source video editor called Palmier",
+        caption:
+          "A new open-source video editor called Palmier has been released that lets Claude directly edit and manage video timelines using AI.",
+      },
+      githubLookup,
+    );
+    const loop = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "[Open Source] Loop Engineering",
+        caption:
+          "Loop Engineering is an open-source comprehensive practice library for AI code agents, featuring an automated looping system.",
+      },
+      githubLookup,
+    );
+
+    expect(githubLookup).toHaveBeenCalledWith("palmier-io/palmier-pro");
+    expect(githubLookup).toHaveBeenCalledWith("cobusgreyling/loop-engineering");
+    expect(palmier.confirmed).toMatchObject({
+      github: "https://github.com/palmier-io/palmier-pro",
+      docs: "https://github.com/palmier-io/palmier-pro#readme",
+    });
+    expect(loop.confirmed).toMatchObject({
+      github: "https://github.com/cobusgreyling/loop-engineering",
+      docs: "https://cobusgreyling.github.io/loop-engineering/",
+    });
+  });
 });
