@@ -43,6 +43,7 @@ export interface EnrichedLinkCandidate {
   url: string;
   source: "caption" | "transcript" | "visual_text" | "title" | "source_url";
   confidence: "confirmed" | "candidate";
+  requires_github?: string;
 }
 
 export interface EnrichedLinks {

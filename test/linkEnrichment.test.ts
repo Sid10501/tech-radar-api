@@ -84,4 +84,83 @@ describe("link enrichment", () => {
     });
     expect(enriched.warnings[0]).toContain("GitHub API returned 404");
   });
+
+  it("resolves curated high-confidence tool aliases when social posts omit the repo link", async () => {
+    const githubLookup = vi.fn(async () => ({
+      stars: 51_000,
+      lastPushed: "2026-07-03T00:00:00Z",
+      openIssues: 30,
+      language: "Python",
+      license: "MIT",
+      archived: false,
+    }));
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "Video by parasmadan.in",
+        caption: "AI Agents on Twitter, Linkedin and WA. Agent reach can now work with your social accounts.",
+        transcript:
+          "Our AI agent can now read Twitter, Reddit, YouTube and GitHub in real time. " +
+          "There is a free open source tool for this called Agent Reach, already past 20,000 stars on GitHub.",
+      },
+      githubLookup,
+    );
+
+    expect(githubLookup).toHaveBeenCalledWith("Panniantong/Agent-Reach");
+    expect(enriched.confirmed.github).toBe("https://github.com/Panniantong/Agent-Reach");
+    expect(enriched.confirmed.docs).toBe("https://github.com/Panniantong/Agent-Reach/blob/main/docs/README_en.md");
+    expect(enriched.github?.license).toBe("MIT");
+  });
+
+  it("does not resolve curated aliases without corroborating evidence", async () => {
+    const githubLookup = vi.fn(async () => ({
+      stars: 51_000,
+      lastPushed: "2026-07-03T00:00:00Z",
+      openIssues: 30,
+      language: "Python",
+      license: "MIT",
+      archived: false,
+    }));
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        caption: "Agent Reach sounds interesting, but this post is only a vague mention.",
+        transcript: null,
+      },
+      githubLookup,
+    );
+
+    expect(githubLookup).not.toHaveBeenCalled();
+    expect(enriched.confirmed.github).toBeNull();
+    expect(enriched.candidates).toEqual([]);
+  });
+
+  it("downgrades curated aliases when GitHub validation fails", async () => {
+    const githubLookup = vi.fn(async () => {
+      throw new Error("GitHub API returned 503");
+    });
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        caption: "Agent reach can now work with your social accounts.",
+        transcript:
+          "Our AI agent can now read Twitter, Reddit, YouTube and GitHub in real time. " +
+          "There is a free open source tool for this called Agent Reach, already past 20,000 stars on GitHub.",
+      },
+      githubLookup,
+    );
+
+    expect(enriched.confirmed.github).toBeNull();
+    expect(enriched.confirmed.docs).toBeNull();
+    expect(enriched.candidates).toContainEqual({
+      kind: "github",
+      url: "https://github.com/Panniantong/Agent-Reach",
+      source: "caption",
+      confidence: "candidate",
+    });
+    expect(enriched.warnings[0]).toContain("GitHub API returned 503");
+  });
 });

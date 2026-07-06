@@ -8,6 +8,26 @@ const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
 const GITHUB_RE = /(?:https?:\/\/)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/gi;
 const NPM_PACKAGE_RE = /(?:npm\s+(?:install|i)\s+|pnpm\s+add\s+|yarn\s+add\s+)(@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+)/gi;
 
+interface CuratedProject {
+  aliases: RegExp[];
+  evidence: RegExp[];
+  github: string;
+  docs?: string;
+}
+
+const CURATED_PROJECTS: CuratedProject[] = [
+  {
+    aliases: [/\bagent\s*-?\s*reach\b/i],
+    evidence: [
+      /\b(twitter|x)\b[\s\S]{0,120}\breddit\b[\s\S]{0,120}\byoutube\b[\s\S]{0,120}\bgithub\b/i,
+      /\byoutube\b[\s\S]{0,120}\bgithub\b[\s\S]{0,120}\b(no setup|just works|real[-\s]?time)\b/i,
+      /\b(20,?000|50,?000)\s+stars?\b/i,
+    ],
+    github: "https://github.com/Panniantong/Agent-Reach",
+    docs: "https://github.com/Panniantong/Agent-Reach/blob/main/docs/README_en.md",
+  },
+];
+
 export function extractLinkCandidates(extract: ExtractResult): EnrichedLinkCandidate[] {
   const candidates: EnrichedLinkCandidate[] = [];
   for (const [source, value] of sourceTexts(extract)) {
@@ -15,6 +35,7 @@ export function extractLinkCandidates(extract: ExtractResult): EnrichedLinkCandi
     collectGithubTextCandidates(value, source, candidates);
     collectNpmInstallCandidates(value, source, candidates);
   }
+  collectCuratedProjectCandidates(extract, candidates);
   return dedupeCandidates(candidates);
 }
 
@@ -28,7 +49,9 @@ export async function enrichLinksFromExtract(
   let github: EnrichedLinks["github"] = null;
 
   for (const candidate of candidates) {
-    if (candidate.kind === "docs" && !confirmed.docs) confirmed.docs = candidate.url;
+    if (candidate.kind === "docs" && !confirmed.docs && isCandidateConfirmed(candidate, confirmed)) {
+      confirmed.docs = candidate.url;
+    }
     if (candidate.kind === "npm" && !confirmed.npm) confirmed.npm = candidate.url;
     if (candidate.kind !== "github" || confirmed.github) continue;
 
@@ -37,6 +60,7 @@ export async function enrichLinksFromExtract(
       github = await lookup(repo);
       candidate.confidence = "confirmed";
       confirmed.github = candidate.url;
+      confirmValidatedCompanionLinks(candidates, confirmed);
     } catch (err) {
       candidate.confidence = "candidate";
       warnings.push(`GitHub candidate rejected: ${candidate.url} (${err instanceof Error ? err.message : String(err)})`);
@@ -91,6 +115,53 @@ function collectNpmInstallCandidates(value: string, source: TextSource, candidat
       confidence: "candidate",
     });
   }
+}
+
+function collectCuratedProjectCandidates(extract: ExtractResult, candidates: EnrichedLinkCandidate[]): void {
+  const texts = sourceTexts(extract);
+  const combined = texts.map(([, value]) => value).join("\n");
+  if (!combined.trim()) return;
+
+  for (const project of CURATED_PROJECTS) {
+    const aliasSource = texts.find(([, value]) => project.aliases.some((alias) => alias.test(value)))?.[0];
+    if (!aliasSource) continue;
+    if (!project.evidence.some((evidence) => evidence.test(combined))) continue;
+
+    candidates.push({
+      kind: "github",
+      url: project.github,
+      source: aliasSource,
+      confidence: "candidate",
+    });
+    if (project.docs) {
+      candidates.push({
+        kind: "docs",
+        url: project.docs,
+        source: aliasSource,
+        confidence: "candidate",
+        requires_github: project.github,
+      });
+    }
+  }
+}
+
+function confirmValidatedCompanionLinks(
+  candidates: EnrichedLinkCandidate[],
+  confirmed: EnrichedLinks["confirmed"],
+): void {
+  if (!confirmed.github) return;
+  for (const candidate of candidates) {
+    if (candidate.kind !== "docs" || confirmed.docs) continue;
+    if (candidate.requires_github === confirmed.github) confirmed.docs = candidate.url;
+  }
+}
+
+function isCandidateConfirmed(
+  candidate: EnrichedLinkCandidate,
+  confirmed: EnrichedLinks["confirmed"],
+): boolean {
+  if (!candidate.requires_github) return true;
+  return confirmed.github === candidate.requires_github;
 }
 
 function linkKind(url: string): EnrichedLinkCandidate["kind"] | null {
