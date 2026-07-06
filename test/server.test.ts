@@ -117,6 +117,10 @@ describe("server routes", () => {
         "- Target project: ai-memory",
       ].join("\n"),
     );
+    fs.writeFileSync(
+      path.join(dir, "tech-radar", "applied.json"),
+      JSON.stringify({ "sample.md": { appliedAt: "2026-07-06", link: "https://github.com/Sid10501/portfolio" } }),
+    );
     process.env["AI_MEMORY_LOCAL_DIR"] = dir;
 
     const res = await app.inject({ method: "GET", url: "/api/public/findings" });
@@ -125,6 +129,7 @@ describe("server routes", () => {
     const body = res.json();
     expect(body.findings).toHaveLength(1);
     expect(body.findings[0].title).toBe("Public Sample");
+    expect(body.findings[0].applied).toEqual({ appliedAt: "2026-07-06", link: "https://github.com/Sid10501/portfolio" });
     expect(body.findings[0]).not.toHaveProperty("targetProject");
     expectNoPrivateFindingFields(body);
     expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);

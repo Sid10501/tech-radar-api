@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { loadAppliedMap, type AppliedEntry, type AppliedMap } from "./applied.js";
 
 export interface FindingEvidence {
   caption: boolean;
@@ -57,6 +58,7 @@ export interface FindingSummary {
 
 export type PublicFindingSummary = Omit<FindingSummary, "targetProject" | "verdict" | "recommendedAction"> & {
   isPrivate: false;
+  applied: AppliedEntry | null;
 };
 
 export interface FindingDetail {
@@ -423,7 +425,7 @@ function publicQuality(finding: FindingSummary): FindingQuality {
   };
 }
 
-export function toPublicFinding(finding: FindingSummary): PublicFindingSummary {
+export function toPublicFinding(finding: FindingSummary, appliedMap: AppliedMap = {}): PublicFindingSummary {
   const { targetProject: _targetProject, verdict: _verdict, recommendedAction: _recommendedAction, ...rest } = finding;
   return {
     ...rest,
@@ -431,6 +433,7 @@ export function toPublicFinding(finding: FindingSummary): PublicFindingSummary {
     retry: publicRetryHistory(finding.retry),
     diagnostics: publicDiagnostics(finding.diagnostics),
     isPrivate: false,
+    applied: appliedMap[finding.filename] ?? null,
   };
 }
 
@@ -670,7 +673,8 @@ function stableDuplicateId(value: string): string {
 }
 
 export function listPublicFindings(aiMemoryDir = getAiMemoryDir()): PublicFindingSummary[] {
-  return listFindings(aiMemoryDir).map(toPublicFinding);
+  const appliedMap = loadAppliedMap(aiMemoryDir);
+  return listFindings(aiMemoryDir).map((finding) => toPublicFinding(finding, appliedMap));
 }
 
 export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir()): FindingDetail | null {
@@ -704,7 +708,7 @@ export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemo
   if (!detail) return null;
   const publicMarkdown = withoutPrivateSections(detail.markdown);
   return {
-    finding: toPublicFinding(detail.finding),
+    finding: toPublicFinding(detail.finding, loadAppliedMap(aiMemoryDir)),
     markdown: publicMarkdown,
     sections: {
       tldr: textBetween(publicMarkdown, "TL;DR"),

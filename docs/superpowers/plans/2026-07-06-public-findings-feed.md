@@ -16,9 +16,9 @@
 
 ## Task 1: `applied` mapping
 
-- [ ] Test first (`test/applied.test.ts` + extend `test/findings.test.ts`/server tests): fixture `applied.json` in the test ai-memory dir maps one finding slug → `{appliedAt, link}`; assert summary + detail expose it; assert missing file / invalid JSON → `applied: null`, warning logged, no throw.
-- [ ] Implement `src/applied.ts` (`loadAppliedMap(aiMemoryDir)`) consumed by `toPublicFinding`; extend `PublicFindingSummary`.
-- [ ] Seed real `tech-radar/applied.json` in ai-memory (separate repo commit): `20260514-...` → brand mockup/UI template, `2026-06-28-ketan-...` + kun audit → this workflow, `2026-05-19-...fli...` → the live radar feed itself.
+- [x] Test first (`test/applied.test.ts` + extend `test/findings.test.ts`/server tests): fixture `applied.json` in the test ai-memory dir maps one finding slug → `{appliedAt, link}`; assert summary + detail expose it; assert missing file / invalid JSON → `applied: null`, warning logged, no throw.
+- [x] Implement `src/applied.ts` (`loadAppliedMap(aiMemoryDir)`) consumed by `toPublicFinding`; extend `PublicFindingSummary`.
+- [x] Seed real `tech-radar/applied.json` in ai-memory (separate repo commit): `20260514-...` → brand mockup/UI template, `2026-06-28-ketan-...` + kun audit → this workflow, `2026-05-19-...fli...` → the live radar feed itself.
 
 ## Task 2: RSS 2.0 endpoint
 

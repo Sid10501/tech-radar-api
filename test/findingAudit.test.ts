@@ -38,6 +38,7 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     retry: null,
     diagnostics: { extractionWarnings: [] },
     isPrivate: false,
+    applied: null,
     ...overrides,
   };
 }
