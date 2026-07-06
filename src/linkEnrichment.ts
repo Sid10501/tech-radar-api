@@ -1,8 +1,14 @@
 import type { EnrichedLinkCandidate, EnrichedLinks, ExtractResult } from "./extract.js";
-import { githubLookup, type GithubRepoInfo } from "./tools/github.js";
+import {
+  githubLookup,
+  githubSearchRepositories,
+  type GithubRepoInfo,
+  type GithubRepoSearchResult,
+} from "./tools/github.js";
 
 type TextSource = EnrichedLinkCandidate["source"];
 type GithubLookup = (repo: string) => Promise<GithubRepoInfo>;
+type GithubSearch = (query: string, limit: number) => Promise<GithubRepoSearchResult[]>;
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
 const GITHUB_RE = /(?:https?:\/\/)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/gi;
@@ -62,11 +68,20 @@ export function extractLinkCandidates(extract: ExtractResult): EnrichedLinkCandi
 export async function enrichLinksFromExtract(
   extract: ExtractResult,
   lookup: GithubLookup = githubLookup,
+  search: GithubSearch = githubSearchRepositories,
 ): Promise<EnrichedLinks> {
   const candidates = extractLinkCandidates(extract);
   const confirmed: EnrichedLinks["confirmed"] = { github: null, docs: null, npm: null };
   const warnings: string[] = [];
   let github: EnrichedLinks["github"] = null;
+
+  if (!candidates.some((candidate) => candidate.kind === "github")) {
+    try {
+      candidates.push(...await githubSearchCandidates(extract, search));
+    } catch (err) {
+      warnings.push(`GitHub search failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   for (const candidate of candidates) {
     if (candidate.kind === "docs" && !confirmed.docs && isCandidateConfirmed(candidate, confirmed)) {
@@ -164,6 +179,84 @@ function collectCuratedProjectCandidates(extract: ExtractResult, candidates: Enr
       });
     }
   }
+}
+
+async function githubSearchCandidates(
+  extract: ExtractResult,
+  search: GithubSearch,
+): Promise<EnrichedLinkCandidate[]> {
+  const searchSpec = githubSearchSpec(extract);
+  if (!searchSpec) return [];
+  const results = await search(searchSpec.query, 3);
+  const best = results.find((result) => isHighConfidenceSearchHit(result, searchSpec.name));
+  if (!best) return [];
+  return [{
+    kind: "github",
+    url: normalizeGithubUrl(best.htmlUrl),
+    source: searchSpec.source,
+    confidence: "candidate",
+    discovered_by: "github_search",
+    search_query: searchSpec.query,
+  }];
+}
+
+function githubSearchSpec(extract: ExtractResult): { name: string; query: string; source: TextSource } | null {
+  const texts = sourceTexts(extract);
+  const combined = texts.map(([, value]) => value).join("\n");
+  if (!/\b(github|open[-\s]?source|repo|repository)\b/i.test(combined)) return null;
+  const named = findNamedTool(texts);
+  if (!named) return null;
+  const context: string[] = [];
+  if (/\bAI agents?\b/i.test(combined)) context.push("AI agents");
+  if (/\bClaude Code\b/i.test(combined)) context.push("Claude Code");
+  if (/\bvideo editor\b/i.test(combined)) context.push("video editor");
+  context.push("GitHub");
+  return {
+    name: named.name,
+    source: named.source,
+    query: [named.name, ...context].join(" "),
+  };
+}
+
+function findNamedTool(texts: Array<[TextSource, string]>): { name: string; source: TextSource } | null {
+  const patterns = [
+    /\btool called\s+([A-Z][A-Za-z0-9_.-]{1,40})\b/,
+    /\bcalled\s+([A-Z][A-Za-z0-9_.-]{1,40})\b/,
+    /\bopen[-\s]?sourced?\s+([A-Z][A-Za-z0-9_.-]{1,40})\b/,
+  ];
+  for (const [source, value] of texts) {
+    for (const pattern of patterns) {
+      const match = pattern.exec(value);
+      if (match?.[1] && isSearchableToolName(match[1])) return { name: match[1], source };
+    }
+  }
+  return null;
+}
+
+function isHighConfidenceSearchHit(result: GithubRepoSearchResult, name: string): boolean {
+  if (result.archived) return false;
+  const normalizedName = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const repoName = result.fullName.split("/").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+  if (repoName === normalizedName) return true;
+  if (normalizedName.length >= 5 && repoName.includes(normalizedName)) return true;
+  const description = result.description?.toLowerCase() ?? "";
+  return result.stars >= 50 && normalizedName.length >= 5 && description.includes(name.toLowerCase());
+}
+
+function isSearchableToolName(name: string): boolean {
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (normalized.length < 3) return false;
+  return !new Set([
+    "ai",
+    "app",
+    "bot",
+    "code",
+    "github",
+    "open",
+    "repo",
+    "tool",
+    "video",
+  ]).has(normalized);
 }
 
 function confirmValidatedCompanionLinks(

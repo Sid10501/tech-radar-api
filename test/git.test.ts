@@ -64,6 +64,108 @@ describe("AiMemoryRepo", () => {
     }
   });
 
+  it("rewrites the existing finding when a retry generates a new filename for the same source URL", async () => {
+    const sourceUrl = "https://www.instagram.com/p/example/";
+    await repo.pullLatest();
+    await repo.writeFindingForSource({
+      sourceUrl,
+      filename: "2026-04-28-old-title.md",
+      body: [
+        "# Old Title",
+        "",
+        `**Source:** instagram · [Creator](${sourceUrl})`,
+        "**Saved:** 20260428",
+        "",
+        "Old body.",
+        "",
+      ].join("\n"),
+      date: "2026-04-28",
+    });
+    await repo.commitAndPush("tech-radar: old-title");
+
+    await repo.pullLatest();
+    const write = await repo.writeFindingForSource({
+      sourceUrl,
+      filename: "2026-07-06-new-title.md",
+      body: [
+        "# New Title",
+        "",
+        `**Source:** instagram · [Creator](${sourceUrl})`,
+        "**Saved:** 20260706",
+        "",
+        "New body.",
+        "",
+      ].join("\n"),
+      date: "2026-07-06",
+    });
+    await repo.commitAndPush("tech-radar: retry source");
+
+    expect(write).toEqual({
+      filename: "2026-04-28-old-title.md",
+      generatedFilename: "2026-07-06-new-title.md",
+      replacedExisting: true,
+    });
+
+    const verifyDir = fs.mkdtempSync(path.join(os.tmpdir(), "tech-radar-verify-source-"));
+    try {
+      execSync(`git clone -b master ${bareRepoDir} .`, { cwd: verifyDir });
+      const findingsDir = path.join(verifyDir, "tech-radar", "findings");
+      expect(fs.existsSync(path.join(findingsDir, "2026-04-28-old-title.md"))).toBe(true);
+      expect(fs.existsSync(path.join(findingsDir, "2026-07-06-new-title.md"))).toBe(false);
+      const content = fs.readFileSync(path.join(findingsDir, "2026-04-28-old-title.md"), "utf8");
+      expect(content).toContain("# New Title");
+      expect(content).toContain("Generated filename: `2026-07-06-new-title.md`");
+    } finally {
+      fs.rmSync(verifyDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records retry history when a retry rewrites the same generated filename for the same source URL", async () => {
+    const sourceUrl = "https://www.instagram.com/p/same-title/";
+    await repo.pullLatest();
+    await repo.writeFindingForSource({
+      sourceUrl,
+      filename: "2026-07-06-same-title.md",
+      body: [
+        "# Same Title",
+        "",
+        `**Source:** instagram · [Creator](${sourceUrl})`,
+        "**Saved:** 20260706",
+        "",
+        "Old body.",
+        "",
+      ].join("\n"),
+      date: "2026-07-06",
+    });
+    await repo.commitAndPush("tech-radar: same-title");
+
+    await repo.pullLatest();
+    const write = await repo.writeFindingForSource({
+      sourceUrl,
+      filename: "2026-07-06-same-title.md",
+      body: [
+        "# Same Title",
+        "",
+        `**Source:** instagram · [Creator](${sourceUrl})`,
+        "**Saved:** 20260706",
+        "",
+        "New body.",
+        "",
+      ].join("\n"),
+      date: "2026-07-06",
+    });
+
+    expect(write).toEqual({
+      filename: "2026-07-06-same-title.md",
+      generatedFilename: "2026-07-06-same-title.md",
+      replacedExisting: true,
+    });
+    const content = fs.readFileSync(path.join(workDir, "clone", "tech-radar", "findings", "2026-07-06-same-title.md"), "utf8");
+    expect(content).toContain("New body.");
+    expect(content).toContain("## Retry history");
+    expect(content).toContain("Previous filename: `2026-07-06-same-title.md`");
+  });
+
   it("updates INBOX.md with a new row", async () => {
     await repo.pullLatest();
     await repo.updateInbox({

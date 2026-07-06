@@ -65,4 +65,13 @@ describe("dashboard HTML", () => {
     expect(html).toContain("Missing links");
     expect(html).toContain("Source uncertainty");
   });
+
+  it("renders retry history and extraction warning diagnostics in the existing detail explorer", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("retryHistory");
+    expect(html).toContain("Extraction warnings");
+    expect(html).toContain("extractionWarnings");
+    expect(html).not.toContain("createRoot");
+  });
 });

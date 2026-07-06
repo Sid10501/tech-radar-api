@@ -25,6 +25,19 @@ export interface IndexRow {
   targetProject: string;
 }
 
+export interface WriteFindingForSourceInput {
+  sourceUrl: string | null;
+  filename: string;
+  body: string;
+  date: string;
+}
+
+export interface WriteFindingResult {
+  filename: string;
+  generatedFilename: string;
+  replacedExisting: boolean;
+}
+
 export class AiMemoryRepo {
   private git!: SimpleGit;
   private readonly opts: AiMemoryRepoOptions;
@@ -74,6 +87,38 @@ export class AiMemoryRepo {
     fs.mkdirSync(findingsDir, { recursive: true });
     fs.writeFileSync(path.join(findingsDir, filename), body, "utf8");
     await this.git.add(path.join("tech-radar", "findings", filename));
+  }
+
+  async writeFindingForSource(input: WriteFindingForSourceInput): Promise<WriteFindingResult> {
+    const findingsDir = path.join(this.opts.localDir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    const existingFilename = input.sourceUrl ? this.findFindingBySourceUrl(input.sourceUrl) : null;
+    const targetFilename = existingFilename ?? input.filename;
+    const body = existingFilename
+      ? appendRetryMetadata(input.body, {
+          date: input.date,
+          generatedFilename: input.filename,
+          previousFilename: existingFilename,
+        })
+      : input.body;
+
+    fs.writeFileSync(path.join(findingsDir, targetFilename), body, "utf8");
+    await this.git.add(path.join("tech-radar", "findings", targetFilename));
+    return {
+      filename: targetFilename,
+      generatedFilename: input.filename,
+      replacedExisting: Boolean(existingFilename),
+    };
+  }
+
+  private findFindingBySourceUrl(sourceUrl: string): string | null {
+    const findingsDir = path.join(this.opts.localDir, "tech-radar", "findings");
+    if (!fs.existsSync(findingsDir)) return null;
+    for (const file of fs.readdirSync(findingsDir).filter((name) => name.endsWith(".md")).sort()) {
+      const content = fs.readFileSync(path.join(findingsDir, file), "utf8");
+      if (content.includes(`](${sourceUrl})`) || content.includes(sourceUrl)) return file;
+    }
+    return null;
   }
 
   async updateInbox(row: InboxRow): Promise<void> {
@@ -145,6 +190,22 @@ export class AiMemoryRepo {
       }
     }
   }
+}
+
+function appendRetryMetadata(
+  body: string,
+  metadata: { date: string; generatedFilename: string; previousFilename: string },
+): string {
+  const block = [
+    "",
+    "## Retry history",
+    "",
+    `- Updated: ${metadata.date}`,
+    `- Previous filename: \`${metadata.previousFilename}\``,
+    `- Generated filename: \`${metadata.generatedFilename}\``,
+    "",
+  ].join("\n");
+  return `${body.trimEnd()}\n${block}`;
 }
 
 export function setupSshKey(base64Key: string): string {

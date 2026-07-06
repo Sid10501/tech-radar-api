@@ -17,6 +17,8 @@ export interface Run {
   url: string;
   status: "pending" | "running" | "processed" | "failed" | "skipped";
   findingPath?: string;
+  generatedFindingPath?: string;
+  replacedExistingFinding?: boolean;
   error?: string;
   startedAt: string;
   finishedAt?: string;
@@ -250,33 +252,40 @@ export async function runPipeline(
     );
 
     // Step 4: Compose
-    const { filename, body } = composeFinding({
+    const composed = composeFinding({
       extract: enrichedExtract,
       research: researchResult,
       implementation: implementationResult,
     });
 
     // Step 5: Write to git
-    await repo.writeFinding(filename, body);
-    await repo.updateInbox({ url, status: "processed", finding: filename, date: today });
+    const write = await repo.writeFindingForSource({
+      sourceUrl: url,
+      filename: composed.filename,
+      body: composed.body,
+      date: today,
+    });
+    await repo.updateInbox({ url, status: "processed", finding: write.filename, date: today });
     await repo.updateIndex({
       date: today,
-      title: extractResult.title ?? filename,
-      finding: filename,
+      title: extractResult.title ?? write.filename,
+      finding: write.filename,
       targetProject: implementationResult.target_project,
     });
-    await repo.commitAndPush(`tech-radar: ${filename.replace(".md", "")} — ${today}`);
+    await repo.commitAndPush(`tech-radar: ${write.filename.replace(".md", "")} — ${today}`);
 
-    const findingPath = `tech-radar/findings/${filename}`;
+    const findingPath = `tech-radar/findings/${write.filename}`;
 
     run.status = "processed";
     run.findingPath = findingPath;
+    run.generatedFindingPath = write.generatedFilename === write.filename ? undefined : `tech-radar/findings/${write.generatedFilename}`;
+    run.replacedExistingFinding = write.replacedExisting;
     run.finishedAt = new Date().toISOString();
     storeRun(run);
 
     const repoUrl = process.env["AI_MEMORY_REPO_URL"] ?? "";
     const fileLink = repoUrl ? `${repoUrl}/blob/master/${findingPath}` : findingPath;
-    sendTelegram(`✅ *Tech Radar finding ready*\n\n[${filename.replace(".md", "")}](${fileLink})\n\nSource: ${url.slice(0, 60)}`);
+    sendTelegram(`✅ *Tech Radar finding ready*\n\n[${write.filename.replace(".md", "")}](${fileLink})\n\nSource: ${url.slice(0, 60)}`);
 
     releaseSlot();
     return { runId, findingPath };

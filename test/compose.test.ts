@@ -102,4 +102,24 @@ describe("composeFinding()", () => {
     // should produce something like 2026-04-28-introducing-zod-4-typescript-first-schema-validation.md
     expect(filename.toLowerCase()).toContain("zod");
   });
+
+  it("preserves extraction warnings in the source-evidence section", async () => {
+    const { composeFinding } = await import("../src/compose.js");
+    const { body } = composeFinding({
+      extract: {
+        ...extractFixture,
+        visual_text: null,
+        extraction_warnings: [
+          "Vision OCR skipped: OPENAI_API_KEY is not configured",
+          "Only carousel metadata was available",
+        ],
+      },
+      research: researchFixture,
+      implementation: implementationFixture,
+    });
+
+    expect(body).toContain("Extraction warnings:");
+    expect(body).toContain("- Vision OCR skipped: OPENAI_API_KEY is not configured");
+    expect(body).toContain("- Only carousel metadata was available");
+  });
 });
