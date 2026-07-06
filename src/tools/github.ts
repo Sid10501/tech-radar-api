@@ -9,13 +9,26 @@ export interface GithubRepoInfo {
   archived: boolean;
 }
 
-export function githubLookup(repo: string): Promise<GithubRepoInfo> {
+export interface GithubRepoSearchResult {
+  fullName: string;
+  htmlUrl: string;
+  description: string | null;
+  stars: number;
+  archived: boolean;
+}
+
+function githubHeaders(): Record<string, string> {
   const token = process.env["GITHUB_TOKEN"];
   const headers: Record<string, string> = {
     "User-Agent": "tech-radar-api/1.0",
     "Accept": "application/vnd.github+json",
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
+export function githubLookup(repo: string): Promise<GithubRepoInfo> {
+  const headers = githubHeaders();
 
   // Normalize: strip any leading API URL or https://github.com/ prefix
   let normalized = repo
@@ -60,6 +73,42 @@ export function githubLookup(repo: string): Promise<GithubRepoInfo> {
           });
         } catch (e) {
           reject(new Error(`Failed to parse GitHub response: ${e}`));
+        }
+      });
+    });
+    req.on("error", reject);
+  });
+}
+
+export function githubSearchRepositories(query: string, limit = 3): Promise<GithubRepoSearchResult[]> {
+  const params = new URLSearchParams({
+    q: `${query} in:name,description,readme`,
+    sort: "stars",
+    order: "desc",
+    per_page: String(Math.max(1, Math.min(10, limit))),
+  });
+  const url = `https://api.github.com/search/repositories?${params.toString()}`;
+
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: githubHeaders() }, (res) => {
+      let body = "";
+      res.on("data", (chunk: Buffer | string) => { body += chunk; });
+      res.on("end", () => {
+        try {
+          if (res.statusCode !== 200) {
+            return reject(new Error(`GitHub search returned ${res.statusCode} for ${query}`));
+          }
+          const data = JSON.parse(body);
+          const items = Array.isArray(data.items) ? data.items : [];
+          resolve(items.map((item: any) => ({
+            fullName: item.full_name,
+            htmlUrl: item.html_url,
+            description: item.description ?? null,
+            stars: item.stargazers_count ?? 0,
+            archived: item.archived ?? false,
+          })).filter((item: GithubRepoSearchResult) => item.fullName && item.htmlUrl));
+        } catch (e) {
+          reject(new Error(`Failed to parse GitHub search response: ${e}`));
         }
       });
     });

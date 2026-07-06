@@ -107,6 +107,7 @@ describe("runPipeline()", () => {
         stars: 32000, lastPushed: "2026-04-01T00:00:00Z",
         openIssues: 42, language: "TypeScript", license: "MIT", archived: false,
       })),
+      githubSearchRepositories: vi.fn(async () => []),
     }));
 
     vi.doMock("../src/tools/ai_memory.js", () => ({

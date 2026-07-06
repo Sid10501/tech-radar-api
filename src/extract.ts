@@ -57,6 +57,8 @@ export interface EnrichedLinkCandidate {
   source: "caption" | "transcript" | "visual_text" | "title" | "source_url";
   confidence: "confirmed" | "candidate";
   requires_github?: string;
+  discovered_by?: "explicit" | "curated" | "github_search";
+  search_query?: string;
 }
 
 export interface EnrichedLinks {

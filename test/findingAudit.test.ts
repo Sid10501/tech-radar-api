@@ -16,6 +16,8 @@ function finding(overrides: Partial<FindingSummary> = {}): FindingSummary {
     summary: "Summary",
     evidence: { caption: true, transcript: false, ocr: false, repo: false, docs: false },
     quality: { score: 42, level: "weak", reasons: ["caption", "source uncertainty"] },
+    retry: null,
+    diagnostics: { extractionWarnings: [] },
     recommendedAction: "Retry",
     ...overrides,
   };
@@ -33,6 +35,8 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     summary: "Summary",
     evidence: { caption: true, transcript: false, ocr: false, repo: true, docs: false },
     quality: { score: 60, level: "review", reasons: ["caption", "repo"] },
+    retry: null,
+    diagnostics: { extractionWarnings: [] },
     isPrivate: false,
     ...overrides,
   };

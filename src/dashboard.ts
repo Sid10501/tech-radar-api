@@ -981,13 +981,14 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     function extractionDetails(d) {
       const shown = d.sections.shown || "";
-      const transcript = textAfterAny(shown, "Key claims from transcript:", ["Learning chapters:", "On-screen text / OCR:", "Extraction path:", "Source links found:", "Top comments:"]);
-      const chapters = textAfterAny(shown, "Learning chapters:", ["On-screen text / OCR:", "Extraction path:", "Source links found:", "Top comments:"]);
-      const ocr = textAfterAny(shown, "On-screen text / OCR:", ["Extraction path:", "Source links found:", "Top comments:"]);
-      const extractionPath = textAfterAny(shown, "Extraction path:", ["Source links found:", "Top comments:"]);
-      const sourceLinks = textAfterAny(shown, "Source links found:", ["Top comments:"]);
-      const comments = textAfterAny(shown, "Top comments:", []);
+      const transcript = textAfterAny(shown, "Key claims from transcript:", ["Learning chapters:", "On-screen text / OCR:", "Extraction path:", "Source links found:", "Top comments:", "Extraction warnings:"]);
+      const chapters = textAfterAny(shown, "Learning chapters:", ["On-screen text / OCR:", "Extraction path:", "Source links found:", "Top comments:", "Extraction warnings:"]);
+      const ocr = textAfterAny(shown, "On-screen text / OCR:", ["Extraction path:", "Source links found:", "Top comments:", "Extraction warnings:"]);
+      const extractionPath = textAfterAny(shown, "Extraction path:", ["Source links found:", "Top comments:", "Extraction warnings:"]);
+      const sourceLinks = textAfterAny(shown, "Source links found:", ["Top comments:", "Extraction warnings:"]);
+      const comments = textAfterAny(shown, "Top comments:", ["Extraction warnings:"]);
       const caption = textAfter(shown, "> Caption:", "Key claims from transcript:");
+      const extractionWarnings = d.sections.extractionWarnings || textAfter(shown, "Extraction warnings:");
       const blocks = [];
       if (caption) blocks.push(\`<details><summary>Caption</summary><div class="details-content markdown">\${markdownToHtml(caption)}</div></details>\`);
       if (transcript) blocks.push(\`<details><summary>Transcript</summary><div class="details-content markdown">\${markdownToHtml(transcript)}</div></details>\`);
@@ -997,6 +998,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (extractionPath) blocks.push(\`<details><summary>Extraction path</summary><div class="details-content markdown">\${markdownToHtml(extractionPath)}</div></details>\`);
       if (sourceLinks) blocks.push(\`<details><summary>Source links</summary><div class="details-content markdown">\${markdownToHtml(sourceLinks)}</div></details>\`);
       if (comments) blocks.push(\`<details><summary>Top comments</summary><div class="details-content markdown">\${markdownToHtml(comments)}</div></details>\`);
+      if (extractionWarnings) blocks.push(\`<details open><summary>Extraction warnings</summary><div class="details-content markdown">\${markdownToHtml(extractionWarnings)}</div></details>\`);
       blocks.push(\`<details><summary>Full finding markdown</summary><div class="details-content markdown">\${markdownToHtml(d.markdown)}</div></details>\`);
       return blocks.join("");
     }
@@ -1082,6 +1084,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         personal ? sectionPanel("Fit for Sid", d.sections.fit) : "",
         personal ? sectionPanel("Implementation idea", d.sections.implementation) : "",
         personal ? sectionPanel("Follow-ups", d.sections.followups) : "",
+        sectionPanel("Retry history", d.sections.retryHistory),
         !state.privateUnlocked ? '<div class="panel"><div class="panel-head">Sid-specific layer</div><div class="panel-body">Unlock when you want to see project fit, recommended action, and implementation notes. The public research above stays open for everyone.</div></div>' : "",
       ].filter(Boolean).join("");
       detail.innerHTML = \`
@@ -1186,7 +1189,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       const current = state.findings.find((finding) => finding.id === id);
       if (current) {
-        state.detail = { finding: current, sections: { tldr: current.summary, shown: "", research: current.summary, links: "", kickstarter: "", fit: "", implementation: "", followups: "" }, markdown: "" };
+        state.detail = { finding: current, sections: { tldr: current.summary, shown: "", research: current.summary, links: "", kickstarter: "", fit: "", implementation: "", followups: "", retryHistory: "", extractionWarnings: "" }, markdown: "" };
         renderDetail();
       }
       const detail = await fetchFindingDetail(id, requestId);

@@ -61,6 +61,10 @@ export function composeFinding(input: {
         return `- ${author}${likes}: ${comment.text.slice(0, 220)}`;
       }).join("\n")}\n`
     : "";
+  const extractionWarnings = (extract.extraction_warnings ?? []).filter((warning) => warning.trim());
+  const extractionWarningsBlock = extractionWarnings.length
+    ? `\nExtraction warnings:\n${extractionWarnings.map((warning) => `- ${warning}`).join("\n")}\n`
+    : "";
 
   const body = `# ${title}
 
@@ -83,6 +87,7 @@ ${visualTextBlock}
 ${extractionMethodsBlock}
 ${sourceLinksBlock}
 ${topCommentsBlock}
+${extractionWarningsBlock}
 
 ## What it actually is
 

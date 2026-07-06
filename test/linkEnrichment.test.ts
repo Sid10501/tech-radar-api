@@ -204,4 +204,118 @@ describe("link enrichment", () => {
       docs: "https://cobusgreyling.github.io/loop-engineering/",
     });
   });
+
+  it("uses conservative GitHub search when a named tool has no explicit URL or curated resolver", async () => {
+    const githubLookup = vi.fn(async () => ({
+      stars: 2_400,
+      lastPushed: "2026-07-05T00:00:00Z",
+      openIssues: 7,
+      language: "TypeScript",
+      license: "MIT",
+      archived: false,
+    }));
+    const githubSearch = vi.fn(async () => [
+      {
+        fullName: "example/rufflo",
+        htmlUrl: "https://github.com/example/rufflo",
+        description: "Runs 60+ AI agents simultaneously inside Claude Code.",
+        stars: 2_400,
+        archived: false,
+      },
+    ]);
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "Someone open-sourced 147 pre-built AI agents",
+        caption:
+          "A tool called Rufflo just hit number one on GitHub and it runs 60+ AI agents simultaneously inside Claude Code.",
+      },
+      githubLookup,
+      githubSearch,
+    );
+
+    expect(githubSearch).toHaveBeenCalledWith("Rufflo AI agents Claude Code GitHub", 3);
+    expect(githubLookup).toHaveBeenCalledWith("example/rufflo");
+    expect(enriched.confirmed.github).toBe("https://github.com/example/rufflo");
+    expect(enriched.candidates[0]).toMatchObject({
+      kind: "github",
+      url: "https://github.com/example/rufflo",
+      source: "caption",
+      confidence: "confirmed",
+      discovered_by: "github_search",
+      search_query: "Rufflo AI agents Claude Code GitHub",
+    });
+  });
+
+  it("does not use GitHub search when explicit GitHub evidence exists", async () => {
+    const githubLookup = vi.fn(async () => ({
+      stars: 42,
+      lastPushed: "2026-06-20T00:00:00Z",
+      openIssues: 2,
+      language: "Swift",
+      license: "MIT",
+      archived: false,
+    }));
+    const githubSearch = vi.fn(async () => []);
+
+    await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        caption: "Repo https://github.com/marcosricopeng/palmier",
+      },
+      githubLookup,
+      githubSearch,
+    );
+
+    expect(githubSearch).not.toHaveBeenCalled();
+  });
+
+  it("does not search GitHub for generic capitalized words after called", async () => {
+    const githubLookup = vi.fn();
+    const githubSearch = vi.fn(async () => [{
+      fullName: "example/open-runtime",
+      htmlUrl: "https://github.com/example/open-runtime",
+      description: "Unrelated open source runtime",
+      stars: 1000,
+      archived: false,
+    }]);
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        caption: "A thing called Open is trending on GitHub for developers.",
+      },
+      githubLookup,
+      githubSearch,
+    );
+
+    expect(githubSearch).not.toHaveBeenCalled();
+    expect(githubLookup).not.toHaveBeenCalled();
+    expect(enriched.confirmed.github).toBeNull();
+  });
+
+  it("rejects GitHub search hits where a short name is only a partial repo-name match", async () => {
+    const githubLookup = vi.fn();
+    const githubSearch = vi.fn(async () => [{
+      fullName: "example/aider-tools",
+      htmlUrl: "https://github.com/example/aider-tools",
+      description: "Tools for unrelated workflows",
+      stars: 1000,
+      archived: false,
+    }]);
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        caption: "A tool called Aid just landed on GitHub for AI agents.",
+      },
+      githubLookup,
+      githubSearch,
+    );
+
+    expect(githubSearch).toHaveBeenCalledWith("Aid AI agents GitHub", 3);
+    expect(githubLookup).not.toHaveBeenCalled();
+    expect(enriched.confirmed.github).toBeNull();
+  });
 });

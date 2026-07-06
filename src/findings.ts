@@ -15,6 +15,16 @@ export interface FindingQuality {
   reasons: string[];
 }
 
+export interface FindingRetryHistory {
+  updated: string | null;
+  previousFilename: string | null;
+  generatedFilename: string | null;
+}
+
+export interface FindingDiagnostics {
+  extractionWarnings: string[];
+}
+
 export interface FindingSummary {
   id: string;
   filename: string;
@@ -33,6 +43,8 @@ export interface FindingSummary {
   summary: string;
   evidence: FindingEvidence;
   quality: FindingQuality;
+  retry: FindingRetryHistory | null;
+  diagnostics: FindingDiagnostics;
   recommendedAction: "Create task" | "Backlog" | "Skip" | "Retry" | "Review";
 }
 
@@ -52,6 +64,8 @@ export interface FindingDetail {
     fit: string;
     implementation: string;
     followups: string;
+    retryHistory: string;
+    extractionWarnings: string;
   };
 }
 
@@ -64,12 +78,14 @@ export interface PublicFindingDetail {
     research: string;
     links: string;
     kickstarter: string;
+    retryHistory: string;
+    extractionWarnings: string;
   };
 }
 
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 const TEMPLATE_SECTION_HEADING =
-  /^## (TL;DR|What the post showed|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Follow-ups)\s*$/m;
+  /^## (TL;DR|What the post showed|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Follow-ups|Retry history)\s*$/m;
 const PRIVATE_PROJECT_REFERENCE =
   /\b(Cross-Tax|StockBot|Finance Assistant|Kalkine Stocks Tracker|tech-radar-api|ai-video)\b/i;
 
@@ -288,6 +304,24 @@ function markerText(source: string, marker: string, untilMarkers: string[] = [])
   return after.slice(0, end).trim();
 }
 
+function parseBulletLines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*]\s+/, ""))
+    .filter(Boolean);
+}
+
+function parseRetryHistory(body: string): FindingRetryHistory | null {
+  const retryHistory = textBetween(body, "Retry history");
+  if (!retryHistory) return null;
+
+  return {
+    updated: retryHistory.match(/^- Updated:\s*(.+)$/m)?.[1]?.trim() ?? null,
+    previousFilename: retryHistory.match(/^- Previous filename:\s*`?([^`\n]+)`?/m)?.[1]?.trim() ?? null,
+    generatedFilename: retryHistory.match(/^- Generated filename:\s*`?([^`\n]+)`?/m)?.[1]?.trim() ?? null,
+  };
+}
+
 function hasCapturedText(value: string, unavailable: RegExp): boolean {
   const clean = stripMarkdown(value);
   return Boolean(clean && !unavailable.test(clean));
@@ -357,8 +391,30 @@ export function toPublicFinding(finding: FindingSummary): PublicFindingSummary {
   return {
     ...rest,
     quality: publicQuality(finding),
+    retry: publicRetryHistory(finding.retry),
+    diagnostics: publicDiagnostics(finding.diagnostics),
     isPrivate: false,
   };
+}
+
+function publicRetryHistory(retry: FindingRetryHistory | null): FindingRetryHistory | null {
+  if (!retry) return null;
+  return {
+    updated: retry.updated,
+    previousFilename: publicSafeValue(retry.previousFilename),
+    generatedFilename: publicSafeValue(retry.generatedFilename),
+  };
+}
+
+function publicDiagnostics(diagnostics: FindingDiagnostics): FindingDiagnostics {
+  return {
+    extractionWarnings: diagnostics.extractionWarnings.filter((warning) => !PRIVATE_PROJECT_REFERENCE.test(warning)),
+  };
+}
+
+function publicSafeValue(value: string | null): string | null {
+  if (!value) return null;
+  return PRIVATE_PROJECT_REFERENCE.test(value) ? null : value;
 }
 
 export function parseFindingMarkdown(filename: string, markdown: string): FindingSummary {
@@ -382,6 +438,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     "Extraction path:",
     "Source links found:",
     "Top comments:",
+    "Extraction warnings:",
   ];
   const captionText = markerText(shown, "> Caption:", ["Key claims from transcript:", ...evidenceMarkers]);
   const transcriptText = markerText(shown, "Key claims from transcript:", evidenceMarkers);
@@ -390,7 +447,9 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     "Source links found:",
     "Top comments:",
     "Learning chapters:",
+    "Extraction warnings:",
   ]);
+  const extractionWarnings = parseBulletLines(markerText(shown, "Extraction warnings:"));
   const evidence: FindingEvidence = {
     caption: hasCapturedText(captionText, /^(none|no caption available)$/i),
     transcript: hasCapturedText(transcriptText, /^[-\s]*(\(no transcript available\)|no transcript available)$/i),
@@ -402,6 +461,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const directPublicArtifact = isDirectPublicArtifact(platform, sourceUrl, evidence);
   const quality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
   const summary = stripMarkdown(tldr).slice(0, 420) || "No summary available.";
+  const retry = parseRetryHistory(markdown);
 
   return {
     id: filename,
@@ -416,6 +476,8 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     summary,
     evidence,
     quality,
+    retry,
+    diagnostics: { extractionWarnings },
     recommendedAction: recommendedAction(quality, targetProject, verdict, evidence, classification, directPublicArtifact),
   };
 }
@@ -465,6 +527,8 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
       fit: textBetween(markdown, "Fit for Sid"),
       implementation: textBetween(markdown, "Implementation Idea"),
       followups: textBetween(markdown, "Follow-ups"),
+      retryHistory: textBetween(markdown, "Retry history"),
+      extractionWarnings: markerText(textBetween(markdown, "What the post showed"), "Extraction warnings:"),
     },
   };
 }
@@ -482,6 +546,8 @@ export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemo
       research: textBetween(publicMarkdown, "What it actually is"),
       links: textBetween(publicMarkdown, "Links"),
       kickstarter: textBetween(publicMarkdown, "Kickstarter guide"),
+      retryHistory: textBetween(publicMarkdown, "Retry history"),
+      extractionWarnings: markerText(textBetween(publicMarkdown, "What the post showed"), "Extraction warnings:"),
     },
   };
 }

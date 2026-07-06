@@ -149,6 +149,67 @@ describe("parseFindingMarkdown()", () => {
     expect(detail?.sections.implementation).not.toContain("## Follow-ups");
   });
 
+  it("exposes retry history without leaking it into follow-ups", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "retry-history-section-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING + [
+        "",
+        "## Follow-ups",
+        "",
+        "- Verify the source repo.",
+        "",
+        "## Retry history",
+        "",
+        "- Updated: 2026-07-06",
+        "- Previous filename: `20260615-video-by-shawnchee.md`",
+        "- Generated filename: `20260706-new-title.md`",
+        "",
+      ].join("\n"),
+    );
+
+    const detail = getFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(detail?.finding.retry).toEqual({
+      updated: "2026-07-06",
+      previousFilename: "20260615-video-by-shawnchee.md",
+      generatedFilename: "20260706-new-title.md",
+    });
+    expect(detail?.sections.followups).toContain("Verify the source repo");
+    expect(detail?.sections.followups).not.toContain("Retry history");
+    expect(detail?.sections.retryHistory).toContain("Generated filename");
+  });
+
+  it("exposes extraction warnings from what-the-post-showed details", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "extraction-warnings-section-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING.replace(
+        "On-screen text / OCR:\nToken usage down\nsmallest useful diff",
+        [
+          "On-screen text / OCR:",
+          "not captured",
+          "",
+          "Extraction warnings:",
+          "- Vision OCR skipped: OPENAI_API_KEY is not configured",
+          "- Only carousel metadata was available",
+        ].join("\n"),
+      ),
+    );
+
+    const detail = getFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(detail?.finding.diagnostics.extractionWarnings).toEqual([
+      "Vision OCR skipped: OPENAI_API_KEY is not configured",
+      "Only carousel metadata was available",
+    ]);
+    expect(detail?.sections.extractionWarnings).toContain("Vision OCR skipped");
+  });
+
   it("does not count placeholder extraction markers as captured evidence", () => {
     const finding = parseFindingMarkdown(
       "20260615-video-by-shawnchee.md",
@@ -304,6 +365,78 @@ describe("public finding shape", () => {
     expect(detail?.markdown).not.toContain("## Implementation Idea");
     expect(detail?.sections.research).toContain("reusable senior-dev prompt");
     expect(detail?.sections.kickstarter).toContain("copy the prompt");
+  });
+
+  it("keeps public-safe retry and extraction diagnostics in public detail", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-diagnostics-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING.replace(
+        "On-screen text / OCR:\nToken usage down\nsmallest useful diff",
+        [
+          "On-screen text / OCR:",
+          "not captured",
+          "",
+          "Extraction warnings:",
+          "- Vision OCR skipped: provider key is not configured",
+        ].join("\n"),
+      ) + [
+        "",
+        "## Retry history",
+        "",
+        "- Updated: 2026-07-06",
+        "- Previous filename: `20260615-video-by-shawnchee.md`",
+        "- Generated filename: `20260706-new-title.md`",
+        "",
+      ].join("\n"),
+    );
+
+    const detail = getPublicFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(detail?.finding.retry?.generatedFilename).toBe("20260706-new-title.md");
+    expect(detail?.finding.diagnostics.extractionWarnings).toEqual(["Vision OCR skipped: provider key is not configured"]);
+    expect(detail?.sections.retryHistory).toContain("Generated filename");
+    expect(detail?.sections.extractionWarnings).toContain("Vision OCR skipped");
+    expect(detail?.markdown).not.toContain("## Fit for Sid");
+    expect(detail?.markdown).not.toContain("## Implementation Idea");
+  });
+
+  it("removes private project references from public retry and diagnostic metadata", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-diagnostics-private-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING.replace(
+        "On-screen text / OCR:\nToken usage down\nsmallest useful diff",
+        [
+          "On-screen text / OCR:",
+          "not captured",
+          "",
+          "Extraction warnings:",
+          "- Cross-Tax local screenshot path was unavailable",
+          "- Public-safe warning remains",
+        ].join("\n"),
+      ) + [
+        "",
+        "## Retry history",
+        "",
+        "- Updated: 2026-07-06",
+        "- Previous filename: `20260706-cross-tax-private.md`",
+        "- Generated filename: `20260706-public-tool.md`",
+        "",
+      ].join("\n"),
+    );
+
+    const detail = getPublicFindingDetail("20260615-video-by-shawnchee.md", dir);
+
+    expect(detail?.finding.retry?.previousFilename).toBe(null);
+    expect(detail?.finding.retry?.generatedFilename).toBe("20260706-public-tool.md");
+    expect(detail?.finding.diagnostics.extractionWarnings).toEqual(["Public-safe warning remains"]);
+    expect(JSON.stringify(detail)).not.toContain("Cross-Tax");
+    expect(JSON.stringify(detail)).not.toContain("cross-tax");
   });
 
   it("removes embedded private decision blocks from public detail text", () => {
