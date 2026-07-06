@@ -72,6 +72,32 @@ describe("parseFindingMarkdown()", () => {
     expect(finding.recommendedAction).toBe("Create task");
   });
 
+  it("scores caption plus confirmed repo and docs as review quality", () => {
+    const finding = parseFindingMarkdown(
+      "20260706-palmier.md",
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Palmier Pro")
+        .replace("Key claims from transcript:\nIt helps save tokens and make better architecture decisions.\n\n", "")
+        .replace("On-screen text / OCR:\nToken usage down\nsmallest useful diff\n\n", "")
+        .replace("- Repo: https://github.com/example/ponytail", [
+          "- Repo: https://github.com/palmier-io/palmier-pro",
+          "- Docs: https://github.com/palmier-io/palmier-pro#readme",
+        ].join("\n"))
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#watch`"),
+    );
+
+    expect(finding.evidence).toMatchObject({
+      caption: true,
+      transcript: false,
+      ocr: false,
+      repo: true,
+      docs: true,
+    });
+    expect(finding.quality.score).toBeGreaterThanOrEqual(60);
+    expect(finding.quality.level).toBe("review");
+  });
+
   it("keeps public and Sid-specific detail sections for the private dashboard", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "private-finding-sections-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");

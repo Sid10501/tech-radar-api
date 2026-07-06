@@ -152,6 +152,10 @@ function scoreFinding(body: string, evidence: FindingEvidence, targetProject: st
     score += 5;
     reasons.push("docs");
   }
+  if (evidence.repo && evidence.docs) {
+    score += 5;
+    reasons.push("confirmed links");
+  }
   if (targetProject && targetProject !== "none" && targetProject !== "unknown") {
     score += 10;
     reasons.push("project fit");
