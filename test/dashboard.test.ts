@@ -74,4 +74,22 @@ describe("dashboard HTML", () => {
     expect(html).toContain("extractionWarnings");
     expect(html).not.toContain("createRoot");
   });
+
+  it("resets stale quality filters when users start a text search", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("function resetFilterToAll()");
+    expect(html).toContain('if (state.query.trim() && state.filter !== "all") resetFilterToAll();');
+    expect(html).toContain("emptyListMessage");
+  });
+
+  it("uses compact mobile action labels that cannot wrap over the brand", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('class="wide-label"');
+    expect(html).toContain('class="short-label"');
+    expect(html).toContain("repeat(4, minmax(0, 1fr))");
+    expect(html).toContain(".filter span {");
+    expect(html).toContain("margin-left: 3px");
+  });
 });

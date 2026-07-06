@@ -97,12 +97,16 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       color: #fff9eb;
       padding: 0 12px;
       font-weight: 780;
+      display: inline-grid;
+      place-items: center;
+      white-space: nowrap;
     }
     .button.primary {
       background: var(--gold);
       border-color: var(--gold);
       color: var(--ink);
     }
+    .short-label { display: none; }
     .workspace {
       display: grid;
       grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
@@ -223,6 +227,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     .filter span {
       color: inherit;
       opacity: .72;
+      margin-left: 3px;
     }
     .private-only-filter { display: none; }
     .sid-unlocked .private-only-filter { display: inline-flex; }
@@ -536,7 +541,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         grid-template-rows: auto minmax(0, 1fr);
       }
       .topbar {
-        grid-template-columns: auto 1fr;
+        grid-template-columns: minmax(0, auto) minmax(0, 1fr);
         gap: 8px;
         padding: 10px 12px;
       }
@@ -550,13 +555,23 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         border-radius: 7px;
       }
       .top-actions {
+        min-width: 0;
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 6px;
       }
       .button {
+        min-width: 0;
+        width: 100%;
         height: 32px;
-        padding: 0 8px;
+        padding: 0 7px;
         font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
+      .wide-label { display: none; }
+      .short-label { display: inline; }
       .search {
         grid-column: 1 / -1;
         grid-row: 2;
@@ -705,19 +720,26 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
     @media (max-width: 560px) {
       .logo > div:last-child {
-        max-width: 112px;
+        max-width: 96px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
       .top-actions .button {
-        max-width: 88px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
       .stats {
         grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 380px) {
+      .logo > div:last-child {
+        display: none;
+      }
+      .topbar {
+        grid-template-columns: 28px minmax(0, 1fr);
       }
     }
   </style>
@@ -728,10 +750,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       <div class="logo"><div class="mark">TR</div><div>Tech Radar</div></div>
       <input id="search" class="search" placeholder="Search findings, tools, sources, or project fit">
       <div class="top-actions">
-        <button id="release-notes" class="button">Release notes</button>
-        <button id="refresh" class="button" title="Refresh findings">Refresh</button>
-        <button id="unlock" class="button">Unlock</button>
-        <button id="add-url" class="button primary">Add URL</button>
+        <button id="release-notes" class="button"><span class="wide-label">Release notes</span><span class="short-label">Notes</span></button>
+        <button id="refresh" class="button" title="Refresh findings"><span class="wide-label">Refresh</span><span class="short-label">Refresh</span></button>
+        <button id="unlock" class="button"><span class="wide-label">Unlock</span><span class="short-label">Unlock</span></button>
+        <button id="add-url" class="button primary"><span class="wide-label">Add URL</span><span class="short-label">Add</span></button>
       </div>
     </header>
     <div class="workspace">
@@ -854,6 +876,36 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return state.findings.filter((finding) => matchesFilter(finding) && matchesQuery(finding));
     }
 
+    function resetFilterToAll() {
+      state.filter = "all";
+      document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
+      document.querySelector('[data-filter="all"]')?.classList.add("active");
+    }
+
+    function filterLabel() {
+      const labels = {
+        strong: "Strong",
+        review: "Review",
+        weak: "Weak",
+        repo: "Repo/docs",
+        enrich: "Needs enrichment",
+        project: "Project fit",
+        ocr: "OCR",
+        skip: "Skip",
+      };
+      return labels[state.filter] || "All";
+    }
+
+    function emptyListMessage() {
+      const q = state.query.trim();
+      if (q && state.filter !== "all") {
+        return "No " + filterLabel().toLowerCase() + " findings match “" + escapeHtml(q) + "”. Try All or clear the search.";
+      }
+      if (q) return "No findings match “" + escapeHtml(q) + "”.";
+      if (state.filter !== "all") return "No " + filterLabel().toLowerCase() + " findings yet.";
+      return "No findings loaded yet.";
+    }
+
     function selectFirstVisibleIfNeeded() {
       const findings = visibleFindings();
       if (!findings.some((finding) => finding.id === state.selectedId)) {
@@ -906,7 +958,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       $("mode-note").textContent = state.privateUnlocked
         ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
         : "Public research is open. Unlock Sid view only when you want project fit and next actions.";
-      $("unlock").textContent = state.privateUnlocked ? "Unlocked" : "Unlock";
+      $("unlock").querySelector(".wide-label").textContent = state.privateUnlocked ? "Unlocked" : "Unlock";
+      $("unlock").querySelector(".short-label").textContent = state.privateUnlocked ? "Sid" : "Unlock";
       $("dashboard-root").classList.toggle("sid-unlocked", state.privateUnlocked);
     }
 
@@ -937,7 +990,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       const findings = selectFirstVisibleIfNeeded();
       if (!findings.length) {
-        list.innerHTML = '<div class="empty">No findings match that search.</div>';
+        list.innerHTML = '<div class="empty">' + emptyListMessage() + '</div>';
         renderDetail();
         return;
       }
@@ -1242,6 +1295,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     $("search").addEventListener("input", (event) => {
       state.query = event.target.value;
+      if (state.query.trim() && state.filter !== "all") resetFilterToAll();
       const previousId = state.selectedId;
       setMobileDetailOpen(false);
       renderList();
