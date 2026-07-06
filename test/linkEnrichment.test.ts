@@ -205,6 +205,50 @@ describe("link enrichment", () => {
     });
   });
 
+  it("resolves curated Ponytail and Kronos aliases from OCR/transcript evidence", async () => {
+    const githubLookup = vi.fn(async (repo: string) => ({
+      stars: repo === "DietrichGebert/ponytail" ? 75_000 : 23_000,
+      lastPushed: "2026-07-06T00:00:00Z",
+      openIssues: 10,
+      language: repo === "DietrichGebert/ponytail" ? "JavaScript" : "Python",
+      license: "MIT",
+      archived: false,
+    }));
+
+    const ponytail = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "Video by shawnchee_",
+        caption: "this skill mimics that one senior dev with glasses and ponytail, helps you save tokens and make better architecture decisions",
+        visual_text:
+          "Ponytail. He says nothing. He writes one line. It works. v4.4.0 release works with 13 agents. 80-94% less code - 3-6x faster - 47-77% cheaper.",
+      },
+      githubLookup,
+    );
+    const kronos = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "Video by cooper.simson",
+        caption:
+          "Someone built a free AI model that reads candlestick charts the way GPT reads English. Trained on 12 billion records from 45 exchanges.",
+        visual_text:
+          "K-line Tokenization. Autoregressive Pre-training. Tokenizer Encoder. Coarse-grained Subtoken and Fine-grained Subtoken for stock prediction.",
+      },
+      githubLookup,
+    );
+
+    expect(githubLookup).toHaveBeenCalledWith("DietrichGebert/ponytail");
+    expect(githubLookup).toHaveBeenCalledWith("shiyu-coder/Kronos");
+    expect(ponytail.confirmed).toMatchObject({
+      github: "https://github.com/DietrichGebert/ponytail",
+      docs: "https://github.com/DietrichGebert/ponytail#readme",
+    });
+    expect(kronos.confirmed).toMatchObject({
+      github: "https://github.com/shiyu-coder/Kronos",
+      docs: "https://github.com/shiyu-coder/Kronos#readme",
+    });
+  });
+
   it("resolves Google's MCP Toolbox for Databases despite older Gen AI Toolbox naming", async () => {
     const githubLookup = vi.fn(async () => ({
       stars: 15_900,
