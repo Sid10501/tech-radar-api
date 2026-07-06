@@ -205,6 +205,56 @@ describe("link enrichment", () => {
     });
   });
 
+  it("resolves Google's MCP Toolbox for Databases despite older Gen AI Toolbox naming", async () => {
+    const githubLookup = vi.fn(async () => ({
+      stars: 15_900,
+      lastPushed: "2026-07-06T00:00:00Z",
+      openIssues: 125,
+      language: "Go",
+      license: "Apache-2.0",
+      archived: false,
+    }));
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "Google just open-sourced a MCP toolbox for databases",
+        caption:
+          "Google Just Open-Sourced a Gen AI Toolbox for Databases. It gives AI agents safe access to Cloud SQL, BigQuery and other enterprise databases.",
+      },
+      githubLookup,
+    );
+
+    expect(githubLookup).toHaveBeenCalledWith("googleapis/mcp-toolbox");
+    expect(enriched.confirmed).toMatchObject({
+      github: "https://github.com/googleapis/mcp-toolbox",
+      docs: "https://github.com/googleapis/mcp-toolbox#readme",
+    });
+  });
+
+  it("does not resolve generic non-Google MCP toolbox database posts to Google's repo", async () => {
+    const githubLookup = vi.fn(async () => ({
+      stars: 15_900,
+      lastPushed: "2026-07-06T00:00:00Z",
+      openIssues: 125,
+      language: "Go",
+      license: "Apache-2.0",
+      archived: false,
+    }));
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "A new MCP toolbox for Postgres",
+        caption: "This MCP toolbox connects agents to BigQuery-style analytics and Cloud SQL-compatible databases, but it is maintained by a small independent team.",
+      },
+      githubLookup,
+    );
+
+    expect(githubLookup).not.toHaveBeenCalledWith("googleapis/mcp-toolbox");
+    expect(enriched.confirmed.github).toBeNull();
+  });
+
   it("uses conservative GitHub search when a named tool has no explicit URL or curated resolver", async () => {
     const githubLookup = vi.fn(async () => ({
       stars: 2_400,

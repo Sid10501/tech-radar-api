@@ -52,6 +52,18 @@ const CURATED_PROJECTS: CuratedProject[] = [
     github: "https://github.com/cobusgreyling/loop-engineering",
     docs: "https://cobusgreyling.github.io/loop-engineering/",
   },
+  {
+    aliases: [
+      /\b(?:mcp|gen\s*ai)\s+toolbox\s+for\s+databases\b/i,
+      /\bgoogle\b[\s\S]{0,120}\b(?:mcp|gen\s*ai)\s+toolbox\b/i,
+      /\bgoogle\b[\s\S]{0,120}\btoolbox\s+for\s+databases\b/i,
+    ],
+    evidence: [
+      /\b(cloud\s+sql|bigquery|alloydb|spanner|enterprise databases?)\b/i,
+    ],
+    github: "https://github.com/googleapis/mcp-toolbox",
+    docs: "https://github.com/googleapis/mcp-toolbox#readme",
+  },
 ];
 
 export function extractLinkCandidates(extract: ExtractResult): EnrichedLinkCandidate[] {

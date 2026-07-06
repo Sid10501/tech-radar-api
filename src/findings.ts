@@ -181,19 +181,33 @@ function isRealGithubRepoUrl(rawUrl: string | null | undefined): boolean {
   }
 }
 
+function isRealGithubGistUrl(rawUrl: string | null | undefined): boolean {
+  if (!rawUrl) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    if (host !== "gist.github.com") return false;
+    const [owner, gistId] = parsed.pathname.split("/").filter(Boolean);
+    return Boolean(owner && gistId && /^[a-f0-9]+$/i.test(gistId));
+  } catch {
+    return false;
+  }
+}
+
 function githubUrls(body: string): string[] {
   return [...body.matchAll(/https?:\/\/github\.com\/[^\s)\],]+/gi)].map((match) => match[0]);
 }
 
 function hasDmGatedSignal(body: string): boolean {
-  return /\b(comment|reply|send|sent|dm|dms)\b.{0,80}\b(dm|dms|repo|link|access|agent|template)\b|\b(dm|dms)\b.{0,80}\b(comment|reply|send|sent|repo|link|access)/i.test(body);
+  return /\bcomment\b.{0,80}\b(?:i['’]?ll|i will)\s+send\s+it\s+over\b|\b(comment|reply|send|sent|dm|dms)\b.{0,80}\b(dm|dms|repo|link|access|agent|template)\b|\b(dm|dms)\b.{0,80}\b(comment|reply|send|sent|repo|link|access)/i.test(body);
 }
 
 function classifySourceEvidence(
   body: string,
   evidence: FindingEvidence,
+  directPublicArtifact: boolean,
 ): FindingSummary["source"]["classification"] {
-  if (evidence.repo || evidence.docs) return "public_artifact";
+  if (evidence.repo || evidence.docs || directPublicArtifact) return "public_artifact";
   if (hasDmGatedSignal(body)) return "dm_gated";
   return "unknown";
 }
@@ -201,6 +215,7 @@ function classifySourceEvidence(
 function isDirectPublicArtifact(platform: string, sourceUrl: string | null, evidence: FindingEvidence): boolean {
   if (platform === "github" && evidence.repo) return true;
   if (sourceUrl && isRealGithubRepoUrl(sourceUrl)) return true;
+  if (sourceUrl && isRealGithubGistUrl(sourceUrl)) return true;
   return false;
 }
 
@@ -253,7 +268,7 @@ function scoreFinding(
   }
 
   const lower = body.toLowerCase();
-  if (lower.includes("no links found") || lower.includes("no confirmed github url") || lower.includes("unverified")) {
+  if (!directPublicArtifact && (lower.includes("no links found") || lower.includes("no confirmed github url") || lower.includes("unverified"))) {
     score -= 18;
     reasons.push("source uncertainty");
   }
@@ -457,8 +472,8 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     repo: isRealGithubRepoUrl(repoUrl) || isRealGithubRepoUrl(sourceUrl) || githubUrls(markdown).some(isRealGithubRepoUrl),
     docs: Boolean(docsUrl),
   };
-  const classification = classifySourceEvidence(markdown, evidence);
   const directPublicArtifact = isDirectPublicArtifact(platform, sourceUrl, evidence);
+  const classification = classifySourceEvidence(markdown, evidence, directPublicArtifact);
   const quality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
   const summary = stripMarkdown(tldr).slice(0, 420) || "No summary available.";
   const retry = parseRetryHistory(markdown);

@@ -88,6 +88,7 @@ describe("finding audit helpers", () => {
       publicFinding(),
       publicFinding({
         id: "weak.md",
+        source: { platform: "instagram", label: "Creator", url: "https://example.com/post", classification: "unknown" },
         evidence: { caption: true, transcript: false, ocr: true, repo: false, docs: false },
         quality: { score: 40, level: "weak", reasons: ["caption", "OCR"] },
       }),
@@ -138,6 +139,29 @@ describe("finding audit helpers", () => {
         }),
       ),
     ).toBe("ready");
+  });
+
+  it("does not keep source-backed public artifacts in the enrichment queue only for missing repo/docs", () => {
+    const sourceBacked = finding({
+      source: { platform: "github", label: "Gist", url: "https://gist.github.com/example/abcdef123456", classification: "public_artifact" },
+      quality: { score: 70, level: "review", reasons: ["caption", "source-backed"] },
+      recommendedAction: "Review",
+    });
+
+    expect(enrichmentProfile(sourceBacked).status).toBe("ready");
+    expect(filterCounts([sourceBacked])).toMatchObject({ enrich: 0, repo: 1 });
+
+    const publicSourceBacked = publicFinding({
+      source: { platform: "github", label: "Gist", url: "https://gist.github.com/example/abcdef123456", classification: "public_artifact" },
+      evidence: { caption: true, transcript: false, ocr: false, repo: false, docs: false },
+      quality: { score: 70, level: "review", reasons: ["caption", "source-backed"] },
+    });
+
+    expect(auditPublicFindings([publicSourceBacked])).toMatchObject({
+      needsEnrichment: 0,
+      missingRepoOrDocs: 0,
+    });
+    expect(filterCountsFromPublic([publicSourceBacked])).toMatchObject({ enrich: 0, repo: 1 });
   });
 
   it("returns public-safe enrichment reasons separately from private skip reasons", () => {

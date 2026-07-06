@@ -846,6 +846,14 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return value ? yes : no;
     }
 
+    function isSourceBackedPublicArtifact(f) {
+      return f.source?.classification === "public_artifact";
+    }
+
+    function hasArtifactEvidence(f) {
+      return f.evidence.repo || f.evidence.docs || isSourceBackedPublicArtifact(f);
+    }
+
     function matchesQuery(f) {
       const q = state.query.trim().toLowerCase();
       if (!q) return true;
@@ -864,8 +872,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (state.filter === "strong") return f.quality.level === "strong";
       if (state.filter === "review") return f.quality.level === "review";
       if (state.filter === "weak") return f.quality.level === "weak";
-      if (state.filter === "repo") return f.evidence.repo || f.evidence.docs;
-      if (state.filter === "enrich") return !(state.privateUnlocked && f.recommendedAction === "Skip") && (f.quality.level === "weak" || !(f.evidence.repo || f.evidence.docs));
+      if (state.filter === "repo") return hasArtifactEvidence(f);
+      if (state.filter === "enrich") return !(state.privateUnlocked && f.recommendedAction === "Skip") && (f.quality.level === "weak" || !hasArtifactEvidence(f));
       if (state.filter === "project") return state.privateUnlocked && f.targetProject && f.targetProject !== "none" && f.targetProject !== "unknown";
       if (state.filter === "ocr") return f.evidence.ocr;
       if (state.filter === "skip") return state.privateUnlocked && f.recommendedAction === "Skip";
