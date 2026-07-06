@@ -1054,11 +1054,12 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     function extractionDetails(d) {
       const shown = d.sections.shown || "";
-      const transcript = textAfterAny(shown, "Key claims from transcript:", ["Learning chapters:", "On-screen text / OCR:", "Extraction path:", "Source links found:", "Top comments:", "Extraction warnings:"]);
-      const chapters = textAfterAny(shown, "Learning chapters:", ["On-screen text / OCR:", "Extraction path:", "Source links found:", "Top comments:", "Extraction warnings:"]);
-      const ocr = textAfterAny(shown, "On-screen text / OCR:", ["Extraction path:", "Source links found:", "Top comments:", "Extraction warnings:"]);
-      const extractionPath = textAfterAny(shown, "Extraction path:", ["Source links found:", "Top comments:", "Extraction warnings:"]);
-      const sourceLinks = textAfterAny(shown, "Source links found:", ["Top comments:", "Extraction warnings:"]);
+      const transcript = textAfterAny(shown, "Key claims from transcript:", ["Learning chapters:", "On-screen text / OCR:", "Extraction path:", "Source links found:", "Linked artifacts:", "Top comments:", "Extraction warnings:"]);
+      const chapters = textAfterAny(shown, "Learning chapters:", ["On-screen text / OCR:", "Extraction path:", "Source links found:", "Linked artifacts:", "Top comments:", "Extraction warnings:"]);
+      const ocr = textAfterAny(shown, "On-screen text / OCR:", ["Extraction path:", "Source links found:", "Linked artifacts:", "Top comments:", "Extraction warnings:"]);
+      const extractionPath = textAfterAny(shown, "Extraction path:", ["Source links found:", "Linked artifacts:", "Top comments:", "Extraction warnings:"]);
+      const sourceLinks = textAfterAny(shown, "Source links found:", ["Linked artifacts:", "Top comments:", "Extraction warnings:"]);
+      const linkedArtifacts = textAfterAny(shown, "Linked artifacts:", ["Top comments:", "Extraction warnings:"]);
       const comments = textAfterAny(shown, "Top comments:", ["Extraction warnings:"]);
       const caption = textAfter(shown, "> Caption:", "Key claims from transcript:");
       const extractionWarnings = d.sections.extractionWarnings || textAfter(shown, "Extraction warnings:");
@@ -1070,6 +1071,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       else blocks.push('<details><summary>OCR text</summary><div class="details-content">No on-screen text was captured for this finding.</div></details>');
       if (extractionPath) blocks.push(\`<details><summary>Extraction path</summary><div class="details-content markdown">\${markdownToHtml(extractionPath)}</div></details>\`);
       if (sourceLinks) blocks.push(\`<details><summary>Source links</summary><div class="details-content markdown">\${markdownToHtml(sourceLinks)}</div></details>\`);
+      if (linkedArtifacts) blocks.push(\`<details><summary>Linked artifacts</summary><div class="details-content markdown">\${markdownToHtml(linkedArtifacts)}</div></details>\`);
       if (comments) blocks.push(\`<details><summary>Top comments</summary><div class="details-content markdown">\${markdownToHtml(comments)}</div></details>\`);
       if (extractionWarnings) blocks.push(\`<details open><summary>Extraction warnings</summary><div class="details-content markdown">\${markdownToHtml(extractionWarnings)}</div></details>\`);
       blocks.push(\`<details><summary>Full finding markdown</summary><div class="details-content markdown">\${markdownToHtml(d.markdown)}</div></details>\`);
@@ -1152,6 +1154,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       const f = d.finding;
       const personal = state.privateUnlocked && f.targetProject;
       const mainSections = [
+        sectionPanel("Workflow audit", d.sections.workflow),
         sectionPanel("What it is", d.sections.research || d.sections.tldr || f.summary),
         sectionPanel("Links", d.sections.links),
         sectionPanel("How to try it", d.sections.kickstarter),

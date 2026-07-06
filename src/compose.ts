@@ -1,4 +1,5 @@
 import { findingFilename } from "./lib/slug.js";
+import { buildWorkflowAuditBlock, linkedArtifactsForExtract } from "./lib/linkedArtifacts.js";
 import type { ExtractResult } from "./extract.js";
 import type { ResearchOutput } from "./agents/research.js";
 import type { ImplementationOutput } from "./agents/implementation.js";
@@ -54,6 +55,10 @@ export function composeFinding(input: {
   const sourceLinksBlock = (extract.source_links ?? []).length > 0
     ? `\nSource links found:\n${extract.source_links!.map((link) => `- ${link}`).join("\n")}\n`
     : "";
+  const linkedArtifacts = linkedArtifactsForExtract(extract);
+  const linkedArtifactsBlock = linkedArtifacts.length > 0
+    ? `\nLinked artifacts:\n${linkedArtifacts.map((artifact) => `- ${artifact.type} · ${artifact.role}: ${artifact.url}`).join("\n")}\n`
+    : "";
   const topCommentsBlock = (extract.top_comments ?? []).length > 0
     ? `\nTop comments:\n${extract.top_comments!.slice(0, 5).map((comment) => {
         const author = comment.author?.trim() || "unknown";
@@ -64,6 +69,10 @@ export function composeFinding(input: {
   const extractionWarnings = (extract.extraction_warnings ?? []).filter((warning) => warning.trim());
   const extractionWarningsBlock = extractionWarnings.length
     ? `\nExtraction warnings:\n${extractionWarnings.map((warning) => `- ${warning}`).join("\n")}\n`
+    : "";
+  const workflowAudit = buildWorkflowAuditBlock(linkedArtifacts);
+  const workflowAuditSection = workflowAudit
+    ? `\n## Workflow Audit\n\n${workflowAudit}\n`
     : "";
 
   const body = `# ${title}
@@ -86,9 +95,11 @@ ${chaptersBlock}
 ${visualTextBlock}
 ${extractionMethodsBlock}
 ${sourceLinksBlock}
+${linkedArtifactsBlock}
 ${topCommentsBlock}
 ${extractionWarningsBlock}
 
+${workflowAuditSection}
 ## What it actually is
 
 - What: ${research.what}

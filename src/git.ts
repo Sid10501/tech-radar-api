@@ -160,6 +160,18 @@ export class AiMemoryRepo {
     await this.git.add(path.join("tech-radar", "INBOX.md"));
   }
 
+  async updateInboxIfMissing(row: InboxRow): Promise<boolean> {
+    if (this.inboxHasUrl(row.url)) return false;
+    await this.updateInbox(row);
+    return true;
+  }
+
+  private inboxHasUrl(url: string): boolean {
+    const inboxPath = path.join(this.opts.localDir, "tech-radar", "INBOX.md");
+    if (!fs.existsSync(inboxPath)) return false;
+    return fs.readFileSync(inboxPath, "utf8").split("\n").some((line) => line.includes(url));
+  }
+
   async updateIndex(row: IndexRow): Promise<void> {
     const indexPath = path.join(this.opts.localDir, "tech-radar", "INDEX.md");
     const newRow = `| ${row.date} | ${row.title} | [${row.finding}](tech-radar/findings/${row.finding}) | ${row.targetProject} |`;

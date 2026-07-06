@@ -32,6 +32,7 @@ JSON schema:
   "upload_date": str | null,
   "raw_metadata_keys": [str],
   "source_links": [str],
+  "linked_artifacts": [{"url": str, "type": str, "role": str}],
   "extraction_methods": [str],
   "chapters": [{"title": str, "start_time": number, "end_time": number | null}],
   "top_comments": [{"author": str | null, "text": str, "like_count": int | null, "timestamp": int | str | null}]
@@ -97,6 +98,77 @@ def pull_links(text: str | None) -> list[str]:
         if link not in seen:
             seen.append(link)
     return seen
+
+KNOWN_LINKED_ARTIFACTS = {
+    "github.com/kunchenguid/no-mistakes": {
+        "type": "validation_gate",
+        "role": "pre-push validation gate",
+    },
+    "github.com/kunchenguid/lavish-axi": {
+        "type": "interactive_planning",
+        "role": "interactive planning artifact",
+    },
+    "github.com/kunchenguid/gnhf": {
+        "type": "long_running_agent",
+        "role": "long-running agent loop",
+    },
+    "github.com/kunchenguid/treehouse": {
+        "type": "worktree_orchestration",
+        "role": "parallel worktree management",
+    },
+    "github.com/kunchenguid/firstmate": {
+        "type": "agent_orchestration",
+        "role": "agent crew coordination",
+    },
+    "github.com/vercel-labs/skills": {
+        "type": "skill",
+        "role": "agent skill system",
+    },
+    "github.com/starmel/opensuperwhisper": {
+        "type": "voice_input",
+        "role": "voice input tool",
+    },
+}
+
+
+def classify_linked_artifacts(links: list[str]) -> list[dict]:
+    out = []
+    seen: set[str] = set()
+    for raw in links:
+        url = raw.strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append(classify_linked_artifact(url))
+    return out
+
+
+def classify_linked_artifact(url: str) -> dict:
+    normalized = normalize_url_for_match(url)
+    known = KNOWN_LINKED_ARTIFACTS.get(normalized)
+    if known:
+        return {"url": url, **known}
+    if normalized.startswith("github.com/"):
+        return {"url": url, "type": "github_repo", "role": "linked GitHub repository"}
+    if normalized in {"wezterm.org/index.html", "wezterm.org"}:
+        return {"url": url, "type": "terminal_tool", "role": "terminal cockpit"}
+    if normalized == "axi.md":
+        return {"url": url, "type": "agent_interface", "role": "agent-facing CLI/interface pattern"}
+    if normalized.startswith("linktr.ee/"):
+        return {"url": url, "type": "profile", "role": "creator/profile link"}
+    if normalized.endswith(".dev") or ".dev/" in normalized or normalized.endswith(".io") or ".io/" in normalized:
+        return {"url": url, "type": "docs", "role": "documentation site"}
+    return {"url": url, "type": "reference", "role": "source reference"}
+
+
+def normalize_url_for_match(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc or ""
+        path = parsed.path.rstrip("/")
+        return f"{host}{path}".lower()
+    except Exception:
+        return re.sub(r"^https?://", "", url.lower()).rstrip("/")
 
 
 def extract_youtube_video_id(url: str) -> str | None:
@@ -790,6 +862,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         "media_assets": [],
         "extraction_warnings": [],
         "source_links": [],
+        "linked_artifacts": [],
         "extraction_methods": [],
         "chapters": [],
         "top_comments": [],
@@ -809,6 +882,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                     result["transcript"] = text
                     result["transcript_source"] = "document"
                     result["source_links"] = pull_links(text)
+                    result["linked_artifacts"] = classify_linked_artifacts(result["source_links"])
                     result["extraction_methods"].append("pypdf")
                 elif pdf_err:
                     errors.append(pdf_err)
@@ -866,6 +940,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         result["caption"] = caption
         result["hashtags"] = pull_hashtags(caption)
         result["source_links"] = pull_links(caption)
+        result["linked_artifacts"] = classify_linked_artifacts(result["source_links"])
         result["duration_sec"] = info.get("duration")
         result["upload_date"] = info.get("upload_date")
         result["chapters"] = collect_chapters(info)
@@ -950,6 +1025,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 result["caption"] = cap
                 result["hashtags"] = result["hashtags"] or pull_hashtags(cap)
                 result["source_links"] = result["source_links"] or pull_links(cap)
+                result["linked_artifacts"] = result["linked_artifacts"] or classify_linked_artifacts(result["source_links"])
                 result["extraction_methods"].append("html-meta")
 
     if do_transcribe and not result["transcript"] and audio_path and audio_path.exists():

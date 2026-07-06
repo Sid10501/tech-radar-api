@@ -86,6 +86,10 @@ describe("composeFinding()", () => {
     expect(body).toContain("- 00:24 Migration notes");
     expect(body).toContain("Source links found:");
     expect(body).toContain("- https://github.com/colinhacks/zod");
+    expect(body).toContain("Linked artifacts:");
+    expect(body).toContain("- github_repo · linked GitHub repository: https://github.com/colinhacks/zod");
+    expect(body).toContain("- docs · documentation site: https://zod.dev/");
+    expect(body).not.toContain("## Workflow Audit");
     expect(body).toContain("Top comments:");
     expect(body).toContain("@viewer");
     expect(body).toContain("migration notes");
@@ -121,5 +125,34 @@ describe("composeFinding()", () => {
     expect(body).toContain("Extraction warnings:");
     expect(body).toContain("- Vision OCR skipped: OPENAI_API_KEY is not configured");
     expect(body).toContain("- Only carousel metadata was available");
+  });
+
+  it("adds a workflow audit section for agent workflow artifacts", async () => {
+    const { composeFinding } = await import("../src/compose.js");
+
+    const { body } = composeFinding({
+      extract: {
+        ...extractFixture,
+        linked_artifacts: [
+          {
+            url: "https://github.com/kunchenguid/no-mistakes",
+            type: "validation_gate",
+            role: "pre-push validation gate",
+          },
+          {
+            url: "https://github.com/kunchenguid/lavish-axi",
+            type: "interactive_planning",
+            role: "interactive planning artifact",
+          },
+        ],
+      },
+      research: researchFixture,
+      implementation: implementationFixture,
+    });
+
+    expect(body).toContain("## Workflow Audit");
+    expect(body).toContain("Workflow type: agentic engineering workflow");
+    expect(body).toContain("Validation gates:");
+    expect(body).toContain("Planning artifacts:");
   });
 });

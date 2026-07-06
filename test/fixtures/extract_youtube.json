@@ -18,6 +18,18 @@
     "https://github.com/colinhacks/zod",
     "https://zod.dev/"
   ],
+  "linked_artifacts": [
+    {
+      "url": "https://github.com/colinhacks/zod",
+      "type": "github_repo",
+      "role": "linked GitHub repository"
+    },
+    {
+      "url": "https://zod.dev/",
+      "type": "docs",
+      "role": "documentation site"
+    }
+  ],
   "extraction_methods": ["yt-dlp:metadata", "yt-dlp:subtitles"],
   "chapters": [
     {
