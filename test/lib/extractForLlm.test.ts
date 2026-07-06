@@ -4,6 +4,7 @@ import {
   llmCaptionBlock,
   llmChaptersBlock,
   llmCommentsBlock,
+  llmLinkedArtifactsBlock,
   llmVisualTextBlock,
 } from "../../src/lib/extractForLlm.js";
 import type { ExtractResult } from "../../src/extract.js";
@@ -119,5 +120,37 @@ describe("extractForLlm", () => {
     const msg = buildResearchUserMessage(extract);
     expect(msg).toContain("Learning chapters:");
     expect(msg).toContain("Setup the terminal cockpit");
+  });
+
+  it("includes linked artifacts as structured research metadata", () => {
+    const extract = {
+      ...baseExtract,
+      source_links: [
+        "https://github.com/kunchenguid/no-mistakes",
+        "https://axi.md/",
+      ],
+    };
+
+    const block = llmLinkedArtifactsBlock(extract);
+    expect(block).toContain("validation_gate");
+    expect(block).toContain("pre-push validation gate");
+    expect(block).toContain("agent_interface");
+
+    const msg = buildResearchUserMessage(extract);
+    expect(msg).toContain("Linked artifacts:");
+    expect(msg).toContain("https://github.com/kunchenguid/no-mistakes");
+  });
+
+  it("adds workflow intake guidance when linked artifacts describe an agent workflow", () => {
+    const msg = buildResearchUserMessage({
+      ...baseExtract,
+      source_links: [
+        "https://github.com/kunchenguid/no-mistakes",
+        "https://github.com/kunchenguid/lavish-axi",
+      ],
+    });
+
+    expect(msg).toContain("Workflow intake guidance:");
+    expect(msg).toContain("memory, skills, validation, and harness changes");
   });
 });

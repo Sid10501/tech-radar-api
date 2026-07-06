@@ -46,6 +46,7 @@ export interface FindingDetail {
   sections: {
     tldr: string;
     shown: string;
+    workflow: string;
     research: string;
     links: string;
     kickstarter: string;
@@ -61,6 +62,7 @@ export interface PublicFindingDetail {
   sections: {
     tldr: string;
     shown: string;
+    workflow: string;
     research: string;
     links: string;
     kickstarter: string;
@@ -69,7 +71,7 @@ export interface PublicFindingDetail {
 
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 const TEMPLATE_SECTION_HEADING =
-  /^## (TL;DR|What the post showed|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Follow-ups)\s*$/m;
+  /^## (TL;DR|What the post showed|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Follow-ups)\s*$/m;
 
 function textBetween(body: string, heading: string): string {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -327,6 +329,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     "On-screen text / OCR:",
     "Extraction path:",
     "Source links found:",
+    "Linked artifacts:",
     "Top comments:",
   ];
   const captionText = markerText(shown, "> Caption:", ["Key claims from transcript:", ...evidenceMarkers]);
@@ -334,6 +337,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const ocrText = markerText(shown, "On-screen text / OCR:", [
     "Extraction path:",
     "Source links found:",
+    "Linked artifacts:",
     "Top comments:",
     "Learning chapters:",
   ]);
@@ -404,6 +408,7 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
     sections: {
       tldr: textBetween(markdown, "TL;DR"),
       shown: textBetween(markdown, "What the post showed"),
+      workflow: textBetween(markdown, "Workflow Audit"),
       research: textBetween(markdown, "What it actually is"),
       links: textBetween(markdown, "Links"),
       kickstarter: textBetween(markdown, "Kickstarter guide"),
@@ -424,6 +429,7 @@ export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemo
     sections: {
       tldr: textBetween(publicMarkdown, "TL;DR"),
       shown: textBetween(publicMarkdown, "What the post showed"),
+      workflow: textBetween(publicMarkdown, "Workflow Audit"),
       research: textBetween(publicMarkdown, "What it actually is"),
       links: textBetween(publicMarkdown, "Links"),
       kickstarter: textBetween(publicMarkdown, "Kickstarter guide"),

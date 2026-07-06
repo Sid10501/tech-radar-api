@@ -3,6 +3,27 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
 
+export type LinkedArtifactType =
+  | "github_repo"
+  | "docs"
+  | "skill"
+  | "voice_input"
+  | "terminal_tool"
+  | "agent_interface"
+  | "interactive_planning"
+  | "validation_gate"
+  | "long_running_agent"
+  | "worktree_orchestration"
+  | "agent_orchestration"
+  | "profile"
+  | "reference";
+
+export interface LinkedArtifact {
+  url: string;
+  type: LinkedArtifactType;
+  role: string;
+}
+
 export interface ExtractResult {
   url: string;
   platform: "tiktok" | "instagram" | "youtube" | "google_drive" | "other";
@@ -20,6 +41,7 @@ export interface ExtractResult {
   upload_date: string | null;
   raw_metadata_keys: string[];
   source_links?: string[];
+  linked_artifacts?: LinkedArtifact[];
   extraction_methods?: string[];
   chapters?: Array<{
     title: string;

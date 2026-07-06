@@ -1,4 +1,5 @@
 import type { ExtractResult } from "../extract.js";
+import { buildWorkflowAuditBlock, linkedArtifactsForExtract } from "./linkedArtifacts.js";
 import { wrapAsUntrusted } from "./untrustedContent.js";
 
 /** Prefer pipeline `*_for_llm` fields; otherwise wrap raw extractor text. */
@@ -51,6 +52,14 @@ export function llmChaptersBlock(extract: ExtractResult): string {
   return wrapAsUntrusted(raw, { label: "YouTube chapters" });
 }
 
+export function llmLinkedArtifactsBlock(extract: ExtractResult): string {
+  const artifacts = linkedArtifactsForExtract(extract);
+  if (artifacts.length === 0) return "";
+  return artifacts
+    .map((artifact) => `- ${artifact.type} · ${artifact.role}: ${artifact.url}`)
+    .join("\n");
+}
+
 export function llmTitleBlock(extract: ExtractResult): string {
   if (extract.title_for_llm) return extract.title_for_llm;
   if (extract.title?.trim()) {
@@ -66,6 +75,7 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
   const title = llmTitleBlock(extract);
   const comments = llmCommentsBlock(extract);
   const chapters = llmChaptersBlock(extract);
+  const linkedArtifacts = llmLinkedArtifactsBlock(extract);
   const hashtags = (extract.hashtags ?? []).join(", ") || "(none)";
   const sourceLinks = (extract.source_links ?? []).filter(Boolean);
 
@@ -83,6 +93,18 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
 
   if (sourceLinks.length > 0) {
     parts.push("", "Source links found:", sourceLinks.map((link) => `- ${link}`).join("\n"));
+  }
+  if (linkedArtifacts) {
+    parts.push("", "Linked artifacts:", linkedArtifacts);
+  }
+  const workflowAudit = buildWorkflowAuditBlock(linkedArtifactsForExtract(extract));
+  if (workflowAudit) {
+    parts.push(
+      "",
+      "Workflow intake guidance:",
+      "This source appears to describe an AI-agent workflow. Evaluate memory, skills, validation, and harness changes separately from individual tools.",
+      workflowAudit,
+    );
   }
 
   if (caption) {

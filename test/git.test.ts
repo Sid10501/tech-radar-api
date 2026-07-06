@@ -84,4 +84,28 @@ describe("AiMemoryRepo", () => {
       fs.rmSync(verifyDir, { recursive: true, force: true });
     }
   });
+
+  it("adds pending inbox rows only when the URL is missing", async () => {
+    await repo.pullLatest();
+    const first = await repo.updateInboxIfMissing({
+      url: "https://github.com/kunchenguid/no-mistakes",
+      status: "pending",
+      finding: null,
+      date: "2026-07-05",
+      error: "child of parent.md: validation_gate",
+    });
+    const second = await repo.updateInboxIfMissing({
+      url: "https://github.com/kunchenguid/no-mistakes",
+      status: "pending",
+      finding: null,
+      date: "2026-07-05",
+      error: "child of parent.md: validation_gate",
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+
+    const inbox = fs.readFileSync(path.join(workDir, "clone", "tech-radar", "INBOX.md"), "utf8");
+    expect(inbox.match(/https:\/\/github\.com\/kunchenguid\/no-mistakes/g)).toHaveLength(1);
+  });
 });

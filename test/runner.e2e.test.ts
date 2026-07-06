@@ -146,6 +146,11 @@ describe("runPipeline()", () => {
       const findingContent = fs.readFileSync(fullFindingPath, "utf8");
       expect(findingContent).toContain("## Implementation Idea");
 
+      const inbox = fs.readFileSync(path.join(localDir, "tech-radar", "INBOX.md"), "utf8");
+      expect(inbox).toContain("| https://github.com/colinhacks/zod | pending |");
+      expect(inbox).toContain("| https://zod.dev/ | pending |");
+      expect(inbox).toContain(`child of ${path.basename(findingPath)}: github_repo`);
+
     } finally {
       fs.rmSync(localDir, { recursive: true, force: true });
     }

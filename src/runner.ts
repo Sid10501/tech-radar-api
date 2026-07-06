@@ -8,6 +8,7 @@ import { runImplementation } from "./agents/implementation.js";
 import { composeFinding } from "./compose.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 import type { AiMemoryRepoOptions } from "./git.js";
+import { childArtifactInboxRows } from "./lib/linkedArtifactIntake.js";
 
 export interface Run {
   id: string;
@@ -234,6 +235,10 @@ export async function runPipeline(
       finding: filename,
       targetProject: implementationResult.target_project,
     });
+    let childCount = 0;
+    for (const row of childArtifactInboxRows(extractResult, { date: today, parentFinding: filename })) {
+      if (await repo.updateInboxIfMissing(row)) childCount++;
+    }
     await repo.commitAndPush(`tech-radar: ${filename.replace(".md", "")} — ${today}`);
 
     const findingPath = `tech-radar/findings/${filename}`;
@@ -245,7 +250,8 @@ export async function runPipeline(
 
     const repoUrl = process.env["AI_MEMORY_REPO_URL"] ?? "";
     const fileLink = repoUrl ? `${repoUrl}/blob/master/${findingPath}` : findingPath;
-    sendTelegram(`✅ *Tech Radar finding ready*\n\n[${filename.replace(".md", "")}](${fileLink})\n\nSource: ${url.slice(0, 60)}`);
+    const childNote = childCount > 0 ? `\nQueued child artifacts: ${childCount}` : "";
+    sendTelegram(`✅ *Tech Radar finding ready*\n\n[${filename.replace(".md", "")}](${fileLink})\n\nSource: ${url.slice(0, 60)}${childNote}`);
 
     releaseSlot();
     return { runId, findingPath };
