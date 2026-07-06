@@ -27,6 +27,32 @@ vi.mock("../src/git.js", () => ({
 const { buildServer } = await import("../src/server.js");
 const runnerMock = await import("../src/runner.js");
 
+const EXPECTED_SECURITY_HEADERS = {
+  "content-security-policy":
+    "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'",
+  "x-frame-options": "DENY",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+};
+const EXPECTED_CACHE_CONTROL = "no-store, max-age=0";
+
+function expectSecurityHeaders(headers: Record<string, unknown>) {
+  expect(headers).toMatchObject(EXPECTED_SECURITY_HEADERS);
+}
+
+function expectNoPrivateFindingFields(value: unknown) {
+  if (Array.isArray(value)) {
+    value.forEach(expectNoPrivateFindingFields);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  expect(value).not.toHaveProperty("targetProject");
+  expect(value).not.toHaveProperty("verdict");
+  expect(value).not.toHaveProperty("recommendedAction");
+  Object.values(value).forEach(expectNoPrivateFindingFields);
+}
+
 describe("server routes", () => {
   const app = buildServer();
 
@@ -36,12 +62,15 @@ describe("server routes", () => {
   it("GET /healthz returns 200 with { ok: true }", async () => {
     const res = await app.inject({ method: "GET", url: "/healthz" });
     expect(res.statusCode).toBe(200);
+    expectSecurityHeaders(res.headers);
     expect(res.json()).toEqual({ ok: true });
   });
 
   it("GET / returns HTML page", async () => {
     const res = await app.inject({ method: "GET", url: "/" });
     expect(res.statusCode).toBe(200);
+    expectSecurityHeaders(res.headers);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.body).toContain("Tech Radar");
     expect(res.body).toContain("dashboard-root");
@@ -53,6 +82,13 @@ describe("server routes", () => {
     expect(res.body).toContain("data-filter=\"ocr\"");
     expect(res.body).not.toContain("class=\"tabs\"");
     expect(res.body).not.toContain("evidence-tab");
+  });
+
+  it("keeps token-query HTML responses no-store", async () => {
+    const res = await app.inject({ method: "GET", url: "/?token=preview" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
   });
 
   it("GET /api/public/findings returns public findings without auth", async () => {
@@ -90,6 +126,8 @@ describe("server routes", () => {
     expect(body.findings).toHaveLength(1);
     expect(body.findings[0].title).toBe("Public Sample");
     expect(body.findings[0]).not.toHaveProperty("targetProject");
+    expectNoPrivateFindingFields(body);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
   });
 
   it("GET /api/public/audit returns latest batch health without auth", async () => {
@@ -141,18 +179,22 @@ describe("server routes", () => {
     expect(body.filters.enrich).toBe(1);
     expect(body.filters.repo).toBe(0);
     expect(body.audit).not.toHaveProperty("actions");
+    expectNoPrivateFindingFields(body);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
   });
 
   it("GET /api/public/release-notes returns release notes without auth", async () => {
     const res = await app.inject({ method: "GET", url: "/api/public/release-notes" });
 
     expect(res.statusCode).toBe(200);
+    expectSecurityHeaders(res.headers);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
     const body = res.json();
     expect(Array.isArray(body.releases)).toBe(true);
     expect(body.releases.length).toBeGreaterThan(0);
     expect(body.releases[0]).toMatchObject({
-      date: "2026-07-05",
-      title: "Ever-Improving Product Loop",
+      date: "2026-07-06",
+      title: "Audit Completion Ops Polish",
     });
   });
 
@@ -162,16 +204,43 @@ describe("server routes", () => {
     fs.mkdirSync(findingsDir, { recursive: true });
     fs.writeFileSync(
       path.join(findingsDir, "sample.md"),
-      "# Sample\n\n## TL;DR\n\nPublic\n\n## Fit for Sid\n\nPrivate project fit\n\n## Implementation Idea\n\nPrivate action",
+      [
+        "# Sample",
+        "",
+        "## TL;DR",
+        "",
+        "Public",
+        "",
+        "## What it actually is",
+        "",
+        "Public-safe sentence.",
+        "- Target project: Cross-Tax",
+        "- Verdict: `#try-soon`",
+        "- Recommended action: Create task",
+        "",
+        "## Fit for Sid",
+        "",
+        "Private project fit",
+        "",
+        "## Implementation Idea",
+        "",
+        "Private action",
+      ].join("\n"),
     );
     process.env["AI_MEMORY_LOCAL_DIR"] = dir;
 
     const res = await app.inject({ method: "GET", url: "/api/public/findings/sample.md" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().markdown).toContain("## TL;DR");
-    expect(res.json().markdown).not.toContain("Fit for Sid");
-    expect(res.json().markdown).not.toContain("Implementation Idea");
+    expectSecurityHeaders(res.headers);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+    const body = res.json();
+    expect(body.markdown).toContain("## TL;DR");
+    expect(body.markdown).not.toContain("Fit for Sid");
+    expect(body.markdown).not.toContain("Implementation Idea");
+    expect(body.markdown).not.toMatch(/Target project|Verdict|Recommended action/i);
+    expect(body.markdown).toContain("Public-safe sentence.");
+    expectNoPrivateFindingFields(body);
   });
 
   it("reuses a recent ai-memory sync for repeated dashboard reads", async () => {
@@ -210,6 +279,22 @@ describe("server routes", () => {
     it("GET /runs returns 401 without token", async () => {
       const res = await app.inject({ method: "GET", url: "/runs" });
       expect(res.statusCode).toBe(401);
+      expectSecurityHeaders(res.headers);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+    });
+
+    it("private finding and admin endpoints return 401 without auth", async () => {
+      const privateFindings = await app.inject({ method: "GET", url: "/api/findings" });
+      const privateDetail = await app.inject({ method: "GET", url: "/api/findings/sample.md" });
+      const privateAudit = await app.inject({ method: "GET", url: "/api/audit" });
+      const adminEnrich = await app.inject({ method: "POST", url: "/api/admin/enrich/sample.md" });
+      const adminEnrichWeak = await app.inject({ method: "POST", url: "/api/admin/enrich-weak", payload: { limit: 1 } });
+
+      for (const res of [privateFindings, privateDetail, privateAudit, adminEnrich, adminEnrichWeak]) {
+        expect(res.statusCode).toBe(401);
+        expectSecurityHeaders(res.headers);
+        expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+      }
     });
 
     it("GET /api/session reports private lock state without exposing token", async () => {
@@ -221,8 +306,10 @@ describe("server routes", () => {
       });
 
       expect(locked.statusCode).toBe(200);
+      expect(locked.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(locked.json()).toEqual({ privateUnlocked: false });
       expect(unlocked.statusCode).toBe(200);
+      expect(unlocked.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(unlocked.json()).toEqual({ privateUnlocked: true });
       expect(JSON.stringify(unlocked.json())).not.toContain(TOKEN);
     });
@@ -234,6 +321,7 @@ describe("server routes", () => {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       const body = res.json();
       expect(Array.isArray(body)).toBe(true);
     });

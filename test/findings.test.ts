@@ -385,6 +385,98 @@ describe("parseFindingMarkdown()", () => {
     expect(finding.recommendedAction).toBe("Skip");
   });
 
+  it("adds actionable weak-quality reasons for repo-backed posts that still need extraction review", () => {
+    const finding = parseFindingMarkdown(
+      "20260706-repo-backed-weak.md",
+      [
+        "# Repo-backed weak workflow",
+        "",
+        "**Source:** instagram · [Creator](https://www.instagram.com/reel/weak/)",
+        "**Saved:** 20260706",
+        "**Tags:** instagram, workflow",
+        "",
+        "## TL;DR",
+        "",
+        "A repository was found, but the source post has little usable extraction context.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: (none)",
+        "",
+        "Key claims from transcript:",
+        "(no transcript available)",
+        "",
+        "## What it actually is",
+        "",
+        "- What: A thin source mention with a repository.",
+        "- GitHub stars: 0 · License: unknown · Archived: no",
+        "",
+        "## Links",
+        "",
+        "- Repo: https://github.com/example/repo-backed-weak",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: ai-memory",
+        "- Verdict: `#watch`",
+      ].join("\n"),
+    );
+
+    expect(finding.quality.level).toBe("weak");
+    expect(finding.quality.reasons).toContain("repo found, source weak");
+    expect(finding.quality.reasons).toContain("needs transcript");
+    expect(finding.recommendedAction).toBe("Retry");
+  });
+
+  it("explains why caption-plus-repo findings are still weak", () => {
+    const finding = parseFindingMarkdown(
+      "20260706-christian-quant-finance.md",
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Christian quant finance repos")
+        .replace("Key claims from transcript:\nIt helps save tokens and make better architecture decisions.\n\n", "")
+        .replace("On-screen text / OCR:\nToken usage down\nsmallest useful diff\n\n", "")
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#watch`"),
+    );
+
+    expect(finding.evidence).toMatchObject({
+      caption: true,
+      transcript: false,
+      ocr: false,
+      repo: true,
+    });
+    expect(finding.quality.score).toBe(50);
+    expect(finding.quality.level).toBe("weak");
+    expect(finding.quality.reasons).toEqual(
+      expect.arrayContaining([
+        "repo found, source weak",
+        "needs transcript",
+        "needs OCR",
+        "triage skip",
+      ]),
+    );
+  });
+
+  it("keeps comment-to-receive posts DM-gated even when a repo URL is present", () => {
+    const finding = parseFindingMarkdown(
+      "20260706-ketan-loop-engineering.md",
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Ketan loop engineering")
+        .replace("Ponytail is useful as operating-system guidance, not a replacement for Superpowers.", "The post says comment LOOP and I will DM you the repo.")
+        .replace("this skill mimics that one senior dev with glasses and ponytail", "comment LOOP and I will DM you the repo")
+        .replace("Key claims from transcript:\nIt helps save tokens and make better architecture decisions.\n\n", "")
+        .replace("On-screen text / OCR:\nToken usage down\nsmallest useful diff\n\n", "")
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#watch`"),
+    );
+
+    expect(finding.evidence.repo).toBe(true);
+    expect(finding.source.classification).toBe("dm_gated");
+    expect(finding.quality.level).toBe("weak");
+    expect(finding.quality.reasons).toEqual(expect.arrayContaining(["dm gated", "triage skip"]));
+    expect(finding.recommendedAction).toBe("Skip");
+  });
+
   it("routes stale skip verdicts with a real public artifact back to review", () => {
     const finding = parseFindingMarkdown(
       "20260705-stale-skip.md",
@@ -526,6 +618,34 @@ describe("public finding shape", () => {
     expect(detail?.markdown).not.toContain("Cross-Tax");
   });
 
+  it("removes private-only decision keys from public detail payloads", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-private-keys-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-video-by-shawnchee.md"),
+      SAMPLE_FINDING + [
+        "",
+        "## What it actually is",
+        "",
+        "- recommendedAction: Create task",
+        "- targetProject: ai-memory",
+        "- verdict: #try-soon",
+        "- followups: private queue",
+      ].join("\n"),
+    );
+
+    const detail = getPublicFindingDetail("20260615-video-by-shawnchee.md", dir);
+    const serialized = JSON.stringify(detail);
+
+    expect(serialized).not.toContain("recommendedAction");
+    expect(serialized).not.toContain("targetProject");
+    expect(serialized).not.toContain("verdict");
+    expect(serialized).not.toContain("followups");
+    expect(serialized).not.toContain("implementation");
+    expect(serialized).not.toContain("fit");
+  });
+
   it("removes private verdict scoring reasons from public finding quality", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-skip-quality-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
@@ -547,6 +667,7 @@ describe("public finding shape", () => {
 
     expect(privateFinding.quality.reasons).toContain("skip verdict");
     expect(publicFinding.quality.reasons).not.toContain("skip verdict");
+    expect(publicFinding.quality.reasons).not.toContain("triage skip");
     expect(publicFinding.quality.score).toBeGreaterThan(privateFinding.quality.score);
   });
 
@@ -595,5 +716,69 @@ describe("listFindings()", () => {
     expect(findings).toHaveLength(2);
     expect(findings[0].saved).toBe("2026-06-15");
     expect(findings[1].saved).toBe("2026-05-01");
+  });
+
+  it("annotates duplicate findings by normalized source URL", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duplicate-source-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/dupe/?utm_source=ig"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Same source, different title")
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/dupe/"),
+    );
+
+    const findings = listFindings(dir);
+
+    expect(findings.map((finding) => finding.diagnostics.duplicateGroup?.count)).toEqual([2, 2]);
+    expect(findings[0].diagnostics.duplicateGroup?.reason).toBe("same source URL");
+    expect(listPublicFindings(dir)[0].diagnostics.duplicateGroup?.count).toBe(2);
+  });
+
+  it("does not collapse source URLs that differ by identity-bearing query parameters", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "identity-query-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.youtube.com/watch?v=alpha&utm_source=x"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Different video")
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.youtube.com/watch?v=beta&utm_source=x"),
+    );
+
+    const findings = listFindings(dir);
+
+    expect(findings.map((finding) => finding.diagnostics.duplicateGroup)).toEqual([undefined, undefined]);
+  });
+
+  it("annotates duplicate findings by normalized title, creator, and platform when source URL is missing", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duplicate-title-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      SAMPLE_FINDING.replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** instagram · Shawn"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING.replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** instagram · Shawn"),
+    );
+
+    const findings = listFindings(dir);
+
+    expect(findings[0].diagnostics.duplicateGroup).toMatchObject({
+      count: 2,
+      reason: "same title and creator",
+    });
+    expect(findings[0].diagnostics.duplicateGroup?.id).toBe(findings[1].diagnostics.duplicateGroup?.id);
   });
 });

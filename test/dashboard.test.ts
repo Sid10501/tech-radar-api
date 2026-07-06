@@ -91,6 +91,26 @@ describe("dashboard HTML", () => {
     expect(html).toContain("emptyListMessage");
   });
 
+  it("opens release notes in the visible mobile detail pane", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('state.view = "release-notes";\n      if (isMobileViewport()) setMobileDetailOpen(true);');
+  });
+
+  it("returns release notes users to the mobile findings list", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('state.view = "findings";\n        setMobileDetailOpen(false);\n        renderDetail();');
+  });
+
+  it("keeps startup finding reloads from stomping an open release notes view", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("async function loadFindings(options = {})");
+    expect(html).toContain('if (!options.preserveView) state.view = "findings";');
+    expect(html).toContain("syncSession().finally(() => loadFindings({ preserveView: true }));");
+  });
+
   it("uses compact mobile action labels that cannot wrap over the brand", () => {
     const html = DASHBOARD_HTML([]);
 
@@ -99,5 +119,22 @@ describe("dashboard HTML", () => {
     expect(html).toContain("repeat(4, minmax(0, 1fr))");
     expect(html).toContain(".filter span {");
     expect(html).toContain("margin-left: 3px");
+  });
+
+  it("opens release notes in the mobile detail pane and closes it when returning to findings", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("async function loadReleaseNotes()");
+    expect(html).toContain("if (isMobileViewport()) setMobileDetailOpen(true);");
+    expect(html).toContain("state.view = \"findings\";\n        setMobileDetailOpen(false);\n        renderDetail();");
+  });
+
+  it("renders duplicate and quality reason chips on finding cards", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("function qualityReasonChips(f)");
+    expect(html).toContain("f.diagnostics?.duplicateGroup");
+    expect(html).toContain("duplicate");
+    expect(html).toContain("${qualityReasonChips(f)}");
   });
 });

@@ -23,6 +23,13 @@ export interface FindingRetryHistory {
 
 export interface FindingDiagnostics {
   extractionWarnings: string[];
+  duplicateGroup?: FindingDuplicateGroup;
+}
+
+export interface FindingDuplicateGroup {
+  id: string;
+  count: number;
+  reason: "same source URL" | "same title and creator";
 }
 
 export interface FindingSummary {
@@ -207,8 +214,9 @@ function classifySourceEvidence(
   evidence: FindingEvidence,
   directPublicArtifact: boolean,
 ): FindingSummary["source"]["classification"] {
-  if (evidence.repo || evidence.docs || directPublicArtifact) return "public_artifact";
+  if (directPublicArtifact) return "public_artifact";
   if (hasDmGatedSignal(body)) return "dm_gated";
+  if (evidence.repo || evidence.docs) return "public_artifact";
   return "unknown";
 }
 
@@ -281,6 +289,11 @@ function scoreFinding(
     reasons.push("skip verdict");
   }
 
+  if (!evidence.transcript) reasons.push("needs transcript");
+  if (!evidence.ocr) reasons.push("needs OCR");
+  if (evidence.repo && !directPublicArtifact && (!evidence.transcript || !evidence.ocr)) {
+    reasons.push("repo found, source weak");
+  }
   score = Math.max(0, Math.min(100, score));
   const level = score >= 80 ? "strong" : score >= 60 ? "review" : "weak";
   return { score, level, reasons };
@@ -303,6 +316,22 @@ function recommendedAction(
   if (quality.level === "strong" && targetProject && targetProject !== "unknown") return "Create task";
   if (quality.level === "review") return "Review";
   return "Backlog";
+}
+
+function qualityWithTriageReasons(
+  quality: FindingQuality,
+  action: FindingSummary["recommendedAction"],
+  retry: FindingRetryHistory | null,
+): FindingQuality {
+  const reasons = [...quality.reasons];
+  const add = (reason: string) => {
+    if (!reasons.includes(reason)) reasons.push(reason);
+  };
+
+  add(action === "Retry" ? "triage enrich" : `triage ${action.toLowerCase()}`);
+  if (retry?.previousFilename || retry?.generatedFilename) add("duplicate/retry history");
+
+  return { ...quality, reasons };
 }
 
 function markerText(source: string, marker: string, untilMarkers: string[] = []): string {
@@ -360,26 +389,17 @@ function removeTemplateSection(markdown: string, headingPattern: string): string
 }
 
 function withoutEmbeddedPrivateDecisionBlocks(markdown: string): string {
-  const lines = markdown.split("\n");
-  const kept: string[] = [];
-  let dropping = false;
-
-  for (const line of lines) {
-    if (!dropping && isPrivateDecisionLine(line)) {
-      dropping = true;
-      continue;
-    }
-    if (dropping && TEMPLATE_SECTION_HEADING.test(line)) {
-      dropping = false;
-    }
-    if (!dropping) kept.push(line);
-  }
-
-  return kept.join("\n");
+  return markdown
+    .split("\n")
+    .filter((line) => !isPrivateDecisionLine(line))
+    .join("\n");
 }
 
 function isPrivateDecisionLine(line: string): boolean {
-  return /^\s*[-*]?\s*(Target project|Verdict):/i.test(line) || /^\s*[-*]\s+.*\bSid\b/i.test(line);
+  return (
+    /^\s*[-*]?\s*(Target project|targetProject|Verdict|verdict|Recommended action|recommendedAction|followups|implementation|fit):/i.test(line) ||
+    /^\s*[-*]\s+.*\bSid\b/i.test(line)
+  );
 }
 
 function withoutPrivateProjectReferences(markdown: string): string {
@@ -397,7 +417,7 @@ function publicQuality(finding: FindingSummary): FindingQuality {
   return {
     score,
     level,
-    reasons: finding.quality.reasons.filter((reason) => reason !== "project fit" && reason !== "skip verdict"),
+    reasons: finding.quality.reasons.filter((reason) => reason !== "project fit" && reason !== "skip verdict" && !reason.startsWith("triage ")),
   };
 }
 
@@ -422,8 +442,16 @@ function publicRetryHistory(retry: FindingRetryHistory | null): FindingRetryHist
 }
 
 function publicDiagnostics(diagnostics: FindingDiagnostics): FindingDiagnostics {
+  const duplicateGroup = diagnostics.duplicateGroup
+    ? {
+        id: diagnostics.duplicateGroup.id,
+        count: diagnostics.duplicateGroup.count,
+        reason: diagnostics.duplicateGroup.reason,
+      }
+    : undefined;
   return {
     extractionWarnings: diagnostics.extractionWarnings.filter((warning) => !PRIVATE_PROJECT_REFERENCE.test(warning)),
+    ...(duplicateGroup ? { duplicateGroup } : {}),
   };
 }
 
@@ -435,9 +463,9 @@ function publicSafeValue(value: string | null): string | null {
 export function parseFindingMarkdown(filename: string, markdown: string): FindingSummary {
   const title = decodeEntities(markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() || filename.replace(/\.md$/, ""));
   const sourceLine = markdown.match(/^\*\*Source:\*\*\s*(.+)$/m)?.[1]?.trim() ?? "";
-  const sourceMatch = sourceLine.match(/^([^·\n]+?)(?:\s*·\s*\[([^\]]+)\]\(([^)]+)\))?$/);
+  const sourceMatch = sourceLine.match(/^([^·\n]+?)(?:\s*·\s*(?:\[([^\]]+)\]\(([^)]+)\)|(.+)))?$/);
   const platform = sourceMatch?.[1]?.trim().toLowerCase() || "unknown";
-  const sourceLabel = sourceMatch?.[2] ? decodeEntities(sourceMatch[2].trim()) : null;
+  const sourceLabel = sourceMatch?.[2] || sourceMatch?.[4] ? decodeEntities((sourceMatch[2] ?? sourceMatch[4]).trim()) : null;
   const sourceUrl = sourceMatch?.[3]?.trim() ?? null;
   const saved = normalizeSavedDate(markdown.match(/^\*\*Saved:\*\*\s*(.+)$/m)?.[1]);
   const tags = parseTags(markdown.match(/^\*\*Tags:\*\*\s*(.+)$/m)?.[1]);
@@ -474,9 +502,11 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   };
   const directPublicArtifact = isDirectPublicArtifact(platform, sourceUrl, evidence);
   const classification = classifySourceEvidence(markdown, evidence, directPublicArtifact);
-  const quality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
   const summary = stripMarkdown(tldr).slice(0, 420) || "No summary available.";
   const retry = parseRetryHistory(markdown);
+  const scoredQuality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
+  const action = recommendedAction(scoredQuality, targetProject, verdict, evidence, classification, directPublicArtifact);
+  const quality = qualityWithTriageReasons(scoredQuality, action, retry);
 
   return {
     id: filename,
@@ -493,7 +523,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     quality,
     retry,
     diagnostics: { extractionWarnings },
-    recommendedAction: recommendedAction(quality, targetProject, verdict, evidence, classification, directPublicArtifact),
+    recommendedAction: action,
   };
 }
 
@@ -508,7 +538,7 @@ export function getFindingsDir(aiMemoryDir = getAiMemoryDir()): string {
 export function listFindings(aiMemoryDir = getAiMemoryDir()): FindingSummary[] {
   const dir = getFindingsDir(aiMemoryDir);
   if (!fs.existsSync(dir)) return [];
-  return fs
+  const findings = fs
     .readdirSync(dir)
     .filter((file) => file.endsWith(".md") && file !== "_template.md")
     .map((file) => parseFindingMarkdown(file, fs.readFileSync(path.join(dir, file), "utf8")))
@@ -518,6 +548,121 @@ export function listFindings(aiMemoryDir = getAiMemoryDir()): FindingSummary[] {
       if (aDate !== bDate) return bDate.localeCompare(aDate);
       return a.title.localeCompare(b.title);
     });
+  return withDuplicateDiagnostics(findings);
+}
+
+function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] {
+  const duplicateByFilename = new Map<string, FindingDuplicateGroup>();
+  const sourceGroups = new Map<string, FindingSummary[]>();
+
+  for (const finding of findings) {
+    const sourceUrl = normalizeDuplicateUrl(finding.source.url);
+    if (!sourceUrl) continue;
+    const key = `url:${sourceUrl}`;
+    sourceGroups.set(key, [...(sourceGroups.get(key) ?? []), finding]);
+  }
+
+  for (const [key, group] of sourceGroups.entries()) {
+    if (group.length < 2) continue;
+    const duplicateGroup = duplicateGroupFor(key, group.length, "same source URL");
+    for (const finding of group) duplicateByFilename.set(finding.filename, duplicateGroup);
+  }
+
+  const fallbackGroups = new Map<string, FindingSummary[]>();
+  for (const finding of findings) {
+    if (duplicateByFilename.has(finding.filename)) continue;
+    const key = fallbackDuplicateGroupKey(finding);
+    if (!key) continue;
+    fallbackGroups.set(key, [...(fallbackGroups.get(key) ?? []), finding]);
+  }
+
+  for (const [key, group] of fallbackGroups.entries()) {
+    if (group.length < 2) continue;
+    const duplicateGroup = duplicateGroupFor(key, group.length, "same title and creator");
+    for (const finding of group) duplicateByFilename.set(finding.filename, duplicateGroup);
+  }
+
+  return findings.map((finding) => {
+    const duplicateGroup = duplicateByFilename.get(finding.filename);
+    if (!duplicateGroup) return finding;
+    return {
+      ...finding,
+      quality: {
+        ...finding.quality,
+        reasons: finding.quality.reasons.includes("duplicate") ? finding.quality.reasons : [...finding.quality.reasons, "duplicate"],
+      },
+      diagnostics: {
+        ...finding.diagnostics,
+        duplicateGroup,
+      },
+    };
+  });
+}
+
+function duplicateGroupFor(key: string, count: number, reason: FindingDuplicateGroup["reason"]): FindingDuplicateGroup {
+  return {
+    id: stableDuplicateId(key),
+    count,
+    reason,
+  };
+}
+
+function fallbackDuplicateGroupKey(finding: FindingSummary): string | null {
+  const title = normalizeDuplicateText(finding.title);
+  const creator = normalizeDuplicateText(finding.source.label ?? "");
+  const platform = normalizeDuplicateText(finding.source.platform);
+  if (!title || !creator || !platform || platform === "unknown") return null;
+  return `title:${platform}:${creator}:${title}`;
+}
+
+function normalizeDuplicateUrl(rawUrl: string | null): string | null {
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.hash = "";
+    parsed.hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    stripTrackingParams(parsed.searchParams);
+    parsed.searchParams.sort();
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return normalizeDuplicateText(rawUrl) || null;
+  }
+}
+
+function stripTrackingParams(params: URLSearchParams): void {
+  const trackingParams = new Set([
+    "fbclid",
+    "gclid",
+    "igsh",
+    "mc_cid",
+    "mc_eid",
+    "si",
+  ]);
+  for (const key of [...params.keys()]) {
+    const normalized = key.toLowerCase();
+    if (normalized.startsWith("utm_") || trackingParams.has(normalized)) {
+      params.delete(key);
+    }
+  }
+}
+
+function normalizeDuplicateText(value: string): string {
+  return decodeEntities(value)
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function stableDuplicateId(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `dup-${(hash >>> 0).toString(36)}`;
 }
 
 export function listPublicFindings(aiMemoryDir = getAiMemoryDir()): PublicFindingSummary[] {
@@ -530,8 +675,9 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
   const fullPath = path.join(getFindingsDir(aiMemoryDir), safeName);
   if (!fs.existsSync(fullPath)) return null;
   const markdown = fs.readFileSync(fullPath, "utf8");
+  const finding = listFindings(aiMemoryDir).find((candidate) => candidate.filename === safeName) ?? parseFindingMarkdown(safeName, markdown);
   return {
-    finding: parseFindingMarkdown(safeName, markdown),
+    finding,
     markdown,
     sections: {
       tldr: textBetween(markdown, "TL;DR"),
