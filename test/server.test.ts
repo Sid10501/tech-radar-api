@@ -230,6 +230,10 @@ describe("server routes", () => {
         "## Implementation Idea",
         "",
         "Private action",
+        "",
+        "## Follow-ups",
+        "",
+        "- Private follow-up task",
       ].join("\n"),
     );
     process.env["AI_MEMORY_LOCAL_DIR"] = dir;
@@ -245,6 +249,9 @@ describe("server routes", () => {
     expect(body.markdown).not.toContain("Implementation Idea");
     expect(body.markdown).not.toMatch(/Target project|Verdict|Recommended action/i);
     expect(body.markdown).toContain("Public-safe sentence.");
+    expect(res.body).not.toContain("Fit for Sid");
+    expect(res.body).not.toContain("## Implementation Idea");
+    expect(res.body).not.toContain("## Follow-ups");
     expectNoPrivateFindingFields(body);
   });
 

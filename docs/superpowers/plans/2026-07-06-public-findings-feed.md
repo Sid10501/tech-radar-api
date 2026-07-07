@@ -32,9 +32,9 @@
 
 ## Task 4: leak regression + docs
 
-- [ ] Test first: server-level test asserting the private-section strings never appear in `/api/public/findings/:id` markdown for a fixture containing all three sections (may already exist — extend, don't duplicate).
-- [ ] README: env table rows for `PUBLIC_FEED_ALLOWED_ORIGINS`, `PUBLIC_SITE_RADAR_BASE`; note applied.json contract.
-- [ ] `release-notes.md`: entry "Public feed: RSS + applied mapping + scoped CORS".
+- [x] Test first: server-level test asserting the private-section strings never appear in `/api/public/findings/:id` markdown for a fixture containing all three sections (may already exist — extend, don't duplicate).
+- [x] README: env table rows for `PUBLIC_FEED_ALLOWED_ORIGINS`, `PUBLIC_SITE_RADAR_BASE`; note applied.json contract.
+- [x] `release-notes.md`: entry "Public feed: RSS + applied mapping + scoped CORS".
 
 ## Out of scope
 - Pagination/ETag (payload is small; existing no-store hardening stands — portfolio consumes at build time via ISR).
