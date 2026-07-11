@@ -452,6 +452,45 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       font-size: 12px;
     }
     .side { display: grid; gap: 12px; }
+    .workflow-map {
+      display: grid;
+      gap: 8px;
+    }
+    .workflow-link {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid #e1e7df;
+      border-radius: 8px;
+      background: #fbfcf8;
+      text-decoration: none;
+      color: inherit;
+    }
+    .workflow-link:hover {
+      border-color: #b8c9bd;
+      background: #f5f8f2;
+    }
+    .workflow-main {
+      min-width: 0;
+    }
+    .workflow-title {
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 850;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .workflow-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -1093,6 +1132,38 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return '<div class="panel"><div class="panel-head">' + escapeHtml(title) + '</div><div class="panel-body markdown">' + markdownToHtml(markdown) + '</div></div>';
     }
 
+    function workflowMapPanel(f) {
+      const workflow = f.workflow || {};
+      if (workflow.kind === "workflow" && workflow.children?.length) {
+        const rows = workflow.children.map((child) => {
+          const label = child.title || child.filename || child.url;
+          const href = child.filename ? ' href="#" data-workflow-finding="' + escapeHtml(child.filename) + '"' : ' href="' + escapeHtml(child.url) + '" target="_blank" rel="noopener"';
+          return \`
+            <a class="workflow-link"\${href}>
+              <div class="workflow-main">
+                <div class="workflow-title">\${escapeHtml(label)}</div>
+                <div class="workflow-meta">\${escapeHtml(child.type)} · \${escapeHtml(child.role)} · \${escapeHtml(child.url)}</div>
+              </div>
+              <div class="badge">\${escapeHtml(child.status || "pending")}</div>
+            </a>\`;
+        }).join("");
+        return '<div class="panel"><div class="panel-head">Workflow map</div><div class="panel-body"><div class="workflow-map">' + rows + '</div></div></div>';
+      }
+      if (workflow.kind === "artifact" && workflow.parent) {
+        return \`
+          <div class="panel"><div class="panel-head">Workflow map</div><div class="panel-body"><div class="workflow-map">
+            <a class="workflow-link" href="#" data-workflow-finding="\${escapeHtml(workflow.parent.filename)}">
+              <div class="workflow-main">
+                <div class="workflow-title">\${escapeHtml(workflow.parent.title)}</div>
+                <div class="workflow-meta">Parent workflow · \${escapeHtml(workflow.artifactType || workflow.parent.type)} · \${escapeHtml(workflow.role || workflow.parent.role)}</div>
+              </div>
+              <div class="badge">parent</div>
+            </a>
+          </div></div></div>\`;
+      }
+      return "";
+    }
+
     function renderReleaseNotes() {
       const detail = $("detail");
       if (state.releaseNotesLoading) {
@@ -1154,12 +1225,14 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       const f = d.finding;
       const personal = state.privateUnlocked && f.targetProject;
       const mainSections = [
+        workflowMapPanel(f),
         sectionPanel("Workflow audit", d.sections.workflow),
         sectionPanel("What it is", d.sections.research || d.sections.tldr || f.summary),
         sectionPanel("Links", d.sections.links),
         sectionPanel("How to try it", d.sections.kickstarter),
         personal ? sectionPanel("Fit for Sid", d.sections.fit) : "",
         personal ? sectionPanel("Implementation idea", d.sections.implementation) : "",
+        personal ? sectionPanel("Child artifact intake", d.sections.childArtifacts) : "",
         personal ? sectionPanel("Follow-ups", d.sections.followups) : "",
         sectionPanel("Retry history", d.sections.retryHistory),
         !state.privateUnlocked ? '<div class="panel"><div class="panel-head">Sid-specific layer</div><div class="panel-body">Unlock when you want to see project fit, recommended action, and implementation notes. The public research above stays open for everyone.</div></div>' : "",
@@ -1209,6 +1282,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           const text = nextTaskText(f);
           navigator.clipboard?.writeText(text).then(() => showToast("Next step copied."), () => showToast(text));
         }
+      }));
+      detail.querySelectorAll("[data-workflow-finding]").forEach((link) => link.addEventListener("click", (event) => {
+        event.preventDefault();
+        selectFinding(link.dataset.workflowFinding, { openDetail: true });
       }));
     }
 
@@ -1266,7 +1343,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       const current = state.findings.find((finding) => finding.id === id);
       if (current) {
-        state.detail = { finding: current, sections: { tldr: current.summary, shown: "", research: current.summary, links: "", kickstarter: "", fit: "", implementation: "", followups: "", retryHistory: "", extractionWarnings: "" }, markdown: "" };
+        state.detail = { finding: current, sections: { tldr: current.summary, shown: "", workflow: "", research: current.summary, links: "", kickstarter: "", fit: "", implementation: "", childArtifacts: "", followups: "", retryHistory: "", extractionWarnings: "" }, markdown: "" };
         renderDetail();
       }
       const detail = await fetchFindingDetail(id, requestId);

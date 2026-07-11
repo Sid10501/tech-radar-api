@@ -32,6 +32,31 @@ export interface FindingDuplicateGroup {
   reason: "same source URL" | "same title and creator";
 }
 
+export interface FindingWorkflowChild {
+  url: string;
+  type: string;
+  role: string;
+  filename: string | null;
+  title: string | null;
+  status: "processed" | "pending";
+}
+
+export interface FindingWorkflowParent {
+  filename: string;
+  title: string;
+  url: string;
+  type: string;
+  role: string;
+}
+
+export interface FindingWorkflow {
+  kind: "workflow" | "artifact" | "standalone";
+  artifactType: string | null;
+  role: string | null;
+  parent: FindingWorkflowParent | null;
+  children: FindingWorkflowChild[];
+}
+
 export interface FindingSummary {
   id: string;
   filename: string;
@@ -52,6 +77,7 @@ export interface FindingSummary {
   quality: FindingQuality;
   retry: FindingRetryHistory | null;
   diagnostics: FindingDiagnostics;
+  workflow: FindingWorkflow;
   recommendedAction: "Create task" | "Backlog" | "Skip" | "Retry" | "Review";
 }
 
@@ -71,6 +97,7 @@ export interface FindingDetail {
     kickstarter: string;
     fit: string;
     implementation: string;
+    childArtifacts: string;
     followups: string;
     retryHistory: string;
     extractionWarnings: string;
@@ -87,6 +114,7 @@ export interface PublicFindingDetail {
     research: string;
     links: string;
     kickstarter: string;
+    childArtifacts: string;
     retryHistory: string;
     extractionWarnings: string;
   };
@@ -94,7 +122,7 @@ export interface PublicFindingDetail {
 
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 const TEMPLATE_SECTION_HEADING =
-  /^## (TL;DR|What the post showed|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Follow-ups|Retry history)\s*$/m;
+  /^## (TL;DR|What the post showed|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Follow-ups|Retry history)\s*$/m;
 const PRIVATE_PROJECT_REFERENCE =
   /\b(Cross-Tax|StockBot|Finance Assistant|Kalkine Stocks Tracker|tech-radar-api|ai-video)\b/i;
 
@@ -357,6 +385,52 @@ function parseBulletLines(value: string): string[] {
     .filter(Boolean);
 }
 
+function parseLinkedArtifacts(markdown: string): FindingWorkflowChild[] {
+  const shown = textBetween(markdown, "What the post showed");
+  const linkedArtifacts = markerText(shown, "Linked artifacts:", ["Top comments:", "Extraction warnings:"]);
+  return parseBulletLines(linkedArtifacts)
+    .map((line): FindingWorkflowChild | null => {
+      const match = line.match(/^([^·:]+?)\s*·\s*(.+?):\s*(https?:\/\/\S+)$/);
+      if (!match) return null;
+      return {
+        type: decodeEntities(match[1].trim()),
+        role: decodeEntities(match[2].trim()),
+        url: cleanTrailingUrl(match[3]),
+        filename: null,
+        title: null,
+        status: "pending",
+      };
+    })
+    .filter((artifact): artifact is FindingWorkflowChild => {
+      return artifact !== null && artifact.type !== "profile" && artifact.type !== "reference";
+    });
+}
+
+function parseChildArtifactStatus(markdown: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of parseBulletLines(textBetween(markdown, "Child Artifact Intake Status"))) {
+    const match = line.match(/^(.+?):\s*`([^`]+\.md)`/);
+    if (!match) continue;
+    out.set(match[1].trim().toLowerCase(), match[2].trim());
+  }
+  return out;
+}
+
+function workflowFromMarkdown(markdown: string): FindingWorkflow {
+  const children = parseLinkedArtifacts(markdown);
+  return {
+    kind: children.length ? "workflow" : "standalone",
+    artifactType: null,
+    role: null,
+    parent: null,
+    children,
+  };
+}
+
+function cleanTrailingUrl(rawUrl: string): string {
+  return rawUrl.replace(/[),.;]+$/, "");
+}
+
 function parseRetryHistory(body: string): FindingRetryHistory | null {
   const retryHistory = textBetween(body, "Retry history");
   if (!retryHistory) return null;
@@ -511,6 +585,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const scoredQuality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
   const action = recommendedAction(scoredQuality, targetProject, verdict, evidence, classification, directPublicArtifact);
   const quality = qualityWithTriageReasons(scoredQuality, action, retry);
+  const workflow = workflowFromMarkdown(markdown);
 
   return {
     id: filename,
@@ -527,6 +602,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     quality,
     retry,
     diagnostics: { extractionWarnings },
+    workflow,
     recommendedAction: action,
   };
 }
@@ -552,7 +628,83 @@ export function listFindings(aiMemoryDir = getAiMemoryDir()): FindingSummary[] {
       if (aDate !== bDate) return bDate.localeCompare(aDate);
       return a.title.localeCompare(b.title);
     });
-  return withDuplicateDiagnostics(findings);
+  return withDuplicateDiagnostics(withWorkflowRelationships(findings, aiMemoryDir));
+}
+
+function withWorkflowRelationships(findings: FindingSummary[], aiMemoryDir: string): FindingSummary[] {
+  const byFilename = new Map(findings.map((finding) => [finding.filename, finding]));
+  const bySourceUrl = new Map<string, FindingSummary>();
+  for (const finding of findings) {
+    const key = relationshipUrlKey(finding.source.url);
+    if (key) bySourceUrl.set(key, finding);
+  }
+
+  const parentByChild = new Map<string, FindingWorkflowParent>();
+
+  const withChildren = findings.map((finding) => {
+    if (!finding.workflow.children.length) return finding;
+    const childStatus = parseChildArtifactStatus(fs.readFileSync(path.join(getFindingsDir(aiMemoryDir), finding.filename), "utf8"));
+    const children = finding.workflow.children.map((child) => {
+      const matched = bySourceUrl.get(relationshipUrlKey(child.url) ?? "");
+      const statusFilename = childStatus.get(child.role.toLowerCase()) ?? childStatus.get(child.type.toLowerCase()) ?? matched?.filename ?? null;
+      const childFinding = statusFilename ? byFilename.get(statusFilename) : matched;
+      const filename = childFinding?.filename ?? statusFilename ?? null;
+      const enrichedChild: FindingWorkflowChild = {
+        ...child,
+        filename,
+        title: childFinding?.title ?? null,
+        status: filename ? "processed" : "pending",
+      };
+      if (filename) {
+        parentByChild.set(filename, {
+          filename: finding.filename,
+          title: finding.title,
+          url: child.url,
+          type: child.type,
+          role: child.role,
+        });
+      }
+      return enrichedChild;
+    });
+    return {
+      ...finding,
+      workflow: {
+        ...finding.workflow,
+        kind: "workflow" as const,
+        children,
+      },
+    };
+  });
+
+  return withChildren.map((finding) => {
+    const parent = parentByChild.get(finding.filename);
+    if (!parent) return finding;
+    return {
+      ...finding,
+      workflow: {
+        ...finding.workflow,
+        kind: "artifact",
+        artifactType: parent.type,
+        role: parent.role,
+        parent,
+        children: finding.workflow.children,
+      },
+    };
+  });
+}
+
+function relationshipUrlKey(rawUrl: string | null): string | null {
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.hash = "";
+    parsed.search = "";
+    parsed.hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return normalizeDuplicateText(rawUrl) || null;
+  }
 }
 
 function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] {
@@ -692,6 +844,7 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
       kickstarter: textBetween(markdown, "Kickstarter guide"),
       fit: textBetween(markdown, "Fit for Sid"),
       implementation: textBetween(markdown, "Implementation Idea"),
+      childArtifacts: textBetween(markdown, "Child Artifact Intake Status"),
       followups: textBetween(markdown, "Follow-ups"),
       retryHistory: textBetween(markdown, "Retry history"),
       extractionWarnings: markerText(textBetween(markdown, "What the post showed"), "Extraction warnings:"),
@@ -713,6 +866,7 @@ export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemo
       research: textBetween(publicMarkdown, "What it actually is"),
       links: textBetween(publicMarkdown, "Links"),
       kickstarter: textBetween(publicMarkdown, "Kickstarter guide"),
+      childArtifacts: textBetween(publicMarkdown, "Child Artifact Intake Status"),
       retryHistory: textBetween(publicMarkdown, "Retry history"),
       extractionWarnings: markerText(textBetween(publicMarkdown, "What the post showed"), "Extraction warnings:"),
     },

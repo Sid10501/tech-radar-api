@@ -193,8 +193,8 @@ describe("server routes", () => {
     expect(Array.isArray(body.releases)).toBe(true);
     expect(body.releases.length).toBeGreaterThan(0);
     expect(body.releases[0]).toMatchObject({
-      date: "2026-07-06",
-      title: "Audit Completion Ops Polish",
+      date: "2026-07-11",
+      title: "Workflow Maps",
     });
   });
 

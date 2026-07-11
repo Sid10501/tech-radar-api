@@ -1,5 +1,13 @@
 # Release Notes
 
+## 2026-07-11 - Workflow Maps
+
+Made linked creator workflows easier to explore as structured systems instead of isolated findings.
+
+- Added parent-child workflow metadata to finding summaries and detail payloads.
+- Added workflow map cards in the dashboard so parent workflow findings link to processed child artifacts and child findings link back to their source workflow.
+- Verified the Kun workflow resolves to 11 processed child artifacts in the live ai-memory checkout.
+
 ## 2026-07-06 - Audit Completion Ops Polish
 
 Closed the audit-completion polish pass with user-visible diagnostics, clearer triage signals, and an operator-ready verification path.
