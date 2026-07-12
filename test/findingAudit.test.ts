@@ -20,6 +20,7 @@ function finding(overrides: Partial<FindingSummary> = {}): FindingSummary {
     quality: { score: 42, level: "weak", reasons: ["caption", "source uncertainty"] },
     retry: null,
     diagnostics: { extractionWarnings: [] },
+    workflow: { kind: "standalone", artifactType: null, role: null, parent: null, children: [] },
     recommendedAction: "Retry",
     ...overrides,
   };
@@ -41,6 +42,7 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     quality: { score: 60, level: "review", reasons: ["caption", "repo"] },
     retry: null,
     diagnostics: { extractionWarnings: [] },
+    workflow: { kind: "standalone", artifactType: null, role: null, parent: null, children: [] },
     isPrivate: false,
     applied: null,
     ...overrides,

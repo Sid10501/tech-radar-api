@@ -45,18 +45,17 @@ describe("parseReleaseNotesMarkdown()", () => {
 });
 
 describe("listReleaseNotes()", () => {
-  it("keeps audit completion notes latest with ops-polish highlights", () => {
+  it("keeps workflow map notes latest with relationship highlights", () => {
     const releases = listReleaseNotes();
 
     expect(releases[0]).toMatchObject({
-      date: "2026-07-06",
-      title: "Audit Completion Ops Polish",
+      date: "2026-07-11",
+      title: "Workflow Maps",
     });
     expect(releases[0]?.highlights).toEqual(expect.arrayContaining([
-      expect.stringContaining("mobile release notes"),
-      expect.stringContaining("duplicate diagnostics"),
-      expect.stringContaining("triage explainability"),
-      expect.stringContaining("security and ops hardening"),
+      expect.stringContaining("parent-child workflow metadata"),
+      expect.stringContaining("workflow map cards"),
+      expect.stringContaining("Kun workflow"),
     ]));
   });
 

@@ -137,4 +137,14 @@ describe("dashboard HTML", () => {
     expect(html).toContain("duplicate");
     expect(html).toContain("${qualityReasonChips(f)}");
   });
+
+  it("renders workflow map hooks for parent and child artifact findings", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("function workflowMapPanel(f)");
+    expect(html).toContain("Workflow map");
+    expect(html).toContain("data-workflow-finding");
+    expect(html).toContain("workflow.children");
+    expect(html).toContain("workflow.parent");
+  });
 });

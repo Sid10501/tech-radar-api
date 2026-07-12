@@ -229,6 +229,83 @@ describe("parseFindingMarkdown()", () => {
     expect(detail?.sections.research).toContain("reusable senior-dev prompt");
   });
 
+  it("builds parent-child workflow relationships from linked artifact markdown", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workflow-relationships-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "kun-workflow.md"),
+      SAMPLE_FINDING.replace(
+        "On-screen text / OCR:\nToken usage down\nsmallest useful diff",
+        [
+          "On-screen text / OCR:",
+          "Token usage down",
+          "",
+          "Linked artifacts:",
+          "- validation_gate · pre-push validation gate: https://github.com/kunchenguid/no-mistakes",
+          "- interactive_planning · interactive planning artifact: https://github.com/kunchenguid/lavish-axi",
+        ].join("\n"),
+      ) + [
+        "",
+        "## Child Artifact Intake Status",
+        "",
+        "- no-mistakes: `no-mistakes.md`",
+        "- lavish-axi: `lavish-axi.md`",
+        "",
+        "## Follow-ups",
+        "",
+        "- Pilot one validation gate.",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "no-mistakes.md"),
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "No Mistakes")
+        .replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** github · [Repo](https://github.com/kunchenguid/no-mistakes)")
+        .replace("- Repo: https://github.com/example/ponytail", "- Repo: https://github.com/kunchenguid/no-mistakes"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "lavish-axi.md"),
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Lavish AXI")
+        .replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** github · [Repo](https://github.com/kunchenguid/lavish-axi)")
+        .replace("- Repo: https://github.com/example/ponytail", "- Repo: https://github.com/kunchenguid/lavish-axi"),
+    );
+
+    const findings = listFindings(dir);
+    const parent = findings.find((finding) => finding.filename === "kun-workflow.md");
+    const child = findings.find((finding) => finding.filename === "no-mistakes.md");
+    const detail = getFindingDetail("kun-workflow.md", dir);
+
+    expect(parent?.workflow.kind).toBe("workflow");
+    expect(parent?.workflow.children).toEqual([
+      expect.objectContaining({
+        type: "validation_gate",
+        role: "pre-push validation gate",
+        filename: "no-mistakes.md",
+        title: "No Mistakes",
+        status: "processed",
+      }),
+      expect.objectContaining({
+        type: "interactive_planning",
+        role: "interactive planning artifact",
+        filename: "lavish-axi.md",
+        title: "Lavish AXI",
+        status: "processed",
+      }),
+    ]);
+    expect(child?.workflow).toMatchObject({
+      kind: "artifact",
+      artifactType: "validation_gate",
+      role: "pre-push validation gate",
+      parent: {
+        filename: "kun-workflow.md",
+        title: "Ponytail agent rubric",
+      },
+    });
+    expect(detail?.sections.childArtifacts).toContain("no-mistakes.md");
+  });
+
   it("does not count placeholder extraction markers as captured evidence", () => {
     const finding = parseFindingMarkdown(
       "20260615-video-by-shawnchee.md",
