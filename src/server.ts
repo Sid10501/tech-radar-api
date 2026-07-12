@@ -3,7 +3,14 @@ import path from "node:path";
 import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError } from "./runner.js";
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
-import { getAiMemoryDir, getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings } from "./findings.js";
+import {
+  getAiMemoryDir,
+  getFindingDetail,
+  getPublicFindingDetail,
+  listFindings,
+  listPublicFindings,
+  type FindingSummary,
+} from "./findings.js";
 import { auditFindings, auditPublicFindings, enrichmentProfile, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
 import { listReleaseNotes } from "./releaseNotes.js";
 import { buildRssXml } from "./rss.js";
@@ -18,6 +25,38 @@ const SECURITY_HEADERS = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
 } as const;
 const NO_STORE_CACHE_CONTROL = "no-store, max-age=0";
+
+interface EnrichCandidate {
+  finding: FindingSummary;
+  enrichment: ReturnType<typeof enrichmentProfile>;
+}
+
+function isSameSourceDuplicate(finding: FindingSummary): boolean {
+  return finding.diagnostics.duplicateGroup?.reason === "same source URL";
+}
+
+function enrichCandidatePayload({ finding, enrichment }: EnrichCandidate) {
+  return {
+    id: finding.id,
+    title: finding.title,
+    sourceUrl: finding.source.url,
+    quality: {
+      level: finding.quality.level,
+      score: finding.quality.score,
+    },
+    triage: finding.triage,
+    enrichment,
+  };
+}
+
+function skippedDuplicatePayload({ finding }: EnrichCandidate) {
+  return {
+    id: finding.id,
+    title: finding.title,
+    sourceUrl: finding.source.url,
+    reason: "same_source_duplicate" as const,
+  };
+}
 
 function getCookieValue(cookieHeader: unknown, name: string): string | undefined {
   const raw = Array.isArray(cookieHeader) ? cookieHeader.join(";") : cookieHeader;
@@ -249,27 +288,19 @@ export function buildServer() {
       await ensureAiMemoryCheckout();
       const requestedLimit = Number(request.body?.limit ?? 10);
       const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(50, Math.trunc(requestedLimit))) : 10;
-      const candidates = listFindings()
+      const retryableRows = listFindings()
         .map((finding) => ({ finding, enrichment: enrichmentProfile(finding) }))
-        .filter(({ finding, enrichment }) => enrichment.status === "needs-enrichment" && finding.source.url)
-        .slice(0, limit);
+        .filter(({ finding, enrichment }) => enrichment.status === "needs-enrichment" && finding.source.url);
+      const skippedDuplicates = retryableRows.filter(({ finding }) => isSameSourceDuplicate(finding)).map(skippedDuplicatePayload);
+      const candidates = retryableRows.filter(({ finding }) => !isSameSourceDuplicate(finding)).slice(0, limit);
       if (request.body?.dryRun === true) {
         return reply.code(200).send({
           dryRun: true,
           limit,
           matched: candidates.length,
           queued: 0,
-          candidates: candidates.map(({ finding, enrichment }) => ({
-            id: finding.id,
-            title: finding.title,
-            sourceUrl: finding.source.url,
-            quality: {
-              level: finding.quality.level,
-              score: finding.quality.score,
-            },
-            triage: finding.triage,
-            enrichment,
-          })),
+          candidates: candidates.map(enrichCandidatePayload),
+          skippedDuplicates,
           runs: [],
         });
       }
@@ -283,6 +314,7 @@ export function buildServer() {
         matched: candidates.length,
         queued: runs.length,
         candidates: [],
+        skippedDuplicates,
         runs,
       });
     },
