@@ -35,6 +35,7 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     displaySummary: "A reusable senior-dev prompt rubric.",
     evidence: { caption: true, transcript: false, ocr: false, repo: false, docs: false },
     quality: { score: 60, level: "review", reasons: ["caption"] },
+    triage: { kind: "unknown_tool", retryable: false, reasons: [] },
     retry: null,
     diagnostics: { extractionWarnings: [] },
     workflow: { kind: "standalone", artifactType: null, role: null, parent: null, children: [] },

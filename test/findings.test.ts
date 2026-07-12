@@ -481,7 +481,172 @@ describe("parseFindingMarkdown()", () => {
     );
 
     expect(finding.source.classification).toBe("dm_gated");
+    expect(finding.triage).toMatchObject({
+      kind: "dm_gated",
+      retryable: false,
+      reasons: expect.arrayContaining(["dm_gated_no_link"]),
+    });
     expect(finding.recommendedAction).toBe("Skip");
+  });
+
+  it("decodes HTML entities before detecting DM-gated comment funnels", () => {
+    const finding = parseFindingMarkdown(
+      "20260504-comment-scrape-entity.md",
+      SAMPLE_FINDING
+        .replace("Ponytail is useful as operating-system guidance, not a replacement for Superpowers.", "The post asks viewers to comment scrape and says I&#x2019;ll send it over.")
+        .replace("this skill mimics that one senior dev with glasses and ponytail", "comment scrape and I&#x2019;ll send it over")
+        .replace("- Repo: https://github.com/example/ponytail", "- (no links found)")
+        .replace("- Target project: ai-memory", "- Target project: none")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#skip`"),
+    );
+
+    expect(finding.source.classification).toBe("dm_gated");
+    expect(finding.triage.kind).toBe("dm_gated");
+    expect(finding.recommendedAction).toBe("Skip");
+  });
+
+  it("classifies concept explainers without artifacts as review-only, not retry", () => {
+    const finding = parseFindingMarkdown(
+      "20260628-ai-words.md",
+      [
+        "# 8 AI words everyone pretends to understand",
+        "",
+        "**Source:** instagram · [Creator](https://www.instagram.com/p/aiwords/)",
+        "**Saved:** 20260628",
+        "**Tags:** instagram, ai, explainer",
+        "",
+        "## TL;DR",
+        "",
+        "A concept explainer that defines common AI terms for operators.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: 8 AI words everyone pretends to understand. Save this so you can explain agents, RAG, MCP, and embeddings.",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: tech-radar-api",
+        "- Verdict: `#watch`",
+      ].join("\n"),
+    );
+
+    expect(finding.quality.level).toBe("weak");
+    expect(finding.triage).toMatchObject({
+      kind: "concept_explainer",
+      retryable: false,
+      reasons: expect.arrayContaining(["concept_only", "no_artifact_expected"]),
+    });
+    expect(finding.recommendedAction).toBe("Review");
+  });
+
+  it("classifies educational posts without repos as review-only learning content", () => {
+    const finding = parseFindingMarkdown(
+      "20260531-builderscentral-course.md",
+      [
+        "# Builders Central agentic coding course",
+        "",
+        "**Source:** youtube · [Builders Central](https://www.youtube.com/watch?v=course)",
+        "**Saved:** 20260531",
+        "**Tags:** youtube, learning",
+        "",
+        "## TL;DR",
+        "",
+        "A tutorial curriculum for learning agentic engineering practices.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: Free course and lessons for building better coding agents.",
+        "",
+        "Learning chapters:",
+        "- 00:00 Introduction",
+        "- 03:10 Lesson one",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: tech-radar-api",
+        "- Verdict: `#watch`",
+      ].join("\n"),
+    );
+
+    expect(finding.triage).toMatchObject({
+      kind: "educational_post",
+      retryable: false,
+      reasons: expect.arrayContaining(["educational_post", "no_artifact_expected"]),
+    });
+    expect(finding.recommendedAction).toBe("Review");
+  });
+
+  it("keeps unresolved shortlink-only findings retryable", () => {
+    const finding = parseFindingMarkdown(
+      "20260620-shortlink-workflow.md",
+      [
+        "# Agentic engineering workflow",
+        "",
+        "**Source:** x · [Post](https://t.co/abc123)",
+        "**Saved:** 20260620",
+        "**Tags:** x, workflow",
+        "",
+        "## TL;DR",
+        "",
+        "A named workflow points through an unresolved shortlink.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: Try the L8 principals agentic engineering workflow: https://t.co/abc123",
+        "",
+        "Source links found:",
+        "- https://t.co/abc123",
+        "",
+        "Extraction warnings:",
+        "- Shortlink was not expanded.",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: tech-radar-api",
+        "- Verdict: `#try-soon`",
+      ].join("\n"),
+    );
+
+    expect(finding.quality.level).toBe("weak");
+    expect(finding.triage).toMatchObject({
+      kind: "unresolved_shortlink",
+      retryable: true,
+      reasons: expect.arrayContaining(["shortlink_unresolved"]),
+    });
+    expect(finding.recommendedAction).toBe("Retry");
+  });
+
+  it("classifies personal workflow advice as no-public-artifact expected", () => {
+    const finding = parseFindingMarkdown(
+      "20260706-agent-workflow-advice.md",
+      [
+        "# How I review agentic engineering plans",
+        "",
+        "**Source:** linkedin · [Builder](https://www.linkedin.com/posts/example)",
+        "**Saved:** 20260706",
+        "**Tags:** linkedin, workflow",
+        "",
+        "## TL;DR",
+        "",
+        "A personal workflow advice post with no promised repository or public artifact.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: My workflow for reviewing agent plans before coding: brainstorm, test, review, then ship.",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: tech-radar-api",
+        "- Verdict: `#watch`",
+      ].join("\n"),
+    );
+
+    expect(finding.triage).toMatchObject({
+      kind: "no_public_artifact_expected",
+      retryable: false,
+      reasons: expect.arrayContaining(["no_artifact_expected"]),
+    });
+    expect(finding.recommendedAction).toBe("Review");
   });
 
   it("adds actionable weak-quality reasons for repo-backed posts that still need extraction review", () => {
@@ -522,6 +687,11 @@ describe("parseFindingMarkdown()", () => {
     );
 
     expect(finding.quality.level).toBe("weak");
+    expect(finding.triage).toMatchObject({
+      kind: "repo_backed",
+      retryable: true,
+      reasons: expect.arrayContaining(["repo_found_source_weak"]),
+    });
     expect(finding.quality.reasons).toContain("repo found, source weak");
     expect(finding.quality.reasons).toContain("needs transcript");
     expect(finding.recommendedAction).toBe("Retry");
@@ -768,6 +938,27 @@ describe("public finding shape", () => {
     expect(publicFinding.quality.reasons).not.toContain("skip verdict");
     expect(publicFinding.quality.reasons).not.toContain("triage skip");
     expect(publicFinding.quality.score).toBeGreaterThan(privateFinding.quality.score);
+  });
+
+  it("recomputes public triage from public quality instead of leaking private triage", () => {
+    const finding = parseFindingMarkdown(
+      "20260707-public-triage.md",
+      SAMPLE_FINDING
+        .replace("Key claims from transcript:\nIt helps save tokens and make better architecture decisions.\n\n", "")
+        .replace("On-screen text / OCR:\nToken usage down\nsmallest useful diff\n\n", "")
+        .replace("- Verdict: `#try-soon`", "- Verdict: `#watch`"),
+    );
+
+    const publicFinding = toPublicFinding(finding);
+
+    expect(finding.quality.level).toBe("review");
+    expect(finding.triage).toMatchObject({ kind: "repo_backed", retryable: false });
+    expect(publicFinding.quality.level).toBe("weak");
+    expect(publicFinding.triage).toMatchObject({
+      kind: "repo_backed",
+      retryable: true,
+      reasons: expect.arrayContaining(["repo_found_source_weak"]),
+    });
   });
 
   it("removes standalone private project references from public guidance", () => {

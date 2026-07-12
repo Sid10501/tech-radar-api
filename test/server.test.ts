@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -57,6 +57,9 @@ describe("server routes", () => {
   const app = buildServer();
 
   beforeAll(() => app.ready());
+  beforeEach(() => {
+    vi.mocked(runnerMock.runPipeline).mockClear();
+  });
   afterAll(() => app.close());
 
   it("GET /healthz returns 200 with { ok: true }", async () => {
@@ -617,7 +620,95 @@ describe("server routes", () => {
       expect(res.json()).toMatchObject({ queued: true, runId: "mock-run-id" });
     });
 
-    it("POST /api/admin/enrich-weak force-requeues weak non-skip findings only", async () => {
+    it("POST /api/admin/enrich-weak dry-run returns retryable candidates without queueing", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-enrich-dry-"));
+      const findingsDir = path.join(dir, "tech-radar", "findings");
+      fs.mkdirSync(findingsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(findingsDir, "concept.md"),
+        [
+          "# 8 AI words everyone pretends to understand",
+          "",
+          "**Source:** instagram · [Creator](https://www.instagram.com/p/concept/)",
+          "**Saved:** 20260620",
+          "**Tags:** instagram, explainer",
+          "",
+          "## TL;DR",
+          "",
+          "A useful concept explainer with no expected public artifact.",
+          "",
+          "## What the post showed",
+          "",
+          "> Caption: 8 AI words everyone pretends to understand.",
+          "",
+          "## Fit for Sid",
+          "",
+          "- Target project: tech-radar-api",
+          "- Verdict: `#watch`",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(findingsDir, "shortlink.md"),
+        [
+          "# Shortlink workflow",
+          "",
+          "**Source:** x · [Post](https://t.co/abc123)",
+          "**Saved:** 20260621",
+          "**Tags:** x, workflow",
+          "",
+          "## TL;DR",
+          "",
+          "A workflow with an unresolved shortlink.",
+          "",
+          "## What the post showed",
+          "",
+          "> Caption: Try the workflow: https://t.co/abc123",
+          "",
+          "Source links found:",
+          "- https://t.co/abc123",
+          "",
+          "## Fit for Sid",
+          "",
+          "- Target project: tech-radar-api",
+          "- Verdict: `#try-soon`",
+        ].join("\n"),
+      );
+      process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/admin/enrich-weak",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { limit: 10, dryRun: true },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(runnerMock.runPipeline).not.toHaveBeenCalled();
+      expect(res.json()).toMatchObject({
+        dryRun: true,
+        limit: 10,
+        matched: 1,
+        queued: 0,
+        runs: [],
+        candidates: [
+          {
+            id: "shortlink.md",
+            sourceUrl: "https://t.co/abc123",
+            triage: {
+              kind: "unresolved_shortlink",
+              retryable: true,
+              reasons: expect.arrayContaining(["shortlink_unresolved"]),
+            },
+            enrichment: {
+              status: "needs-enrichment",
+              reasons: expect.arrayContaining(["shortlink_unresolved"]),
+            },
+          },
+        ],
+      });
+    });
+
+    it("POST /api/admin/enrich-weak force-requeues retryable weak non-skip findings only", async () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-enrich-weak-"));
       const findingsDir = path.join(dir, "tech-radar", "findings");
       fs.mkdirSync(findingsDir, { recursive: true });
@@ -668,7 +759,13 @@ describe("server routes", () => {
       });
 
       expect(res.statusCode).toBe(202);
-      expect(res.json()).toMatchObject({ queued: 1 });
+      expect(res.json()).toMatchObject({
+        dryRun: false,
+        limit: 10,
+        matched: 1,
+        queued: 1,
+        candidates: [],
+      });
       expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.instagram.com/p/weak/", { force: true });
     });
   });

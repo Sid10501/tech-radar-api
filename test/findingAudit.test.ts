@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FindingSummary, PublicFindingSummary } from "../src/findings.js";
-import { auditFindings, auditPublicFindings, enrichmentProfile, enrichmentStatus, filterCounts, filterCountsFromPublic } from "../src/findingAudit.js";
+import { auditFindings, auditPublicFindings, enrichmentProfile, enrichmentStatus, filterCounts, filterCountsFromPublic, publicEnrichmentProfile } from "../src/findingAudit.js";
 
 function finding(overrides: Partial<FindingSummary> = {}): FindingSummary {
   return {
@@ -18,6 +18,7 @@ function finding(overrides: Partial<FindingSummary> = {}): FindingSummary {
     displaySummary: "Summary",
     evidence: { caption: true, transcript: false, ocr: false, repo: false, docs: false },
     quality: { score: 42, level: "weak", reasons: ["caption", "source uncertainty"] },
+    triage: { kind: "unknown_tool", retryable: true, reasons: [] },
     retry: null,
     diagnostics: { extractionWarnings: [] },
     workflow: { kind: "standalone", artifactType: null, role: null, parent: null, children: [] },
@@ -40,6 +41,7 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     displaySummary: "Summary",
     evidence: { caption: true, transcript: false, ocr: false, repo: true, docs: false },
     quality: { score: 60, level: "review", reasons: ["caption", "repo"] },
+    triage: { kind: "repo_backed", retryable: true, reasons: [] },
     retry: null,
     diagnostics: { extractionWarnings: [] },
     workflow: { kind: "standalone", artifactType: null, role: null, parent: null, children: [] },
@@ -86,6 +88,12 @@ describe("finding audit helpers", () => {
         missing_ocr: 2,
         source_uncertainty: 0,
         low_repo_signal: 0,
+        concept_only: 0,
+        educational_post: 0,
+        no_artifact_expected: 0,
+        repo_found_source_weak: 0,
+        shortlink_unresolved: 0,
+        dm_gated_no_link: 0,
       },
     });
   });
@@ -117,6 +125,12 @@ describe("finding audit helpers", () => {
         missing_ocr: 1,
         source_uncertainty: 0,
         low_repo_signal: 0,
+        concept_only: 0,
+        educational_post: 0,
+        no_artifact_expected: 0,
+        repo_found_source_weak: 0,
+        shortlink_unresolved: 0,
+        dm_gated_no_link: 0,
       },
     });
     expect(audit).not.toHaveProperty("actions");
@@ -187,6 +201,82 @@ describe("finding audit helpers", () => {
       reasons: ["weak_quality", "missing_repo_or_docs", "missing_transcript", "missing_ocr", "source_uncertainty", "low_repo_signal"],
       privateReasons: ["target_project_none", "skip_verdict", "recommended_skip"],
     });
+  });
+
+  it("does not queue weak concept or no-artifact findings for enrichment", () => {
+    const concept = finding({
+      title: "8 AI words everyone pretends to understand",
+      quality: { score: 45, level: "weak", reasons: ["caption"] },
+      recommendedAction: "Review",
+      triage: {
+        kind: "concept_explainer",
+        retryable: false,
+        reasons: ["concept_only", "no_artifact_expected"],
+      },
+    });
+
+    const profile = enrichmentProfile(concept);
+
+    expect(profile).toMatchObject({
+      status: "ready",
+      publicStatus: "ready",
+      reasons: expect.arrayContaining(["weak_quality", "concept_only", "no_artifact_expected"]),
+    });
+    expect(filterCounts([concept])).toMatchObject({ enrich: 0 });
+    expect(auditFindings([concept])).toMatchObject({
+      needsEnrichment: 0,
+      enrichmentReasons: expect.objectContaining({
+        concept_only: 1,
+        no_artifact_expected: 1,
+      }),
+    });
+  });
+
+  it("keeps repo-backed weak findings and unresolved shortlinks in the enrichment queue", () => {
+    const repoWeak = finding({
+      evidence: { caption: true, transcript: false, ocr: false, repo: true, docs: false },
+      quality: { score: 50, level: "weak", reasons: ["caption", "repo found, source weak"] },
+      triage: {
+        kind: "repo_backed",
+        retryable: true,
+        reasons: ["repo_found_source_weak"],
+      },
+    });
+    const shortlink = finding({
+      source: { platform: "x", label: "Post", url: "https://t.co/abc123", classification: "unknown" },
+      quality: { score: 45, level: "weak", reasons: ["caption"] },
+      triage: {
+        kind: "unresolved_shortlink",
+        retryable: true,
+        reasons: ["shortlink_unresolved"],
+      },
+    });
+
+    expect(enrichmentProfile(repoWeak)).toMatchObject({
+      status: "needs-enrichment",
+      reasons: expect.arrayContaining(["weak_quality", "repo_found_source_weak"]),
+    });
+    expect(enrichmentProfile(shortlink)).toMatchObject({
+      status: "needs-enrichment",
+      reasons: expect.arrayContaining(["weak_quality", "shortlink_unresolved"]),
+    });
+    expect(filterCounts([repoWeak, shortlink])).toMatchObject({ enrich: 2 });
+  });
+
+  it("uses public enrichment profiles consistently for audit and filters", () => {
+    const sourceUncertain = publicFinding({
+      source: { platform: "instagram", label: "Creator", url: "https://example.com/post", classification: "unknown" },
+      evidence: { caption: true, transcript: true, ocr: false, repo: false, docs: false },
+      quality: { score: 62, level: "review", reasons: ["caption", "source uncertainty"] },
+      triage: { kind: "unknown_tool", retryable: true, reasons: [] },
+    });
+
+    expect(publicEnrichmentProfile(sourceUncertain)).toMatchObject({
+      status: "needs-enrichment",
+      reasons: expect.arrayContaining(["source_uncertainty"]),
+    });
+    expect(auditPublicFindings([sourceUncertain])).toMatchObject({ needsEnrichment: 1 });
+    expect(filterCountsFromPublic([sourceUncertain])).toMatchObject({ enrich: 1 });
   });
 
   it("computes filter counts used by the dashboard", () => {

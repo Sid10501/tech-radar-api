@@ -881,15 +881,59 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         .join("") || '<span class="evidence-chip muted">metadata only</span>';
     }
 
-    function qualityReasonChips(f) {
+    const triageReasonLabels = {
+      concept_only: "Concept only",
+      educational_post: "Educational",
+      no_artifact_expected: "No artifact expected",
+      repo_found_source_weak: "Repo weak",
+      shortlink_unresolved: "Shortlink unresolved",
+      dm_gated_no_link: "DM gated",
+    };
+
+    function triageLabel(value) {
+      return triageReasonLabels[value] || String(value || "").replace(/_/g, " ");
+    }
+
+    function prioritizedQualityReasons(f) {
       const chips = [];
       if (f.diagnostics?.duplicateGroup) {
         chips.push("duplicate");
       }
-      chips.push(...(f.quality.reasons || []).slice(0, 2));
-      return chips
-        .filter(Boolean)
-        .map((label) => '<span class="evidence-chip muted">' + escapeHtml(label) + '</span>')
+      for (const reason of f.triage?.reasons || []) chips.push("triage " + triageLabel(reason));
+      const priority = [
+        "duplicate/retry history",
+        "source uncertainty",
+        "low repo signal",
+        "repo found, source weak",
+        "needs transcript",
+        "needs OCR",
+        "dm gated",
+      ];
+      for (const reason of priority) {
+        if ((f.quality.reasons || []).includes(reason)) chips.push(reason);
+      }
+      for (const reason of f.quality.reasons || []) {
+        if (!chips.includes(reason)) chips.push(reason);
+      }
+      return chips.filter(Boolean).slice(0, 3);
+    }
+
+    function qualityReasonChips(f) {
+      return prioritizedQualityReasons(f)
+        .map((reason) => {
+          const attr = reason.startsWith("triage ") ? "data-triage-chip" : "data-reason-chip";
+          return '<span class="evidence-chip muted" ' + attr + '>' + escapeHtml(reason) + '</span>';
+        })
+        .join("");
+    }
+
+    function triageChips(f) {
+      const reasons = f.triage?.reasons || [];
+      if (!reasons.length) return '<span class="evidence-chip muted">No special reason</span>';
+      return reasons
+        .map(triageLabel)
+        .filter((label, index, all) => all.indexOf(label) === index)
+        .map((label) => '<span class="evidence-chip muted" data-triage-chip>' + escapeHtml(label) + '</span>')
         .join("");
     }
 
@@ -903,6 +947,12 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     function hasArtifactEvidence(f) {
       return f.evidence.repo || f.evidence.docs || isSourceBackedPublicArtifact(f);
+    }
+
+    function isEnrichmentCandidate(f) {
+      if (f.enrichment?.status) return f.enrichment.status === "needs-enrichment";
+      if (f.triage?.retryable === false) return false;
+      return f.quality.level === "weak" || !hasArtifactEvidence(f);
     }
 
     function matchesQuery(f) {
@@ -924,7 +974,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (state.filter === "review") return f.quality.level === "review";
       if (state.filter === "weak") return f.quality.level === "weak";
       if (state.filter === "repo") return hasArtifactEvidence(f);
-      if (state.filter === "enrich") return !(state.privateUnlocked && f.recommendedAction === "Skip") && (f.quality.level === "weak" || !hasArtifactEvidence(f));
+      if (state.filter === "enrich") return !(state.privateUnlocked && f.recommendedAction === "Skip") && isEnrichmentCandidate(f);
       if (state.filter === "project") return state.privateUnlocked && f.targetProject && f.targetProject !== "none" && f.targetProject !== "unknown";
       if (state.filter === "ocr") return f.evidence.ocr;
       if (state.filter === "skip") return state.privateUnlocked && f.recommendedAction === "Skip";
@@ -981,6 +1031,21 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       setTimeout(() => { el.style.display = "none"; }, 2200);
     }
 
+    const reasonCountLabels = [
+      ["weak_quality", "Weak quality"],
+      ["missing_repo_or_docs", "Missing links"],
+      ["missing_transcript", "Missing transcript"],
+      ["missing_ocr", "Missing OCR"],
+      ["source_uncertainty", "Source uncertainty"],
+      ["low_repo_signal", "Low repo signal"],
+      ["concept_only", "Concept only"],
+      ["educational_post", "Educational"],
+      ["no_artifact_expected", "No artifact expected"],
+      ["repo_found_source_weak", "Repo weak"],
+      ["shortlink_unresolved", "Shortlink unresolved"],
+      ["dm_gated_no_link", "DM gated"],
+    ];
+
     function updateStats() {
       const counts = { strong: 0, review: 0, weak: 0 };
       for (const finding of state.findings) counts[finding.quality.level] += 1;
@@ -1009,8 +1074,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
             ["Repo/docs", (audit.evidence?.repo ?? 0) + (audit.evidence?.docs ?? 0)],
             ["Transcript", audit.evidence?.transcript ?? 0],
             ["Enrich", audit.needsEnrichment ?? 0],
-            ["Missing links", enrichmentReasons.missing_repo_or_docs ?? 0],
-            ["Source uncertainty", enrichmentReasons.source_uncertainty ?? 0],
+            ...reasonCountLabels.map(([key, label]) => [label, enrichmentReasons[key] ?? 0]),
           ].map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ': ' + escapeHtml(value) + '</div>').join("")
         : "";
       $("count").textContent = state.loading ? "Loading" : visibleFindings().length + " of " + state.findings.length;
@@ -1270,6 +1334,11 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
                 <div class="row"><div class="row-label">Transcript</div><div class="badge">\${evidenceBadge(f.evidence.transcript)}</div></div>
                 <div class="row"><div class="row-label">OCR</div><div class="badge">\${evidenceBadge(f.evidence.ocr, "captured", "not captured")}</div></div>
                 <div class="row"><div class="row-label">Repo or docs</div><div class="badge">\${evidenceBadge(f.evidence.repo || f.evidence.docs)}</div></div>
+              </div></div>
+              <div class="panel"><div class="panel-head">Triage</div><div class="panel-body">
+                <div class="row"><div class="row-label">Kind</div><div class="badge">\${escapeHtml(f.triage?.kind || "unknown")}</div></div>
+                <div class="row"><div class="row-label">Retryable</div><div class="badge">\${f.triage?.retryable ? "yes" : "no"}</div></div>
+                <div class="item-evidence">\${triageChips(f)}</div>
               </div></div>
               <div class="panel"><div class="panel-head">Why surfaced</div><div class="panel-body">\${escapeHtml(f.quality.reasons.join(", ") || "Needs manual review.")}</div></div>
             </aside>
