@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const ResearchOutputSchema = z.object({
   what: z.string(),
+  display_name: z.string().nullish(),
+  display_summary: z.string().nullish(),
   who: z.string(),
   status: z.enum(["stable", "alpha", "beta", "abandoned", "unknown"]),
   why: z.string(),
