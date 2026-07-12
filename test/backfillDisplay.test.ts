@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { backfillDir, extractPromptInputs, hasDisplayHeader, insertDisplayHeader } from "../scripts/backfill-display.js";
+import {
+  backfillDir,
+  extractPromptInputs,
+  hasDisplayHeader,
+  insertDisplayHeader,
+  parseDisplayFields,
+} from "../scripts/backfill-display.js";
 
 const FINDING = `# Sebastian Hardy | AI Marketing on Instagram: &quot;The 5 Claude Code plugins&quot;
 
@@ -39,6 +45,17 @@ describe("backfill-display", () => {
     const { title, tldr } = extractPromptInputs(FINDING);
     expect(title).toContain('"The 5 Claude Code plugins"');
     expect(tldr).toContain("five open-source plugins");
+  });
+
+  it("accepts fenced JSON from the model", () => {
+    expect(
+      parseDisplayFields(
+        '```json\n{"display_name":"Claude Code Plugins","display_summary":"A curated set of open-source Claude Code plugins."}\n```',
+      ),
+    ).toEqual({
+      display_name: "Claude Code Plugins",
+      display_summary: "A curated set of open-source Claude Code plugins.",
+    });
   });
 
   it("backfills only findings without a header, honors dry-run and limit", async () => {

@@ -53,6 +53,18 @@ export function extractPromptInputs(markdown: string): { title: string; tldr: st
   return { title, tldr };
 }
 
+function stripJsonFence(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return match ? match[1].trim() : trimmed;
+}
+
+export function parseDisplayFields(text: string): DisplayFields {
+  const parsed = parseAgentOutput(stripJsonFence(text), DisplaySchema, "backfill-display");
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.data;
+}
+
 type Generate = (title: string, tldr: string) => Promise<DisplayFields>;
 
 export async function backfillDir(
@@ -112,9 +124,7 @@ function anthropicGenerate(client: Anthropic): Generate {
       ],
     });
     const text = response.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "";
-    const parsed = parseAgentOutput(text, DisplaySchema, "backfill-display");
-    if (!parsed.ok) throw new Error(parsed.error);
-    return parsed.data;
+    return parseDisplayFields(text);
   };
 }
 
