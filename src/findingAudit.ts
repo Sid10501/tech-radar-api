@@ -217,7 +217,7 @@ export function filterCounts(findings: FindingSummary[]): FindingFilterCounts {
     if (finding.targetProject && finding.targetProject !== "none" && finding.targetProject !== "unknown") counts.project += 1;
     if (finding.evidence.ocr) counts.ocr += 1;
     const status = enrichmentStatus(finding);
-    if (status === "needs-enrichment") counts.enrich += 1;
+    if (status === "needs-enrichment" && !isSameSourceDuplicate(finding)) counts.enrich += 1;
     if (status === "skip") counts.skip += 1;
   }
 
@@ -244,6 +244,10 @@ export function filterCountsFromPublic(findings: PublicFindingSummary[]): Public
   }
 
   return counts;
+}
+
+function isSameSourceDuplicate(finding: FindingSummary): boolean {
+  return finding.diagnostics.duplicateGroup?.reason === "same source URL";
 }
 
 function countEvidence(summary: FindingAuditSummary, finding: FindingSummary | PublicFindingSummary): void {

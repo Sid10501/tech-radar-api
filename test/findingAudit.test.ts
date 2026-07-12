@@ -263,6 +263,20 @@ describe("finding audit helpers", () => {
     expect(filterCounts([repoWeak, shortlink])).toMatchObject({ enrich: 2 });
   });
 
+  it("does not count same-source duplicates as dashboard enrichment queue work", () => {
+    const duplicate = finding({
+      id: "duplicate.md",
+      filename: "duplicate.md",
+      diagnostics: {
+        extractionWarnings: [],
+        duplicateGroup: { id: "dup-source", count: 2, reason: "same source URL" },
+      },
+    });
+
+    expect(enrichmentProfile(duplicate).status).toBe("needs-enrichment");
+    expect(filterCounts([duplicate])).toMatchObject({ enrich: 0 });
+  });
+
   it("uses public enrichment profiles consistently for audit and filters", () => {
     const sourceUncertain = publicFinding({
       source: { platform: "instagram", label: "Creator", url: "https://example.com/post", classification: "unknown" },
