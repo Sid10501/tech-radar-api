@@ -37,6 +37,7 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     quality: { score: 60, level: "review", reasons: ["caption"] },
     retry: null,
     diagnostics: { extractionWarnings: [] },
+    workflow: { kind: "standalone", artifactType: null, role: null, parent: null, children: [] },
     isPrivate: false,
     applied: null,
     ...overrides,
