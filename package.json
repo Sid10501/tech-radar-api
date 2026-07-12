@@ -8,7 +8,8 @@
     "start": "node dist/src/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "INTEGRATION=1 vitest run"
+    "test:integration": "INTEGRATION=1 vitest run",
+    "backfill:display": "tsx scripts/backfill-display.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

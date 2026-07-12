@@ -39,3 +39,10 @@
 ## Out of scope
 - Pagination/ETag (payload is small; existing no-store hardening stands — portfolio consumes at build time via ISR).
 - Dashboard UI changes.
+
+## Addendum (2026-07-12): display title/summary layer
+
+- [x] `src/displayText.ts` — Display-header parsing + deterministic derivation (boilerplate strip, entity decode, word-boundary caps); wired into PublicFindingSummary (`displayTitle`/`displaySummary`) and RSS titles.
+- [x] Research agent emits optional `display_name`/`display_summary`; compose writes `**Display:**` header for all future findings.
+- [x] `scripts/backfill-display.ts` (`npm run backfill:display`, `--dry-run`/`--limit`) — LLM backfill for existing findings via `railway run`; pure logic unit-tested with fake transport.
+- [ ] OPERATOR STEP (Sid): `railway run npx tsx scripts/backfill-display.ts --dry-run` → review → run without `--dry-run` → commit/push ai-memory.
