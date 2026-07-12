@@ -765,8 +765,103 @@ describe("server routes", () => {
         matched: 1,
         queued: 1,
         candidates: [],
+        skippedDuplicates: [],
       });
       expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.instagram.com/p/weak/", { force: true });
+    });
+
+    it("POST /api/admin/enrich-weak skips same-source duplicate candidates", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-enrich-duplicate-"));
+      const findingsDir = path.join(dir, "tech-radar", "findings");
+      fs.mkdirSync(findingsDir, { recursive: true });
+      for (const [filename, saved] of [
+        ["newer.md", "20260530"],
+        ["older.md", "20260516"],
+      ] as const) {
+        fs.writeFileSync(
+          path.join(findingsDir, filename),
+          [
+            `# Duplicate ${saved}`,
+            "",
+            "**Source:** instagram · [Creator](https://www.instagram.com/p/duplicate/?igsh=tracking)",
+            `**Saved:** ${saved}`,
+            "**Tags:** instagram",
+            "",
+            "## TL;DR",
+            "",
+            "Weak duplicate sample.",
+            "",
+            "## What the post showed",
+            "",
+            "> Caption: duplicate",
+            "",
+            "## Links",
+            "",
+            "- Repo: https://github.com/example/duplicate",
+            "",
+            "## Fit for Sid",
+            "",
+            "- Target project: unknown",
+            "- Verdict: `#try-soon`",
+          ].join("\n"),
+        );
+      }
+      fs.writeFileSync(
+        path.join(findingsDir, "unique.md"),
+        [
+          "# Unique weak",
+          "",
+          "**Source:** instagram · [Creator](https://www.instagram.com/p/unique/)",
+          "**Saved:** 20260401",
+          "**Tags:** instagram",
+          "",
+          "## TL;DR",
+          "",
+          "Weak unique sample.",
+          "",
+          "## What the post showed",
+          "",
+          "> Caption: unique",
+        ].join("\n"),
+      );
+      process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+      const dryRun = await app.inject({
+        method: "POST",
+        url: "/api/admin/enrich-weak",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { limit: 10, dryRun: true },
+      });
+
+      expect(dryRun.statusCode).toBe(200);
+      expect(dryRun.json()).toMatchObject({
+        matched: 1,
+        queued: 0,
+        candidates: [{ id: "unique.md" }],
+        skippedDuplicates: expect.arrayContaining([
+          expect.objectContaining({ id: "newer.md", reason: "same_source_duplicate" }),
+          expect.objectContaining({ id: "older.md", reason: "same_source_duplicate" }),
+        ]),
+      });
+
+      const live = await app.inject({
+        method: "POST",
+        url: "/api/admin/enrich-weak",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { limit: 10 },
+      });
+
+      expect(live.statusCode).toBe(202);
+      expect(live.json()).toMatchObject({
+        matched: 1,
+        queued: 1,
+        skippedDuplicates: expect.arrayContaining([
+          expect.objectContaining({ id: "newer.md", reason: "same_source_duplicate" }),
+          expect.objectContaining({ id: "older.md", reason: "same_source_duplicate" }),
+        ]),
+      });
+      expect(runnerMock.runPipeline).toHaveBeenCalledTimes(1);
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.instagram.com/p/unique/", { force: true });
     });
   });
 });
