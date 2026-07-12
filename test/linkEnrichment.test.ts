@@ -249,6 +249,36 @@ describe("link enrichment", () => {
     });
   });
 
+  it("resolves Kronos from practical automated trading setup language", async () => {
+    const githubLookup = vi.fn(async () => ({
+      stars: 23_000,
+      lastPushed: "2026-07-06T00:00:00Z",
+      openIssues: 10,
+      language: "Python",
+      license: "MIT",
+      archived: false,
+    }));
+
+    const enriched = await enrichLinksFromExtract(
+      {
+        ...baseExtract,
+        title: "Kronos AI Automated Trading System",
+        caption:
+          "This video shows how anyone can build an automated AI system with Kronos integration for quant trading with zero experience.",
+        transcript:
+          "I read the research for a Chinese AI model that can make money while you sleep, and now everyone is asking how to use it.",
+        visual_text: "YOU can BUILD a SYSTEM for AUTOMATED TRADING With ZERO EXPERIENCE",
+      },
+      githubLookup,
+    );
+
+    expect(githubLookup).toHaveBeenCalledWith("shiyu-coder/Kronos");
+    expect(enriched.confirmed).toMatchObject({
+      github: "https://github.com/shiyu-coder/Kronos",
+      docs: "https://github.com/shiyu-coder/Kronos#readme",
+    });
+  });
+
   it("resolves Google's MCP Toolbox for Databases despite older Gen AI Toolbox naming", async () => {
     const githubLookup = vi.fn(async () => ({
       stars: 15_900,

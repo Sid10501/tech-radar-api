@@ -75,6 +75,8 @@ const CURATED_PROJECTS: CuratedProject[] = [
       /\bK-line\s+Tokenization\b[\s\S]{0,160}\bAutoregressive Pre-training\b/i,
       /\bcoarse-grained subtoken\b[\s\S]{0,120}\bfine-grained subtoken\b/i,
       /\bdecoder-only foundation models?\b[\s\S]{0,120}\bK-line sequences?\b/i,
+      /\bautomated\s+(?:AI\s+)?(?:trading|quant)\b[\s\S]{0,160}\bzero\s+experience\b/i,
+      /\bKronos integration\b[\s\S]{0,120}\b(?:quant\s+trading|automated\s+trading|trading\s+system)\b/i,
     ],
     github: "https://github.com/shiyu-coder/Kronos",
     docs: "https://github.com/shiyu-coder/Kronos#readme",
