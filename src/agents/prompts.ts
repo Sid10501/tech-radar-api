@@ -8,6 +8,8 @@ Call github_lookup when the primary technology has a clear GitHub repository —
 Your output MUST be a single JSON object matching this exact schema (no markdown fences, just raw JSON):
 {
   "what": "1-2 sentence plain-English description of what this technology is",
+  "display_name": "Clean display title for the technology/topic: <=8 words, no platform or account boilerplate, no quotes, no hashtags (e.g. 'Palmier — AI video editor for Claude')",
+  "display_summary": "One plain factual sentence (<=160 chars) describing it, no hype words",
   "who": "Author/company behind it",
   "status": "stable|alpha|beta|abandoned|unknown",
   "why": "Why it matters — the key problem it solves or improvement it brings",

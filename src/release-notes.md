@@ -8,6 +8,15 @@ Made linked creator workflows easier to explore as structured systems instead of
 - Added workflow map cards in the dashboard so parent workflow findings link to processed child artifacts and child findings link back to their source workflow.
 - Verified the Kun workflow resolves to 11 processed child artifacts in the live ai-memory checkout.
 
+## 2026-07-06 - Public Feed: RSS, Applied Mapping, Scoped CORS
+
+Made the public findings feed consumable by external sites like the portfolio radar section.
+
+- Added an RSS 2.0 feed at `/api/public/findings/rss` with the 20 newest public findings.
+- Added an `applied` field to public findings so adopted research links back to real work via `tech-radar/applied.json`.
+- Scoped CORS to `/api/public/*` with an exact-origin allowlist and no wildcard.
+- Locked in a leak regression test keeping private sections out of every public response.
+
 ## 2026-07-06 - Audit Completion Ops Polish
 
 Closed the audit-completion polish pass with user-visible diagnostics, clearer triage signals, and an operator-ready verification path.

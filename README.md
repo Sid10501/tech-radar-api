@@ -104,12 +104,25 @@ ai-memory/
     INBOX.md             ← pipeline writes run status here
     INDEX.md             ← pipeline writes a finding index here
     findings/            ← markdown findings land here
+    applied.json         ← optional: marks findings you actually adopted
 ```
 
 `INBOX.md` and `INDEX.md` each need this sentinel line for row insertion:
 
 ```markdown
 <!-- new rows inserted above this line -->
+```
+
+`applied.json` is an optional JSON object keyed by finding filename. Each entry needs `appliedAt` and `link`, plus an optional `note`; the public feed exposes it as `applied` on matching findings (`null` otherwise). A missing or corrupt file degrades to `applied: null` for all findings:
+
+```json
+{
+  "20260615-video-by-shawnchee.md": {
+    "appliedAt": "2026-07-06",
+    "link": "https://github.com/you/your-project",
+    "note": "adopted the rubric"
+  }
+}
 ```
 
 ### 3. Create a deploy key
@@ -144,6 +157,8 @@ Copy `.env.example` to `.env`:
 | `TELEGRAM_BOT_TOKEN` | No | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | No | Your chat ID — enables notifications and two-way control |
 | `TELEGRAM_WEBHOOK_SECRET` | No | Random string to verify Telegram webhook requests |
+| `PUBLIC_FEED_ALLOWED_ORIGINS` | No | Comma-separated exact origins granted CORS access to `/api/public/*` (no wildcard; empty = no CORS) |
+| `PUBLIC_SITE_RADAR_BASE` | No | Base URL for RSS item links, e.g. `https://your-site.dev/radar` (default: the request origin) |
 | `PORT` | No | HTTP port (default: `3000`) |
 
 ### 5. Run locally
@@ -185,6 +200,8 @@ Key variables to set (see `.env.example` for full list):
 | `TARGET_PROJECTS` | Optional | Comma-separated list of your projects |
 | `TELEGRAM_BOT_TOKEN` | Optional | Telegram notifications |
 | `TELEGRAM_CHAT_ID` | Optional | Your Telegram chat ID |
+| `PUBLIC_FEED_ALLOWED_ORIGINS` | Optional | Exact origins allowed CORS on `/api/public/*` |
+| `PUBLIC_SITE_RADAR_BASE` | Optional | Base URL for RSS item links |
 
 > **Note:** After pushing new code, use `railway up` to deploy — not `railway deployment redeploy`, which redeploys the previous image.
 
@@ -236,6 +253,15 @@ Returns last 50 runs.
 
 ### `GET /runs/:id`
 Returns a single run by ID.
+
+### `GET /api/public/findings`
+Public, sanitized finding summaries — no auth. Each item includes `applied: null | { appliedAt, link, note? }` sourced from `tech-radar/applied.json`.
+
+### `GET /api/public/findings/rss`
+RSS 2.0 feed of the 20 newest public findings (`application/rss+xml`). Item links use `PUBLIC_SITE_RADAR_BASE`.
+
+### `GET /api/public/findings/:id`
+Public, sanitized markdown detail for one finding — private sections are removed.
 
 ---
 

@@ -156,3 +156,31 @@ describe("composeFinding()", () => {
     expect(body).toContain("Planning artifacts:");
   });
 });
+
+describe("composeFinding() display header", () => {
+  it("writes a Display header when research provides display fields", async () => {
+    const { composeFinding } = await import("../src/compose.js");
+    const { body } = composeFinding({
+      extract: extractFixture,
+      research: {
+        ...researchFixture,
+        display_name: "Zod 4 — schema validation",
+        display_summary: "TypeScript-first validation library with faster parsing than Zod 3.",
+      },
+      implementation: implementationFixture,
+    });
+    expect(body).toContain(
+      "**Display:** Zod 4 — schema validation — TypeScript-first validation library with faster parsing than Zod 3.",
+    );
+  });
+
+  it("omits the Display header when research display fields are absent", async () => {
+    const { composeFinding } = await import("../src/compose.js");
+    const { body } = composeFinding({
+      extract: extractFixture,
+      research: researchFixture,
+      implementation: implementationFixture,
+    });
+    expect(body).not.toContain("**Display:**");
+  });
+});

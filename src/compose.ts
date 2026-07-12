@@ -75,11 +75,16 @@ export function composeFinding(input: {
     ? `\n## Workflow Audit\n\n${workflowAudit}\n`
     : "";
 
+  const displayLine =
+    research.display_name && research.display_summary
+      ? `\n**Display:** ${research.display_name.trim()} — ${research.display_summary.trim()}`
+      : "";
+
   const body = `# ${title}
 
 **Source:** ${extract.platform} · [${extract.creator ?? "unknown"}](${extract.url})
 **Saved:** ${date}
-**Tags:** ${tags}
+**Tags:** ${tags}${displayLine}
 
 ## TL;DR
 

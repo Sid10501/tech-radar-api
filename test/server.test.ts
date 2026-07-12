@@ -117,6 +117,10 @@ describe("server routes", () => {
         "- Target project: ai-memory",
       ].join("\n"),
     );
+    fs.writeFileSync(
+      path.join(dir, "tech-radar", "applied.json"),
+      JSON.stringify({ "sample.md": { appliedAt: "2026-07-06", link: "https://github.com/Sid10501/portfolio" } }),
+    );
     process.env["AI_MEMORY_LOCAL_DIR"] = dir;
 
     const res = await app.inject({ method: "GET", url: "/api/public/findings" });
@@ -125,6 +129,9 @@ describe("server routes", () => {
     const body = res.json();
     expect(body.findings).toHaveLength(1);
     expect(body.findings[0].title).toBe("Public Sample");
+    expect(body.findings[0].displayTitle).toBe("Public Sample");
+    expect(body.findings[0].displaySummary).toBe("General research summary.");
+    expect(body.findings[0].applied).toEqual({ appliedAt: "2026-07-06", link: "https://github.com/Sid10501/portfolio" });
     expect(body.findings[0]).not.toHaveProperty("targetProject");
     expectNoPrivateFindingFields(body);
     expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
@@ -225,6 +232,10 @@ describe("server routes", () => {
         "## Implementation Idea",
         "",
         "Private action",
+        "",
+        "## Follow-ups",
+        "",
+        "- Private follow-up task",
       ].join("\n"),
     );
     process.env["AI_MEMORY_LOCAL_DIR"] = dir;
@@ -240,6 +251,9 @@ describe("server routes", () => {
     expect(body.markdown).not.toContain("Implementation Idea");
     expect(body.markdown).not.toMatch(/Target project|Verdict|Recommended action/i);
     expect(body.markdown).toContain("Public-safe sentence.");
+    expect(res.body).not.toContain("Fit for Sid");
+    expect(res.body).not.toContain("## Implementation Idea");
+    expect(res.body).not.toContain("## Follow-ups");
     expectNoPrivateFindingFields(body);
   });
 
@@ -263,6 +277,78 @@ describe("server routes", () => {
     expect(gitMocks.init).toHaveBeenCalledTimes(1);
     expect(gitMocks.pullLatest).toHaveBeenCalledTimes(1);
     delete process.env["AI_MEMORY_REPO"];
+  });
+
+  describe("public feed CORS", () => {
+    const ORIGIN = "https://sid.dev";
+
+    beforeAll(() => {
+      process.env["PUBLIC_FEED_ALLOWED_ORIGINS"] = `${ORIGIN},https://www.sid.dev`;
+    });
+
+    afterAll(() => {
+      delete process.env["PUBLIC_FEED_ALLOWED_ORIGINS"];
+    });
+
+    it("echoes an allowed Origin on public routes", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/public/findings", headers: { origin: ORIGIN } });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["access-control-allow-origin"]).toBe(ORIGIN);
+      expect(res.headers["vary"]).toContain("Origin");
+    });
+
+    it("omits CORS headers for disallowed or absent Origins", async () => {
+      const disallowed = await app.inject({ method: "GET", url: "/api/public/findings", headers: { origin: "https://evil.example" } });
+      const absent = await app.inject({ method: "GET", url: "/api/public/findings" });
+
+      for (const res of [disallowed, absent]) {
+        expect(res.statusCode).toBe(200);
+        expect(res.headers).not.toHaveProperty("access-control-allow-origin");
+      }
+    });
+
+    it("never uses a wildcard origin", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/public/findings", headers: { origin: ORIGIN } });
+
+      expect(res.headers["access-control-allow-origin"]).not.toBe("*");
+    });
+
+    it("never adds CORS headers to private routes", async () => {
+      process.env["AUTH_TOKEN"] = "cors-private-token";
+      const privateFindings = await app.inject({ method: "GET", url: "/api/findings", headers: { origin: ORIGIN } });
+      const runs = await app.inject({ method: "GET", url: "/runs", headers: { origin: ORIGIN } });
+      delete process.env["AUTH_TOKEN"];
+
+      for (const res of [privateFindings, runs]) {
+        expect(res.statusCode).toBe(401);
+        expect(res.headers).not.toHaveProperty("access-control-allow-origin");
+      }
+    });
+
+    it("answers OPTIONS preflight on public routes with 204 and GET only", async () => {
+      const res = await app.inject({
+        method: "OPTIONS",
+        url: "/api/public/findings",
+        headers: { origin: ORIGIN, "access-control-request-method": "GET" },
+      });
+
+      expect(res.statusCode).toBe(204);
+      expect(res.headers["access-control-allow-origin"]).toBe(ORIGIN);
+      expect(res.headers["access-control-allow-methods"]).toBe("GET");
+      expect(res.body).toBe("");
+    });
+
+    it("answers OPTIONS preflight without CORS grants for disallowed Origins", async () => {
+      const res = await app.inject({
+        method: "OPTIONS",
+        url: "/api/public/findings",
+        headers: { origin: "https://evil.example", "access-control-request-method": "GET" },
+      });
+
+      expect(res.statusCode).toBe(204);
+      expect(res.headers).not.toHaveProperty("access-control-allow-origin");
+    });
   });
 
   describe("with AUTH_TOKEN set", () => {

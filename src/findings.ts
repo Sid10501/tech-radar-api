@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { loadAppliedMap, type AppliedEntry, type AppliedMap } from "./applied.js";
+import { decodeEntities, deriveDisplaySummary, deriveDisplayTitle, parseDisplayHeader } from "./displayText.js";
 
 export interface FindingEvidence {
   caption: boolean;
@@ -73,6 +75,8 @@ export interface FindingSummary {
   targetProject: string;
   verdict: string;
   summary: string;
+  displayTitle: string;
+  displaySummary: string;
   evidence: FindingEvidence;
   quality: FindingQuality;
   retry: FindingRetryHistory | null;
@@ -83,6 +87,7 @@ export interface FindingSummary {
 
 export type PublicFindingSummary = Omit<FindingSummary, "targetProject" | "verdict" | "recommendedAction"> & {
   isPrivate: false;
+  applied: AppliedEntry | null;
 };
 
 export interface FindingDetail {
@@ -143,20 +148,6 @@ function stripMarkdown(value: string): string {
     .replace(/[*_>#-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function decodeEntities(value: string): string {
-  return value.replace(/&(#x?[0-9a-f]+|amp|quot|apos|lt|gt);/gi, (_match, entity: string) => {
-    const key = entity.toLowerCase();
-    if (key === "amp") return "&";
-    if (key === "quot") return "\"";
-    if (key === "apos") return "'";
-    if (key === "lt") return "<";
-    if (key === "gt") return ">";
-    if (key.startsWith("#x")) return String.fromCodePoint(Number.parseInt(key.slice(2), 16));
-    if (key.startsWith("#")) return String.fromCodePoint(Number.parseInt(key.slice(1), 10));
-    return _match;
-  });
 }
 
 function normalizeSavedDate(raw: string | undefined): string | null {
@@ -497,7 +488,7 @@ function publicQuality(finding: FindingSummary): FindingQuality {
   };
 }
 
-export function toPublicFinding(finding: FindingSummary): PublicFindingSummary {
+export function toPublicFinding(finding: FindingSummary, appliedMap: AppliedMap = {}): PublicFindingSummary {
   const { targetProject: _targetProject, verdict: _verdict, recommendedAction: _recommendedAction, ...rest } = finding;
   return {
     ...rest,
@@ -505,6 +496,7 @@ export function toPublicFinding(finding: FindingSummary): PublicFindingSummary {
     retry: publicRetryHistory(finding.retry),
     diagnostics: publicDiagnostics(finding.diagnostics),
     isPrivate: false,
+    applied: appliedMap[finding.filename] ?? null,
   };
 }
 
@@ -581,6 +573,9 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const directPublicArtifact = isDirectPublicArtifact(platform, sourceUrl, evidence);
   const classification = classifySourceEvidence(markdown, evidence, directPublicArtifact);
   const summary = stripMarkdown(tldr).slice(0, 420) || "No summary available.";
+  const displayHeader = parseDisplayHeader(markdown);
+  const displayTitle = displayHeader?.title || deriveDisplayTitle(title) || title;
+  const displaySummary = displayHeader?.summary || deriveDisplaySummary(tldr) || summary;
   const retry = parseRetryHistory(markdown);
   const scoredQuality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
   const action = recommendedAction(scoredQuality, targetProject, verdict, evidence, classification, directPublicArtifact);
@@ -598,6 +593,8 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     targetProject,
     verdict,
     summary,
+    displayTitle,
+    displaySummary,
     evidence,
     quality,
     retry,
@@ -822,7 +819,8 @@ function stableDuplicateId(value: string): string {
 }
 
 export function listPublicFindings(aiMemoryDir = getAiMemoryDir()): PublicFindingSummary[] {
-  return listFindings(aiMemoryDir).map(toPublicFinding);
+  const appliedMap = loadAppliedMap(aiMemoryDir);
+  return listFindings(aiMemoryDir).map((finding) => toPublicFinding(finding, appliedMap));
 }
 
 export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir()): FindingDetail | null {
@@ -857,7 +855,7 @@ export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemo
   if (!detail) return null;
   const publicMarkdown = withoutPrivateSections(detail.markdown);
   return {
-    finding: toPublicFinding(detail.finding),
+    finding: toPublicFinding(detail.finding, loadAppliedMap(aiMemoryDir)),
     markdown: publicMarkdown,
     sections: {
       tldr: textBetween(publicMarkdown, "TL;DR"),

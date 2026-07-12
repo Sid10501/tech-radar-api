@@ -6,6 +6,7 @@ import { DASHBOARD_HTML } from "./dashboard.js";
 import { getAiMemoryDir, getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings } from "./findings.js";
 import { auditFindings, auditPublicFindings, enrichmentStatus, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
 import { listReleaseNotes } from "./releaseNotes.js";
+import { buildRssXml } from "./rss.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 
 const SECURITY_HEADERS = {
@@ -45,6 +46,15 @@ function authMiddleware(request: any, reply: any, done: () => void): void {
     return;
   }
   reply.code(401).send({ error: "Unauthorized" });
+}
+
+function publicFeedAllowedOrigins(): Set<string> {
+  return new Set(
+    (process.env["PUBLIC_FEED_ALLOWED_ORIGINS"] ?? "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  );
 }
 
 let aiMemorySync: Promise<void> | null = null;
@@ -87,6 +97,20 @@ export function buildServer() {
       reply.header(name, value);
     }
     reply.header("Cache-Control", NO_STORE_CACHE_CONTROL);
+  });
+
+  // CORS is scoped to the public feed: exact origins from PUBLIC_FEED_ALLOWED_ORIGINS, never a wildcard
+  app.addHook("onRequest", async (request, reply) => {
+    if (!request.url.startsWith("/api/public/")) return;
+    const origin = request.headers.origin;
+    if (typeof origin === "string" && publicFeedAllowedOrigins().has(origin)) {
+      reply.header("Access-Control-Allow-Origin", origin);
+      reply.header("Vary", "Origin");
+    }
+    if (request.method === "OPTIONS") {
+      reply.header("Access-Control-Allow-Methods", "GET");
+      return reply.code(204).send();
+    }
   });
 
   // Set auth token cookie via ?token= query param (one-time web UI flow)
@@ -177,6 +201,13 @@ export function buildServer() {
 
   app.get("/api/public/release-notes", async () => {
     return { releases: listReleaseNotes() };
+  });
+
+  app.get("/api/public/findings/rss", async (request, reply) => {
+    await ensureAiMemoryCheckout();
+    const siteBase = process.env["PUBLIC_SITE_RADAR_BASE"] || `${request.protocol}://${request.headers.host}`;
+    reply.header("Content-Type", "application/rss+xml; charset=utf-8");
+    return buildRssXml(listPublicFindings(), { siteBase });
   });
 
   app.get<{ Params: { id: string } }>("/api/public/findings/:id", async (request, reply) => {
