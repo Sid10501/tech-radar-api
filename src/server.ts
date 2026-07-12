@@ -4,7 +4,7 @@ import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError 
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 import { getAiMemoryDir, getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings } from "./findings.js";
-import { auditFindings, auditPublicFindings, enrichmentStatus, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
+import { auditFindings, auditPublicFindings, enrichmentProfile, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
 import { listReleaseNotes } from "./releaseNotes.js";
 import { buildRssXml } from "./rss.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
@@ -242,20 +242,49 @@ export function buildServer() {
     },
   );
 
-  app.post<{ Body: { limit?: number } }>(
+  app.post<{ Body: { limit?: number; dryRun?: boolean } }>(
     "/api/admin/enrich-weak",
     { preHandler: authMiddleware },
     async (request, reply) => {
       await ensureAiMemoryCheckout();
-      const limit = Math.max(1, Math.min(50, Number(request.body?.limit ?? 10)));
-      const findings = listFindings()
-        .filter((finding) => enrichmentStatus(finding) === "needs-enrichment" && finding.source.url)
+      const requestedLimit = Number(request.body?.limit ?? 10);
+      const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(50, Math.trunc(requestedLimit))) : 10;
+      const candidates = listFindings()
+        .map((finding) => ({ finding, enrichment: enrichmentProfile(finding) }))
+        .filter(({ finding, enrichment }) => enrichment.status === "needs-enrichment" && finding.source.url)
         .slice(0, limit);
+      if (request.body?.dryRun === true) {
+        return reply.code(200).send({
+          dryRun: true,
+          limit,
+          matched: candidates.length,
+          queued: 0,
+          candidates: candidates.map(({ finding, enrichment }) => ({
+            id: finding.id,
+            title: finding.title,
+            sourceUrl: finding.source.url,
+            quality: {
+              level: finding.quality.level,
+              score: finding.quality.score,
+            },
+            triage: finding.triage,
+            enrichment,
+          })),
+          runs: [],
+        });
+      }
       const runs = [];
-      for (const finding of findings) {
+      for (const { finding } of candidates) {
         runs.push(await runPipeline(finding.source.url!, { force: true }));
       }
-      return reply.code(202).send({ queued: runs.length, runs });
+      return reply.code(202).send({
+        dryRun: false,
+        limit,
+        matched: candidates.length,
+        queued: runs.length,
+        candidates: [],
+        runs,
+      });
     },
   );
 

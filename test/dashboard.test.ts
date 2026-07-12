@@ -62,8 +62,14 @@ describe("dashboard HTML", () => {
     const html = DASHBOARD_HTML([]);
 
     expect(html).toContain("enrichmentReasons");
+    expect(html).toContain("const reasonCountLabels");
     expect(html).toContain("Missing links");
+    expect(html).toContain("Weak quality");
+    expect(html).toContain("Concept only");
+    expect(html).toContain("No artifact expected");
+    expect(html).toContain("Shortlink unresolved");
     expect(html).toContain("Source uncertainty");
+    expect(html).toContain("enrichmentReasons[key] ?? 0");
   });
 
   it("does not filter source-backed public artifacts into Needs enrichment only for missing repo/docs", () => {
@@ -132,10 +138,26 @@ describe("dashboard HTML", () => {
   it("renders duplicate and quality reason chips on finding cards", () => {
     const html = DASHBOARD_HTML([]);
 
+    expect(html).toContain("function prioritizedQualityReasons(f)");
     expect(html).toContain("function qualityReasonChips(f)");
     expect(html).toContain("f.diagnostics?.duplicateGroup");
+    expect(html).toContain('reason.startsWith("triage ")');
     expect(html).toContain("duplicate");
+    expect(html).toContain("duplicate/retry history");
+    expect(html).toContain("repo found, source weak");
+    expect(html).toContain("data-triage-chip");
+    expect(html).toContain("data-reason-chip");
     expect(html).toContain("${qualityReasonChips(f)}");
+  });
+
+  it("renders triage reason labels in the detail explorer", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("triageReasonLabels");
+    expect(html).toContain("function triageChips(f)");
+    expect(html).toContain("Triage");
+    expect(html).toContain("Retryable");
+    expect(html).toContain("${triageChips(f)}");
   });
 
   it("renders workflow map hooks for parent and child artifact findings", () => {

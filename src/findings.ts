@@ -17,6 +17,29 @@ export interface FindingQuality {
   reasons: string[];
 }
 
+export type FindingTriageKind =
+  | "repo_backed"
+  | "concept_explainer"
+  | "educational_post"
+  | "no_public_artifact_expected"
+  | "dm_gated"
+  | "unresolved_shortlink"
+  | "unknown_tool";
+
+export type FindingTriageReason =
+  | "concept_only"
+  | "educational_post"
+  | "no_artifact_expected"
+  | "repo_found_source_weak"
+  | "shortlink_unresolved"
+  | "dm_gated_no_link";
+
+export interface FindingTriage {
+  kind: FindingTriageKind;
+  retryable: boolean;
+  reasons: FindingTriageReason[];
+}
+
 export interface FindingRetryHistory {
   updated: string | null;
   previousFilename: string | null;
@@ -79,6 +102,7 @@ export interface FindingSummary {
   displaySummary: string;
   evidence: FindingEvidence;
   quality: FindingQuality;
+  triage: FindingTriage;
   retry: FindingRetryHistory | null;
   diagnostics: FindingDiagnostics;
   workflow: FindingWorkflow;
@@ -227,7 +251,8 @@ function githubUrls(body: string): string[] {
 }
 
 function hasDmGatedSignal(body: string): boolean {
-  return /\bcomment\b.{0,80}\b(?:i['’]?ll|i will)\s+send\s+it\s+over\b|\b(comment|reply|send|sent|dm|dms)\b.{0,80}\b(dm|dms|repo|link|access|agent|template)\b|\b(dm|dms)\b.{0,80}\b(comment|reply|send|sent|repo|link|access)/i.test(body);
+  const text = decodeEntities(body);
+  return /\bcomment\b.{0,80}\b(?:i['’]?ll|i will)\s+send\s+it\s+over\b|\b(comment|reply|send|sent|dm|dms)\b.{0,80}\b(dm|dms|repo|link|access|agent|template)\b|\b(dm|dms)\b.{0,80}\b(comment|reply|send|sent|repo|link|access)/i.test(text);
 }
 
 function classifySourceEvidence(
@@ -327,16 +352,90 @@ function recommendedAction(
   evidence: FindingEvidence,
   classification: FindingSummary["source"]["classification"],
   directPublicArtifact: boolean,
+  triage: FindingTriage,
 ): FindingSummary["recommendedAction"] {
   if (classification === "dm_gated") return "Skip";
   if ((verdict.includes("#skip") || targetProject === "none") && !(directPublicArtifact && (evidence.repo || evidence.docs))) {
     return "Skip";
   }
+  if (quality.level === "weak" && !triage.retryable) return "Review";
   if (quality.level === "weak") return "Retry";
   if (verdict.includes("#skip") || targetProject === "none") return "Review";
   if (quality.level === "strong" && targetProject && targetProject !== "unknown") return "Create task";
   if (quality.level === "review") return "Review";
   return "Backlog";
+}
+
+function triageFinding(
+  body: string,
+  evidence: FindingEvidence,
+  sourceUrl: string | null,
+  classification: FindingSummary["source"]["classification"],
+  directPublicArtifact: boolean,
+  quality: FindingQuality,
+): FindingTriage {
+  const publicArtifact = directPublicArtifact || evidence.repo || evidence.docs || classification === "public_artifact";
+  if (classification === "dm_gated" && !publicArtifact) {
+    return { kind: "dm_gated", retryable: false, reasons: ["dm_gated_no_link"] };
+  }
+
+  if (classification === "dm_gated") {
+    return { kind: "dm_gated", retryable: false, reasons: ["dm_gated_no_link"] };
+  }
+
+  if (publicArtifact) {
+    const reasons: FindingTriageReason[] = [];
+    if (quality.reasons.includes("repo found, source weak")) reasons.push("repo_found_source_weak");
+    const retryable =
+      quality.level === "weak" &&
+      (quality.reasons.includes("repo found, source weak") ||
+        quality.reasons.includes("source uncertainty") ||
+        quality.reasons.includes("low repo signal") ||
+        quality.reasons.includes("needs transcript") ||
+        quality.reasons.includes("needs OCR"));
+    return { kind: "repo_backed", retryable, reasons };
+  }
+
+  if (hasUnresolvedShortlinkOnly(body, sourceUrl, evidence)) {
+    return { kind: "unresolved_shortlink", retryable: true, reasons: ["shortlink_unresolved"] };
+  }
+
+  const clean = stripMarkdown(body).toLowerCase();
+  if (isConceptExplainer(clean)) {
+    return { kind: "concept_explainer", retryable: false, reasons: ["concept_only", "no_artifact_expected"] };
+  }
+  if (isEducationalPost(clean)) {
+    return { kind: "educational_post", retryable: false, reasons: ["educational_post", "no_artifact_expected"] };
+  }
+  if (isNoArtifactExpected(clean)) {
+    return { kind: "no_public_artifact_expected", retryable: false, reasons: ["no_artifact_expected"] };
+  }
+
+  return { kind: "unknown_tool", retryable: quality.level === "weak", reasons: [] };
+}
+
+function hasUnresolvedShortlinkOnly(body: string, sourceUrl: string | null, evidence: FindingEvidence): boolean {
+  if (evidence.repo || evidence.docs) return false;
+  return shortlinkUrls([body, sourceUrl ?? ""].join("\n")).length > 0;
+}
+
+function shortlinkUrls(value: string): string[] {
+  return [...value.matchAll(/https?:\/\/(?:t\.co|bit\.ly|bitly\.com|tinyurl\.com|linktr\.ee|lnk\.bio|bio\.link|cutt\.ly|goo\.gl)\/[^\s)\],]+/gi)].map(
+    (match) => cleanTrailingUrl(match[0]),
+  );
+}
+
+function isConceptExplainer(cleanText: string): boolean {
+  return /\b(?:explainer|explained|concepts?|terminology|glossary|terms?|what\s+(?:is|are)|words everyone pretends|ai words)\b/.test(cleanText);
+}
+
+function isEducationalPost(cleanText: string): boolean {
+  return /\b(?:course|curriculum|tutorial|lessons?|learning chapters|learn how|workshop|bootcamp|class)\b/.test(cleanText);
+}
+
+function isNoArtifactExpected(cleanText: string): boolean {
+  if (/\b(?:repo|github|docs|documentation|library|framework|sdk|plugin|tool)\b/.test(cleanText)) return false;
+  return /\b(?:my workflow|personal workflow|workflow advice|advice|principles|practices|tips|how i|before coding)\b/.test(cleanText);
 }
 
 function qualityWithTriageReasons(
@@ -489,15 +588,35 @@ function publicQuality(finding: FindingSummary): FindingQuality {
 }
 
 export function toPublicFinding(finding: FindingSummary, appliedMap: AppliedMap = {}): PublicFindingSummary {
-  const { targetProject: _targetProject, verdict: _verdict, recommendedAction: _recommendedAction, ...rest } = finding;
+  const { targetProject: _targetProject, verdict: _verdict, recommendedAction: _recommendedAction, triage: _triage, ...rest } = finding;
+  const quality = publicQuality(finding);
   return {
     ...rest,
-    quality: publicQuality(finding),
+    quality,
+    triage: publicTriage(finding, quality),
     retry: publicRetryHistory(finding.retry),
     diagnostics: publicDiagnostics(finding.diagnostics),
     isPrivate: false,
     applied: appliedMap[finding.filename] ?? null,
   };
+}
+
+function publicTriage(finding: FindingSummary, quality: FindingQuality): FindingTriage {
+  const publicText = [
+    finding.title,
+    finding.summary,
+    finding.displayTitle,
+    finding.displaySummary,
+    finding.tags.join(" "),
+  ].join("\n");
+  return triageFinding(
+    publicText,
+    finding.evidence,
+    finding.source.url,
+    finding.source.classification,
+    isDirectPublicArtifact(finding.source.platform, finding.source.url, finding.evidence),
+    quality,
+  );
 }
 
 function publicRetryHistory(retry: FindingRetryHistory | null): FindingRetryHistory | null {
@@ -578,7 +697,8 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const displaySummary = displayHeader?.summary || deriveDisplaySummary(tldr) || summary;
   const retry = parseRetryHistory(markdown);
   const scoredQuality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
-  const action = recommendedAction(scoredQuality, targetProject, verdict, evidence, classification, directPublicArtifact);
+  const triage = triageFinding(markdown, evidence, sourceUrl, classification, directPublicArtifact, scoredQuality);
+  const action = recommendedAction(scoredQuality, targetProject, verdict, evidence, classification, directPublicArtifact, triage);
   const quality = qualityWithTriageReasons(scoredQuality, action, retry);
   const workflow = workflowFromMarkdown(markdown);
 
@@ -597,6 +717,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     displaySummary,
     evidence,
     quality,
+    triage,
     retry,
     diagnostics: { extractionWarnings },
     workflow,

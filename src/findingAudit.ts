@@ -40,7 +40,13 @@ export type EnrichmentReason =
   | "missing_transcript"
   | "missing_ocr"
   | "source_uncertainty"
-  | "low_repo_signal";
+  | "low_repo_signal"
+  | "concept_only"
+  | "educational_post"
+  | "no_artifact_expected"
+  | "repo_found_source_weak"
+  | "shortlink_unresolved"
+  | "dm_gated_no_link";
 export type PrivateEnrichmentReason = "target_project_none" | "skip_verdict" | "recommended_skip";
 
 export interface EnrichmentProfile {
@@ -48,6 +54,11 @@ export interface EnrichmentProfile {
   publicStatus: PublicEnrichmentStatus;
   reasons: EnrichmentReason[];
   privateReasons: PrivateEnrichmentReason[];
+}
+
+export interface PublicEnrichmentProfile {
+  status: PublicEnrichmentStatus;
+  reasons: EnrichmentReason[];
 }
 
 const evidenceKeys: EvidenceKey[] = ["caption", "transcript", "ocr", "repo", "docs"];
@@ -72,6 +83,12 @@ function emptyReasonCounts(): Record<EnrichmentReason, number> {
     missing_ocr: 0,
     source_uncertainty: 0,
     low_repo_signal: 0,
+    concept_only: 0,
+    educational_post: 0,
+    no_artifact_expected: 0,
+    repo_found_source_weak: 0,
+    shortlink_unresolved: 0,
+    dm_gated_no_link: 0,
   };
 }
 
@@ -80,7 +97,7 @@ function hasPublicArtifactEvidence(finding: FindingSummary | PublicFindingSummar
 }
 
 function publicNeedsEnrichment(finding: PublicFindingSummary): boolean {
-  return finding.quality.level === "weak" || !hasPublicArtifactEvidence(finding);
+  return publicEnrichmentProfile(finding).status === "needs-enrichment";
 }
 
 export function enrichmentStatus(finding: FindingSummary): EnrichmentStatus {
@@ -93,7 +110,7 @@ export function enrichmentProfile(finding: FindingSummary): EnrichmentProfile {
   if (finding.targetProject === "none") privateReasons.push("target_project_none");
   if (finding.verdict.includes("#skip")) privateReasons.push("skip_verdict");
   if (finding.recommendedAction === "Skip") privateReasons.push("recommended_skip");
-  const blocked = hasEnrichmentBlockingReason(reasons);
+  const blocked = hasEnrichmentBlockingReason(reasons, finding);
   const status = privateReasons.length ? "skip" : blocked ? "needs-enrichment" : "ready";
   return {
     status,
@@ -103,23 +120,38 @@ export function enrichmentProfile(finding: FindingSummary): EnrichmentProfile {
   };
 }
 
+export function publicEnrichmentProfile(finding: PublicFindingSummary): PublicEnrichmentProfile {
+  const reasons = enrichmentReasonsFor(finding);
+  return {
+    status: hasEnrichmentBlockingReason(reasons, finding) ? "needs-enrichment" : "ready",
+    reasons,
+  };
+}
+
 function enrichmentReasonsFor(finding: FindingSummary | PublicFindingSummary): EnrichmentReason[] {
   const reasons: EnrichmentReason[] = [];
-  if (finding.quality.level === "weak") reasons.push("weak_quality");
-  if (!hasPublicArtifactEvidence(finding)) reasons.push("missing_repo_or_docs");
-  if (!finding.evidence.transcript) reasons.push("missing_transcript");
-  if (!finding.evidence.ocr) reasons.push("missing_ocr");
-  if (finding.quality.reasons.includes("source uncertainty")) reasons.push("source_uncertainty");
-  if (finding.quality.reasons.includes("low repo signal")) reasons.push("low_repo_signal");
+  const add = (reason: EnrichmentReason) => {
+    if (!reasons.includes(reason)) reasons.push(reason);
+  };
+  if (finding.quality.level === "weak") add("weak_quality");
+  if (!hasPublicArtifactEvidence(finding)) add("missing_repo_or_docs");
+  if (!finding.evidence.transcript) add("missing_transcript");
+  if (!finding.evidence.ocr) add("missing_ocr");
+  if (finding.quality.reasons.includes("source uncertainty")) add("source_uncertainty");
+  if (finding.quality.reasons.includes("low repo signal")) add("low_repo_signal");
+  for (const reason of finding.triage?.reasons ?? []) add(reason);
   return reasons;
 }
 
-function hasEnrichmentBlockingReason(reasons: EnrichmentReason[]): boolean {
+function hasEnrichmentBlockingReason(reasons: EnrichmentReason[], finding?: FindingSummary | PublicFindingSummary): boolean {
+  if (finding?.triage && !finding.triage.retryable) return false;
   return reasons.some((reason) =>
     reason === "weak_quality" ||
     reason === "missing_repo_or_docs" ||
     reason === "source_uncertainty" ||
-    reason === "low_repo_signal"
+    reason === "low_repo_signal" ||
+    reason === "repo_found_source_weak" ||
+    reason === "shortlink_unresolved"
   );
 }
 
@@ -165,8 +197,9 @@ export function auditPublicFindings(findings: PublicFindingSummary[], limit = 15
     summary.total += 1;
     summary.quality[finding.quality.level] += 1;
     countEvidence(summary, finding);
-    if (publicNeedsEnrichment(finding)) summary.needsEnrichment += 1;
-    countReasons(summary, enrichmentReasonsFor(finding));
+    const profile = publicEnrichmentProfile(finding);
+    if (profile.status === "needs-enrichment") summary.needsEnrichment += 1;
+    countReasons(summary, profile.reasons);
     if (!finding.evidence.transcript) summary.missingTranscript += 1;
     if (!hasPublicArtifactEvidence(finding)) summary.missingRepoOrDocs += 1;
   }
