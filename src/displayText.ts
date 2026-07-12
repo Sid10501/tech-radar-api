@@ -15,8 +15,13 @@ export function decodeEntities(value: string): string {
     if (key === "apos") return "'";
     if (key === "lt") return "<";
     if (key === "gt") return ">";
-    if (key.startsWith("#x")) return String.fromCodePoint(Number.parseInt(key.slice(2), 16));
-    if (key.startsWith("#")) return String.fromCodePoint(Number.parseInt(key.slice(1), 10));
+    if (key.startsWith("#")) {
+      const codePoint = key.startsWith("#x")
+        ? Number.parseInt(key.slice(2), 16)
+        : Number.parseInt(key.slice(1), 10);
+      if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return _match;
+      return String.fromCodePoint(codePoint);
+    }
     return _match;
   });
 }

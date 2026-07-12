@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveDisplaySummary, deriveDisplayTitle, parseDisplayHeader } from "../src/displayText.js";
+import { decodeEntities, deriveDisplaySummary, deriveDisplayTitle, parseDisplayHeader } from "../src/displayText.js";
 import { parseFindingMarkdown } from "../src/findings.js";
 
 describe("parseDisplayHeader()", () => {
@@ -188,4 +188,10 @@ describe("display fields on parsed findings", () => {
     expect(finding.displaySummary).toBe(finding.summary);
     expect(finding.displaySummary.length).toBeGreaterThan(0);
   });
+});
+
+it("never throws on malformed or out-of-range entities", () => {
+  expect(decodeEntities("&#abc; stays literal")).toBe("&#abc; stays literal");
+  expect(decodeEntities("&#xffffff; stays literal")).toBe("&#xffffff; stays literal");
+  expect(decodeEntities("&#8217;")).toBe("’");
 });
