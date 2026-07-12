@@ -31,6 +31,8 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     tags: ["instagram"],
     source: { platform: "instagram", label: "Shawn", url: "https://example.com/post", classification: "unknown" },
     summary: "A reusable senior-dev prompt rubric.",
+    displayTitle: "Ponytail agent rubric",
+    displaySummary: "A reusable senior-dev prompt rubric.",
     evidence: { caption: true, transcript: false, ocr: false, repo: false, docs: false },
     quality: { score: 60, level: "review", reasons: ["caption"] },
     retry: null,
@@ -65,8 +67,8 @@ describe("buildRssXml()", () => {
     const xml = buildRssXml(
       [
         publicFinding({
-          title: `Tips & tricks <fast> "quoted" 'single'`,
-          summary: `Ship <em>fast</em> & safe`,
+          displayTitle: `Tips & tricks <fast> "quoted" 'single'`,
+          displaySummary: `Ship <em>fast</em> & safe`,
         }),
       ],
       { siteBase: `${BASE}?a=1&b=2` },
@@ -78,12 +80,34 @@ describe("buildRssXml()", () => {
     expect(xml).not.toMatch(/&(?!amp;|lt;|gt;|quot;|apos;)/);
   });
 
+  it("uses the display title and display summary instead of the raw scraped title", () => {
+    const xml = buildRssXml(
+      [
+        publicFinding({
+          title: 'Sebastian Hardy | AI Marketing on Instagram: "The 5 Claude Code plugins…',
+          summary: "Raw scraped summary text.",
+          displayTitle: "The 5 Claude Code plugins I’m actually running this month",
+          displaySummary: "Five open-source Claude Code plugins for tokens, memory, design, writing, and marketing.",
+        }),
+      ],
+      { siteBase: BASE },
+    );
+
+    expect(xml).toContain("<title>The 5 Claude Code plugins I’m actually running this month</title>");
+    expect(xml).not.toContain("on Instagram");
+    expect(xml).toContain(
+      "<description>Five open-source Claude Code plugins for tokens, memory, design, writing, and marketing.</description>",
+    );
+    expect(xml).not.toContain("Raw scraped summary text.");
+  });
+
   it("keeps at most the 20 newest items in feed order", () => {
     const findings = Array.from({ length: 25 }, (_, index) =>
       publicFinding({
         id: `finding-${index}.md`,
         filename: `finding-${index}.md`,
         title: `Finding ${index}`,
+        displayTitle: `Finding ${index}`,
         saved: `2026-06-${String(25 - index).padStart(2, "0")}`,
       }),
     );

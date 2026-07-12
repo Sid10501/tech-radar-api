@@ -129,6 +129,8 @@ describe("server routes", () => {
     const body = res.json();
     expect(body.findings).toHaveLength(1);
     expect(body.findings[0].title).toBe("Public Sample");
+    expect(body.findings[0].displayTitle).toBe("Public Sample");
+    expect(body.findings[0].displaySummary).toBe("General research summary.");
     expect(body.findings[0].applied).toEqual({ appliedAt: "2026-07-06", link: "https://github.com/Sid10501/portfolio" });
     expect(body.findings[0]).not.toHaveProperty("targetProject");
     expectNoPrivateFindingFields(body);

@@ -26,10 +26,10 @@ function rssItem(finding: PublicFindingSummary, siteBase: string): string {
   const pubDate = finding.saved ? rfc822Date(finding.saved) : null;
   return [
     "    <item>",
-    `      <title>${xmlEscape(finding.title)}</title>`,
+    `      <title>${xmlEscape(finding.displayTitle)}</title>`,
     `      <link>${xmlEscape(link)}</link>`,
     `      <guid>${xmlEscape(link)}</guid>`,
-    `      <description>${xmlEscape(finding.summary)}</description>`,
+    `      <description>${xmlEscape(finding.displaySummary)}</description>`,
     ...(pubDate ? [`      <pubDate>${pubDate}</pubDate>`] : []),
     "    </item>",
   ].join("\n");
