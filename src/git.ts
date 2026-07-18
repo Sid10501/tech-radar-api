@@ -85,19 +85,21 @@ export class AiMemoryRepo {
   async writeFinding(filename: string, body: string): Promise<void> {
     const findingsDir = path.join(this.opts.localDir, "tech-radar", "findings");
     fs.mkdirSync(findingsDir, { recursive: true });
-    fs.writeFileSync(path.join(findingsDir, filename), body, "utf8");
-    await this.git.add(path.join("tech-radar", "findings", filename));
+    const safeFilename = safeFindingFilename(filename);
+    fs.writeFileSync(path.join(findingsDir, safeFilename), body, "utf8");
+    await this.git.add(path.join("tech-radar", "findings", safeFilename));
   }
 
   async writeFindingForSource(input: WriteFindingForSourceInput): Promise<WriteFindingResult> {
     const findingsDir = path.join(this.opts.localDir, "tech-radar", "findings");
     fs.mkdirSync(findingsDir, { recursive: true });
     const existingFilename = input.sourceUrl ? this.findFindingBySourceUrl(input.sourceUrl) : null;
-    const targetFilename = existingFilename ?? input.filename;
+    const generatedFilename = safeFindingFilename(input.filename);
+    const targetFilename = safeFindingFilename(existingFilename ?? generatedFilename);
     const body = existingFilename
       ? appendRetryMetadata(input.body, {
           date: input.date,
-          generatedFilename: input.filename,
+          generatedFilename,
           previousFilename: existingFilename,
         })
       : input.body;
@@ -106,7 +108,7 @@ export class AiMemoryRepo {
     await this.git.add(path.join("tech-radar", "findings", targetFilename));
     return {
       filename: targetFilename,
-      generatedFilename: input.filename,
+      generatedFilename,
       replacedExisting: Boolean(existingFilename),
     };
   }
@@ -205,6 +207,21 @@ export class AiMemoryRepo {
       }
     }
   }
+}
+
+function safeFindingFilename(filename: string): string {
+  if (
+    !filename ||
+    filename !== path.basename(filename) ||
+    filename.includes("/") ||
+    filename.includes("\\") ||
+    filename === "." ||
+    filename === ".." ||
+    !filename.endsWith(".md")
+  ) {
+    throw new Error(`invalid finding filename: ${filename}`);
+  }
+  return filename;
 }
 
 function sourceUrlFromMarkdown(content: string): string | null {

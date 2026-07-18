@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as childProcess from "node:child_process";
+import * as dns from "node:dns/promises";
 
 vi.mock("node:child_process");
+vi.mock("node:dns/promises");
 
 describe("extract()", () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(dns.lookup).mockResolvedValue([{ address: "93.184.216.34", family: 4 }] as any);
+  });
 
   it("parses a successful JSON result from the pipeline script", async () => {
     const { extract } = await import("../src/extract.js");
@@ -70,5 +75,27 @@ describe("extract()", () => {
     await expect(
       extract("https://www.tiktok.com/@x/video/9999")
     ).rejects.toThrow("extract failed");
+  });
+
+  it("rejects localhost and private-network URLs before invoking the extractor script", async () => {
+    vi.resetModules();
+    const { extract } = await import("../src/extract.js");
+
+    await expect(extract("http://127.0.0.1:8080/admin")).rejects.toThrow("blocked submitted URL");
+    await expect(extract("http://169.254.169.254/latest/meta-data")).rejects.toThrow("blocked submitted URL");
+    await expect(extract("http://[::ffff:127.0.0.1]/admin")).rejects.toThrow("blocked submitted URL");
+    await expect(extract("http://100.64.0.1/internal")).rejects.toThrow("blocked submitted URL");
+    expect(childProcess.execFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects hostnames that resolve to private or metadata addresses before invoking the extractor script", async () => {
+    vi.resetModules();
+    vi.mocked(dns.lookup).mockResolvedValue([{ address: "169.254.169.254", family: 4 }] as any);
+    const { extract } = await import("../src/extract.js");
+
+    await expect(extract("http://metadata.google.internal/latest/meta-data")).rejects.toThrow("blocked submitted URL");
+
+    expect(dns.lookup).toHaveBeenCalledWith("metadata.google.internal", { all: true, verbatim: false });
+    expect(childProcess.execFile).not.toHaveBeenCalled();
   });
 });

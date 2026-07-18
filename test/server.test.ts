@@ -354,6 +354,65 @@ describe("server routes", () => {
     });
   });
 
+  describe("Telegram webhook", () => {
+    beforeEach(() => {
+      vi.mocked(runnerMock.runPipeline).mockClear();
+      delete process.env["TELEGRAM_WEBHOOK_SECRET"];
+      delete process.env["TELEGRAM_CHAT_ID"];
+    });
+
+    it("rejects webhook updates when owner chat is configured but the webhook secret is missing", async () => {
+      process.env["TELEGRAM_CHAT_ID"] = "123";
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/telegram/webhook",
+        payload: {
+          message: {
+            chat: { id: 123 },
+            text: "https://example.com/untrusted",
+          },
+        },
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(runnerMock.runPipeline).not.toHaveBeenCalled();
+    });
+
+    it("accepts webhook updates only with the configured Telegram secret", async () => {
+      process.env["TELEGRAM_CHAT_ID"] = "123";
+      process.env["TELEGRAM_WEBHOOK_SECRET"] = "telegram-secret";
+
+      const unauthorized = await app.inject({
+        method: "POST",
+        url: "/telegram/webhook",
+        headers: { "x-telegram-bot-api-secret-token": "wrong" },
+        payload: {
+          message: {
+            chat: { id: 123 },
+            text: "https://example.com/rejected",
+          },
+        },
+      });
+      const authorized = await app.inject({
+        method: "POST",
+        url: "/telegram/webhook",
+        headers: { "x-telegram-bot-api-secret-token": "telegram-secret" },
+        payload: {
+          message: {
+            chat: { id: 123 },
+            text: "https://example.com/accepted",
+          },
+        },
+      });
+
+      expect(unauthorized.statusCode).toBe(401);
+      expect(authorized.statusCode).toBe(200);
+      expect(runnerMock.runPipeline).toHaveBeenCalledTimes(1);
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://example.com/accepted");
+    });
+  });
+
   describe("with AUTH_TOKEN set", () => {
     const TOKEN = "test-secret-token";
 

@@ -215,7 +215,10 @@ export function buildServer() {
     async (request, reply) => {
       // Verify it's from our bot via secret token header
       const secret = process.env["TELEGRAM_WEBHOOK_SECRET"];
-      if (secret && request.headers["x-telegram-bot-api-secret-token"] !== secret) {
+      if (!secret) {
+        return reply.code(503).send({ error: "Telegram webhook secret is not configured" });
+      }
+      if (request.headers["x-telegram-bot-api-secret-token"] !== secret) {
         return reply.code(401).send();
       }
       handleTelegramUpdate(request.body).catch(() => {});

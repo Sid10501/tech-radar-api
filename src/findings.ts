@@ -538,20 +538,24 @@ function hasCapturedText(value: string, unavailable: RegExp): boolean {
 }
 
 function withoutPrivateSections(markdown: string): string {
-  const withoutSections = removeTemplateSection(
-    removeTemplateSection(removeTemplateSection(markdown, "Fit for .+"), "Implementation Idea"),
+  const withoutSections = removeTemplateSections(
+    removeTemplateSections(removeTemplateSections(markdown, "Fit for .+"), "Implementation Idea"),
     "Follow-ups",
   );
   return withoutPrivateProjectReferences(withoutEmbeddedPrivateDecisionBlocks(withoutSections)).trim();
 }
 
-function removeTemplateSection(markdown: string, headingPattern: string): string {
-  const match = new RegExp(`^## ${headingPattern}\\s*$`, "m").exec(markdown);
-  if (!match) return markdown;
-  const before = markdown.slice(0, match.index);
-  const tail = markdown.slice(match.index + match[0].length);
-  const nextHeading = TEMPLATE_SECTION_HEADING.exec(tail);
-  return before + (nextHeading ? tail.slice(nextHeading.index) : "");
+function removeTemplateSections(markdown: string, headingPattern: string): string {
+  const heading = new RegExp(`^## ${headingPattern}\\s*$`, "m");
+  let next = markdown;
+  while (true) {
+    const match = heading.exec(next);
+    if (!match) return next;
+    const before = next.slice(0, match.index);
+    const tail = next.slice(match.index + match[0].length);
+    const nextHeading = TEMPLATE_SECTION_HEADING.exec(tail);
+    next = before + (nextHeading ? tail.slice(nextHeading.index) : "");
+  }
 }
 
 function withoutEmbeddedPrivateDecisionBlocks(markdown: string): string {
