@@ -255,6 +255,21 @@ describe("AiMemoryRepo", () => {
     });
   });
 
+  it("rejects generated finding filenames that would escape the findings directory", async () => {
+    await repo.pullLatest();
+
+    await expect(
+      repo.writeFindingForSource({
+        sourceUrl: "https://example.com/path-traversal",
+        filename: "../../INBOX-safe-title.md",
+        body: "# Safe Title\n\nContent.\n",
+        date: "2026-07-18",
+      }),
+    ).rejects.toThrow("invalid finding filename");
+
+    expect(fs.existsSync(path.join(workDir, "clone", "INBOX-safe-title.md"))).toBe(false);
+  });
+
   it("updates INBOX.md with a new row", async () => {
     await repo.pullLatest();
     await repo.updateInbox({

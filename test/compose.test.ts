@@ -107,6 +107,22 @@ describe("composeFinding()", () => {
     expect(filename.toLowerCase()).toContain("zod");
   });
 
+  it("does not let extractor upload_date escape the generated finding filename", async () => {
+    const { composeFinding } = await import("../src/compose.js");
+    const { filename } = composeFinding({
+      extract: {
+        ...extractFixture,
+        upload_date: "../../INBOX",
+      },
+      research: researchFixture,
+      implementation: implementationFixture,
+    });
+
+    expect(filename).toMatch(/^\d{4}-\d{2}-\d{2}-/);
+    expect(filename).not.toContain("/");
+    expect(filename).not.toContain("..");
+  });
+
   it("preserves extraction warnings in the source-evidence section", async () => {
     const { composeFinding } = await import("../src/compose.js");
     const { body } = composeFinding({

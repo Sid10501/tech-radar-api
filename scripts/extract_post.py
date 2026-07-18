@@ -41,20 +41,28 @@ JSON schema:
 from __future__ import annotations
 
 import argparse
+import queue
 import html
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse, quote
 
 # stdlib only on purpose — the fallback has to work even when pip is useless.
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
+
+
+class DownloadLimitExceeded(Exception):
+    pass
 
 
 # --- Platform detection ------------------------------------------------------
@@ -70,6 +78,80 @@ def detect_platform(url: str) -> str:
     if host in {"drive.google.com", "drive.usercontent.google.com"}:
         return "google_drive"
     return "other"
+
+
+def is_allowed_fetch_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host == "localhost" or host.endswith(".localhost"):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+        return is_public_ip(ip)
+    except ValueError:
+        pass
+    return resolves_to_public_address(host)
+
+
+def is_public_ip(ip: ipaddress._BaseAddress) -> bool:
+    return ip.is_global and not ip.is_multicast
+
+
+def resolves_to_public_address(host: str) -> bool:
+    previous_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(_float_env("FETCH_DNS_TIMEOUT_SEC", 2.0, 0.1, 10.0))
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False
+    finally:
+        socket.setdefaulttimeout(previous_timeout)
+    ips: list[ipaddress._BaseAddress] = []
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        try:
+            ips.append(ipaddress.ip_address(sockaddr[0]))
+        except ValueError:
+            continue
+    return bool(ips) and all(is_public_ip(ip) for ip in ips)
+
+
+def run_with_timeout(fn, timeout_sec: float, label: str):
+    result_queue: queue.Queue = queue.Queue(maxsize=1)
+
+    def target() -> None:
+        try:
+            result_queue.put((True, fn()))
+        except Exception as e:
+            result_queue.put((False, e))
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    try:
+        ok, value = result_queue.get(timeout=timeout_sec)
+    except queue.Empty as e:
+        raise TimeoutError(f"{label} exceeded {timeout_sec:.1f}s") from e
+    if ok:
+        return value
+    raise value
+
+
+def output_dir_bytes(out_dir: Path) -> int:
+    total = 0
+    for path in out_dir.rglob("*"):
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 # --- Hashtag extraction ------------------------------------------------------
@@ -210,11 +292,14 @@ _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML,
 
 
 def _http_get(url: str, timeout: int = 10) -> str | None:
+    if not is_allowed_fetch_url(url):
+        return None
     try:
         req = Request(url, headers={"User-Agent": _UA, "Accept": "application/json,text/html;q=0.9,*/*;q=0.5"})
         with urlopen(req, timeout=timeout) as r:
-            return r.read().decode("utf-8", errors="replace")
-    except (URLError, HTTPError, TimeoutError, OSError):
+            max_bytes = _int_env("HTTP_TEXT_MAX_BYTES", 2 * 1024 * 1024, 1024, 10 * 1024 * 1024)
+            return _read_limited_response(r, max_bytes).decode("utf-8", errors="replace")
+    except (DownloadLimitExceeded, URLError, HTTPError, TimeoutError, OSError):
         return None
 
 
@@ -258,16 +343,24 @@ def run_ytdlp(
     max_comments: int,
 ) -> tuple[dict | None, Path | None, Path | None, str | None]:
     """Return (info_dict, audio_path, video_path, error). Any of those may be None."""
+    if not is_allowed_fetch_url(url):
+        return None, None, None, "yt-dlp blocked: unsafe URL"
     try:
         import yt_dlp  # type: ignore
     except ImportError as e:
         return None, None, None, f"yt-dlp not installed: {e}"
 
     want_comments = max_comments > 0
+    max_download_bytes = _int_env("YTDLP_MAX_DOWNLOAD_BYTES", 50 * 1024 * 1024, 1024 * 1024, 500 * 1024 * 1024)
+    socket_timeout = _float_env("YTDLP_SOCKET_TIMEOUT_SEC", 20.0, 1.0, 120.0)
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
+        "socket_timeout": socket_timeout,
+        "retries": 1,
+        "fragment_retries": 1,
+        "max_filesize": max_download_bytes,
         "skip_download": not (want_audio or want_video),
         "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
         "format": "best[height<=720]/best" if want_video else "bestaudio/best",
@@ -293,7 +386,13 @@ def run_ytdlp(
     info: dict | None = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=want_audio or want_video or want_subtitles)
+            info = run_with_timeout(
+                lambda: ydl.extract_info(url, download=want_audio or want_video or want_subtitles),
+                _float_env("YTDLP_EXTRACT_TIMEOUT_SEC", 60.0, 1.0, 300.0),
+                "yt-dlp extract_info",
+            )
+            if (want_audio or want_video or want_subtitles) and output_dir_bytes(out_dir) > max_download_bytes:
+                return info, None, None, f"yt-dlp download exceeded {max_download_bytes} bytes"
             if (want_audio or want_video) and info:
                 base = Path(ydl.prepare_filename(info))
                 if want_video:
@@ -313,6 +412,8 @@ def run_ytdlp(
                 elif not audio_path and base.exists():
                     audio_path = base
         return info, audio_path, video_path, None
+    except TimeoutError as e:
+        return info, audio_path, video_path, f"yt-dlp timeout: {e}"
     except Exception as e:
         return info, audio_path, video_path, f"yt-dlp error: {e.__class__.__name__}: {e}"
 
@@ -360,6 +461,8 @@ def find_subtitle_text(out_dir: Path, video_id: str | None) -> str | None:
 
 
 def download_subtitles_cli(url: str, out_dir: Path) -> str | None:
+    if not is_allowed_fetch_url(url):
+        return "subtitle fallback blocked: unsafe URL"
     if not shutil.which("yt-dlp"):
         return "subtitle fallback skipped: yt-dlp CLI not installed"
     try:
@@ -389,6 +492,8 @@ def download_subtitles_cli(url: str, out_dir: Path) -> str | None:
 
 
 def run_ytdlp_json_cli(url: str, max_comments: int) -> tuple[dict | None, str | None]:
+    if not is_allowed_fetch_url(url):
+        return None, "metadata fallback blocked: unsafe URL"
     if not shutil.which("yt-dlp"):
         return None, "metadata fallback skipped: yt-dlp CLI not installed"
     args = ["yt-dlp", "--skip-download", "--dump-json"]
@@ -564,6 +669,8 @@ def safe_download_name(filename: str | None, fallback: str) -> str:
 
 
 def download_google_drive_file(url: str, out_dir: Path) -> tuple[Path | None, str | None, str | None]:
+    if not is_allowed_fetch_url(url):
+        return None, None, "google-drive download blocked: unsafe URL"
     file_id = extract_google_drive_file_id(url)
     if not file_id:
         return None, None, "google-drive: missing file id"
@@ -574,12 +681,12 @@ def download_google_drive_file(url: str, out_dir: Path) -> tuple[Path | None, st
         req = Request(download_url, headers={"User-Agent": _UA, "Accept": "*/*"})
         with urlopen(req, timeout=30) as r:
             filename = filename_from_content_disposition(r.headers.get("content-disposition"))
-            body = r.read(max_bytes + 1)
+            body = _read_limited_response(r, max_bytes)
+    except DownloadLimitExceeded:
+        return None, None, f"google-drive download skipped: file exceeds {max_bytes} bytes"
     except (URLError, HTTPError, TimeoutError, OSError) as e:
         return None, None, f"google-drive download error: {e.__class__.__name__}: {e}"
 
-    if len(body) > max_bytes:
-        return None, filename, f"google-drive download skipped: file exceeds {max_bytes} bytes"
     if body.lstrip().startswith(b"<"):
         return None, filename, "google-drive download error: received HTML instead of file bytes"
 
@@ -652,6 +759,20 @@ def _float_env(name: str, default: float, minimum: float, maximum: float) -> flo
     except ValueError:
         return default
     return max(minimum, min(maximum, value))
+
+
+def _read_limited_response(response, max_bytes: int) -> bytes:
+    content_length = response.headers.get("content-length") or response.headers.get("Content-Length")
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                raise DownloadLimitExceeded(f"response exceeds {max_bytes} bytes")
+        except ValueError:
+            pass
+    body = response.read(max_bytes + 1)
+    if len(body) > max_bytes:
+        raise DownloadLimitExceeded(f"response exceeds {max_bytes} bytes")
+    return body
 
 
 def clean_ocr_line(line: str) -> str:
@@ -752,11 +873,14 @@ def download_image_assets(urls: list[str], out_dir: Path) -> tuple[list[Path], l
 
 
 def _http_get_bytes(url: str, timeout: int = 10) -> bytes | None:
+    if not is_allowed_fetch_url(url):
+        return None
     try:
         req = Request(url, headers={"User-Agent": _UA, "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5"})
         with urlopen(req, timeout=timeout) as r:
-            return r.read()
-    except (URLError, HTTPError, TimeoutError, OSError):
+            max_bytes = _int_env("OCR_IMAGE_MAX_BYTES", 5 * 1024 * 1024, 1024, 25 * 1024 * 1024)
+            return _read_limited_response(r, max_bytes)
+    except (DownloadLimitExceeded, URLError, HTTPError, TimeoutError, OSError):
         return None
 
 
@@ -774,6 +898,7 @@ def extract_image_text(image_paths: list[Path]) -> tuple[str | None, str | None]
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                timeout=_float_env("OCR_TESSERACT_TIMEOUT_SEC", 20.0, 1.0, 120.0),
             )
         except Exception:
             continue
@@ -815,6 +940,7 @@ def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, st
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=_float_env("OCR_FFMPEG_TIMEOUT_SEC", 30.0, 1.0, 180.0),
         )
     except Exception as e:
         return None, f"ocr frame extraction error: {e.__class__.__name__}: {e}"
@@ -828,6 +954,7 @@ def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, st
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                timeout=_float_env("OCR_TESSERACT_TIMEOUT_SEC", 20.0, 1.0, 120.0),
             )
         except Exception:
             continue
@@ -867,6 +994,11 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         "chapters": [],
         "top_comments": [],
     }
+
+    if not is_allowed_fetch_url(url):
+        result["error"] = "extraction blocked: unsafe URL"
+        result["extraction_warnings"] = [result["error"]]
+        return result
 
     if platform == "google_drive":
         file_path, filename, drive_err = download_google_drive_file(url, out_dir)

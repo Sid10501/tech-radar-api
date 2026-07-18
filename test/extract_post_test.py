@@ -57,6 +57,54 @@ def test_extract_google_drive_pdf_uses_document_text_without_ytdlp(monkeypatch, 
     assert result["extraction_methods"] == ["google-drive:download", "pypdf"]
 
 
+def test_extract_rejects_unsafe_primary_urls_before_ytdlp(monkeypatch, tmp_path):
+    def fail_ytdlp(*_args, **_kwargs):
+        raise AssertionError("unsafe primary URLs should not reach yt-dlp")
+
+    monkeypatch.setattr(extract_post, "run_ytdlp", fail_ytdlp)
+
+    result = extract_post.extract(
+        "http://169.254.169.254/latest/meta-data",
+        tmp_path,
+        do_transcribe=True,
+        do_ocr=True,
+    )
+
+    assert result["status"] == "failed"
+    assert "unsafe URL" in result["error"]
+
+
+def test_run_ytdlp_reports_timeout(monkeypatch, tmp_path):
+    class FakeYoutubeDL:
+        def __init__(self, _opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, *_args, **_kwargs):
+            raise TimeoutError("timed out")
+
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", type("FakeModule", (), {"YoutubeDL": FakeYoutubeDL}))
+
+    info, audio_path, video_path, error = extract_post.run_ytdlp(
+        "https://example.com/video",
+        tmp_path,
+        want_audio=True,
+        want_video=False,
+        want_subtitles=False,
+        max_comments=0,
+    )
+
+    assert info is None
+    assert audio_path is None
+    assert video_path is None
+    assert error and "timeout" in error.lower()
+
+
 def test_transcript_snippets_are_normalized_to_text():
     snippets = [
         {"text": " First line ", "start": 0.0, "duration": 1.5},

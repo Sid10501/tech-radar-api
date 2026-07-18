@@ -779,6 +779,63 @@ describe("public finding shape", () => {
     expect(detail?.sections.kickstarter).toContain("copy the prompt");
   });
 
+  it("removes private sections even when public content contains decoy template headings", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-decoy-headings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "20260615-decoy-heading.md"),
+      [
+        "# Ponytail agent rubric",
+        "",
+        "**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)",
+        "**Saved:** 20260615",
+        "**Tags:** instagram, computerscience, skill, tech",
+        "",
+        "## TL;DR",
+        "",
+        "Ponytail is useful as operating-system guidance.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: this skill mimics that senior dev review pattern",
+        "",
+        "## Implementation Idea",
+        "",
+        "This public transcript line should not decide where the real private section ends.",
+        "",
+        "## What it actually is",
+        "",
+        "- What: A reusable senior-dev prompt/rubric.",
+        "",
+        "## Links",
+        "",
+        "- Repo: https://github.com/example/ponytail",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: ai-memory",
+        "",
+        "## Implementation Idea",
+        "",
+        "Add this to Sid's shared rubric.",
+        "",
+        "## Follow-ups",
+        "",
+        "- Private follow-up task.",
+        "",
+      ].join("\n"),
+    );
+
+    const detail = getPublicFindingDetail("20260615-decoy-heading.md", dir);
+
+    expect(detail?.markdown).not.toContain("Add this to Sid's shared rubric");
+    expect(detail?.markdown).not.toContain("Private follow-up task");
+    expect(detail?.markdown).not.toContain("## Implementation Idea");
+    expect(detail?.markdown).not.toContain("## Follow-ups");
+    expect(detail?.sections.research).toContain("reusable senior-dev prompt");
+  });
+
   it("keeps public-safe retry and extraction diagnostics in public detail", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-diagnostics-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
