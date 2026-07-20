@@ -143,6 +143,28 @@ describe("composeFinding()", () => {
     expect(body).toContain("- Only carousel metadata was available");
   });
 
+  it("persists shortlink expansion status, final host, and reason", async () => {
+    const { composeFinding } = await import("../src/compose.js");
+    const { body } = composeFinding({
+      extract: {
+        ...extractFixture,
+        shortlink_expansions: [{
+          sourceUrl: "https://t.co/abc123",
+          expandedUrl: "https://github.com/acme/tool",
+          finalHost: "github.com",
+          status: "resolved",
+          reason: "expanded",
+          redirectCount: 1,
+        }],
+      },
+      research: researchFixture,
+      implementation: implementationFixture,
+    });
+
+    expect(body).toContain("Shortlink expansions:");
+    expect(body).toContain("- resolved · github.com · expanded · 1 redirect: https://t.co/abc123 → https://github.com/acme/tool");
+  });
+
   it("adds a workflow audit section for agent workflow artifacts", async () => {
     const { composeFinding } = await import("../src/compose.js");
 
