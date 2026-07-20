@@ -1,5 +1,6 @@
 {
   "eventId": "social-video:analysis-fixture",
+  "runId": "fixture-run",
   "analysisId": "analysis-fixture",
   "status": "failed",
   "detailUrl": null,

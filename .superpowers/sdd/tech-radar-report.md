@@ -6,8 +6,8 @@ Status: `DONE`
 
 ## Scope delivered
 
-- Added the camelCase, versioned `SocialVideoEvidenceV1` Zod contract with schema version/idempotency/origin/source/classification/transcript/visual/extraction/finance-claim fields; max duration 1,800 seconds, max ten securities, bounded arrays/text/timestamps, and untrusted wrapping/redaction for external prose.
-- Changed `POST /runs` to validate `url` and `intent`, canonicalize before dedupe/queue, preserve existing auth, and return the synchronously registered run ID.
+- Added the camelCase, versioned `SocialVideoEvidenceV1` Zod contract with schema version/idempotency/origin/source/classification/transcript/visual/extraction/finance-claim fields; max duration 1,800 seconds, max ten securities, bounded raw arrays/text/timestamps, and prompt-boundary-only untrusted wrapping.
+- Changed `POST /runs` to validate `url` and `intent`, canonicalize before dedupe/queue, require the dedicated dispatch token, honor `Idempotency-Key`, and return the synchronously registered or deduplicated run ID.
 - Refactored extraction so vision OCR and link enrichment are performed once and the same enriched result is passed to intent-specific technology/finance handlers. Added deterministic-first routing, explicit overrides, and injectable/model fallback through `ROUTER_MODEL`.
 - Added a typed StockBot client for `POST /api/internal/video-evidence`, dedicated bearer token, idempotency header, bounded timeout, snake/camel response aliases, and non-secret error mapping.
 - Added finance/mixed handoff with stable `runId:finance-v1` idempotency; Tech Radar only extracts creator claims and does not calculate grades/opinions/verdicts.
@@ -90,10 +90,10 @@ Results:
 ## Self-review
 
 - Verified StockBot bearer token is separate from `AUTH_TOKEN` and never included in mapped errors.
-- Verified callback signing uses exactly `timestamp + '.' + rawBody`; event ID is reserved before side effects and released when no matching analysis/run exists.
+- Verified callback signing uses exactly `timestamp + '.' + rawBody`; event ID moves atomically from `pending` to `applied`, is released on application failure, and is correlated by both run and analysis IDs.
 - Verified canonical dedupe compares canonical forms for both new and legacy hydrated runs while preserving recorded legacy URL display.
 - Verified pending rows carry stable run IDs before extraction, downstream rows carry analysis+run IDs, and hydrated downstream rows suppress duplicate handoff.
-- Verified external title/creator/transcript/visual/claim/warning text is wrapped/redacted before evidence or model fallback use.
+- Verified shared evidence preserves bounded raw title/creator/transcript/visual/claim/warning text; existing LLM prompt builders remain the only untrusted-content wrapping boundary.
 - Verified Telegram downloads use fixed `api.telegram.org` endpoints, reject redirects, bound declared and streamed bytes, validate returned path, generate filenames, and use private file modes.
 - Verified existing bearer/cookie auth, webhook secret auth, CORS, security headers, SSRF/DNS restrictions, and full legacy suite remain green.
 
@@ -178,3 +178,34 @@ RED: the focused runner suite produced four expected failures for mixed symbol/c
 - `npm test` → 33 files, 287 tests passed, 0 failures.
 - `npm run build` → exit 0.
 - `npm audit --omit=dev` → 0 vulnerabilities.
+
+## Final cross-repository integration correction
+
+Status: `DONE`
+
+- `POST /runs` now uses only `STOCKBOT_DISPATCH_TOKEN`, never browser cookies, `AUTH_TOKEN`, or query tokens. It honors `Idempotency-Key`, returns the existing run with `202`/`deduplicated: true` for the same canonical source and exact intent, and does not let `force` bypass finance deduplication.
+- Signed uploads require an exact allowlisted `Origin` and return endpoint-scoped CORS. Dedicated-token service uploads may omit `Origin`. A browser ticket is consumed only after durable run registration, so registration failure remains retryable.
+- Callback payloads require both `runId` and `analysisId`, accept terminal `needs_review`, and reserve event IDs cross-process with event-specific atomic filesystem creation. State advances from `pending` to `applied` only after exact-run application, durable INBOX commit/push, and notification; application failure releases the reservation for retry.
+- Pending callback reservations expire after a bounded interval so a process crash cannot permanently suppress retries; applied reservations remain durable. Signed upload tickets use the same atomic begin/apply/rollback lifecycle.
+- Production startup rejects missing, default, or temporary `RUN_STATE_DIR` values so replay and run state cannot silently become ephemeral.
+- StockBot dedupe responses adopt the originating run. Terminal responses immediately set the matching terminal Tech Radar state and notify with the returned detail link; nonterminal cross-run reuse does not create a second `downstream_pending` run.
+- A nonterminal cross-run reuse marks only the shadow Tech Radar run `skipped`/deduplicated and keeps the originating run as the active downstream owner; it never falsely reports the Stock analysis as processed.
+- The shared evidence contract stores bounded raw prose. Subtitle/API/Whisper segment timestamps are preserved, and deterministic whole-video compaction samples across the entire video while retaining late claims within the 3,600-segment/120,000-character aggregate bounds.
+- Upload evidence preserves the original filename and uses the required `platform: "upload"` source with an internal HTTPS sentinel while retaining required source URL/canonical fields.
+- Shared strings reject whitespace-only values without trimming or otherwise mutating valid surrounding whitespace. `needs_review` notifications use an action-required warning and retain the detail link.
+- The shared fixture is byte-identical to StockBot's fixture. SHA-256: `e84e0db0dcc5d1ea3e018fc3c1dca2957b8cd3a8f5d1242eb306b4dcd95489ef`.
+
+### RED/GREEN evidence
+
+- RED: the six focused suites initially produced 16 expected failures covering raw evidence, transcript timestamps/whole-video retention, dispatch isolation/idempotency, exact callback correlation/two-phase retry, exact upload Origin, and post-registration ticket consumption.
+- GREEN: the same six suites passed all 96 tests after the final integration changes.
+- Cross-repository fixture verification compared exact bytes and SHA-256 against `/Users/work/.codex/worktrees/abe3/stocks/backend/tests/fixtures/social_video_evidence_v1.json`.
+
+### Final verification after cross-repository integration
+
+- `git diff --check` → clean.
+- `npx tsc --noEmit` → exit 0.
+- `npm test` → 33 files, 306 tests passed, 0 failures.
+- `npm run build` → exit 0.
+- `npm audit --omit=dev` → 0 vulnerabilities.
+- Exact fixture byte comparison and both SHA-256 checks matched.

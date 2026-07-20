@@ -30,9 +30,9 @@ describe("StockBotClient", () => {
   });
 
   it("accepts the camelCase response alias", async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ analysisId: "analysis-2", status: "accepted", deduplicated: true }), { status: 202 }));
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ analysisId: "analysis-2", runId: "original-run", status: "accepted", deduplicated: true }), { status: 202 }));
     const client = new StockBotClient({ baseUrl: "https://stockbot.test", serviceToken: "secret" }, fetcher);
-    await expect(client.submitVideoEvidence(evidence)).resolves.toMatchObject({ analysisId: "analysis-2", deduplicated: true });
+    await expect(client.submitVideoEvidence(evidence)).resolves.toMatchObject({ analysisId: "analysis-2", originRunId: "original-run", deduplicated: true });
   });
 
   it("maps timeout and downstream failures without leaking the service token", async () => {

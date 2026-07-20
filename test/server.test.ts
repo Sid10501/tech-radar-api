@@ -23,6 +23,9 @@ vi.mock("../src/runner.js", () => ({
   getRun: vi.fn((id: string) => id === "existing" ? { id, url: "https://x.com", status: "processed", startedAt: new Date().toISOString() } : undefined),
   listRuns: vi.fn(() => [{ id: "existing", url: "https://x.com", status: "processed", startedAt: new Date().toISOString() }]),
   applyStockBotCompletion: vi.fn(() => ({ id: "finance-run", status: "processed" })),
+  DuplicateRunError: class DuplicateRunError extends Error {
+    constructor(public existingRun: any, public idempotent = false) { super("duplicate"); }
+  },
 }));
 
 vi.mock("../src/git.js", () => ({
@@ -84,6 +87,13 @@ describe("server routes", () => {
     expect(res.json()).toEqual({ ok: true });
   });
 
+  it("refuses production startup without a persistent RUN_STATE_DIR", () => {
+    const previousNodeEnv = process.env["NODE_ENV"]; const previousStateDir = process.env["RUN_STATE_DIR"];
+    process.env["NODE_ENV"] = "production"; process.env["RUN_STATE_DIR"] = "/tmp/tech-radar-runs";
+    try { expect(() => buildServer()).toThrow(/persistent storage/i); }
+    finally { if (previousNodeEnv === undefined) delete process.env["NODE_ENV"]; else process.env["NODE_ENV"] = previousNodeEnv; if (previousStateDir === undefined) delete process.env["RUN_STATE_DIR"]; else process.env["RUN_STATE_DIR"] = previousStateDir; }
+  });
+
   it("GET / returns HTML page", async () => {
     const res = await app.inject({ method: "GET", url: "/" });
     expect(res.statusCode).toBe(200);
@@ -116,11 +126,12 @@ describe("server routes", () => {
     } finally { delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; }
   });
 
-  it("keeps token-query HTML responses no-store", async () => {
+  it("does not turn query tokens into authentication cookies", async () => {
     const res = await app.inject({ method: "GET", url: "/?token=preview" });
 
     expect(res.statusCode).toBe(200);
     expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+    expect(res.headers["set-cookie"]).toBeUndefined();
   });
 
   it("GET /api/public/findings returns public findings without auth", async () => {
@@ -449,6 +460,7 @@ describe("server routes", () => {
     const secret = "stockbot-callback-secret";
     const event = {
       eventId: "callback-event-1",
+      runId: "finance-run",
       analysisId: "analysis-1",
       status: "completed",
       detailUrl: "https://stockbot.test/analyses/analysis-1",
@@ -504,6 +516,17 @@ describe("server routes", () => {
       expect(second.json()).toEqual({ ok: true, deduplicated: true });
       expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(1);
     });
+
+    it("retries the same callback event when applying it fails", async () => {
+      const retryEvent = { ...event, eventId: `retry-${Date.now()}` };
+      const raw = JSON.stringify(retryEvent);
+      vi.mocked(runnerMock.applyStockBotCompletion).mockRejectedValueOnce(new Error("durable write failed") as never).mockResolvedValueOnce({ id: "finance-run", status: "processed" } as never);
+      const first = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      const second = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      expect(first.statusCode).toBe(500);
+      expect(second.json()).toEqual({ ok: true, deduplicated: false });
+      expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("with AUTH_TOKEN set", () => {
@@ -511,10 +534,12 @@ describe("server routes", () => {
 
     beforeAll(() => {
       process.env["AUTH_TOKEN"] = TOKEN;
+      process.env["STOCKBOT_DISPATCH_TOKEN"] = "dispatch-secret";
     });
 
     afterAll(() => {
       delete process.env["AUTH_TOKEN"];
+      delete process.env["STOCKBOT_DISPATCH_TOKEN"];
     });
 
     it("GET /runs returns 401 without token", async () => {
@@ -601,14 +626,28 @@ describe("server routes", () => {
         method: "POST",
         url: "/runs",
         headers: {
-          authorization: `Bearer ${TOKEN}`,
+          authorization: "Bearer dispatch-secret",
           "content-type": "application/json",
+          "idempotency-key": "dispatch-key",
         },
         body: JSON.stringify({ url: "https://www.youtube.com/shorts/abc123", intent: "finance" }),
       });
       expect(res.statusCode).toBe(202);
-      expect(res.json()).toEqual({ runId: "mock-run-id" });
-      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.youtube.com/watch?v=abc123", expect.objectContaining({ intent: "finance" }));
+      expect(res.json()).toEqual({ runId: "mock-run-id", deduplicated: false });
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.youtube.com/watch?v=abc123", expect.objectContaining({ intent: "finance", idempotencyKey: "dispatch-key" }));
+    });
+
+    it("POST /runs returns an idempotent canonical duplicate as accepted", async () => {
+      const ExistingDuplicate = runnerMock.DuplicateRunError as any;
+      vi.mocked(runnerMock.runPipeline).mockImplementationOnce(() => { throw new ExistingDuplicate({ id: "existing-id", status: "processed" }, true); });
+      const res = await app.inject({ method: "POST", url: "/runs", headers: { authorization: "Bearer dispatch-secret", "idempotency-key": "same-key" }, payload: { url: "https://youtu.be/abc123?si=x", intent: "finance" } });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ runId: "existing-id", status: "processed", deduplicated: true });
+    });
+
+    it("POST /runs does not accept the general service bearer as the dispatch token", async () => {
+      const res = await app.inject({ method: "POST", url: "/runs", headers: { authorization: `Bearer ${TOKEN}` }, payload: { url: "https://youtu.be/auth-boundary", intent: "finance" } });
+      expect(res.statusCode).toBe(401);
     });
 
     it("POST /runs/upload streams a bounded authenticated file and returns its run id", async () => {
@@ -624,7 +663,7 @@ describe("server routes", () => {
         `--${boundary}--\r\n`,
       ].join(""));
       try {
-        const res = await app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: `Bearer ${TOKEN}`, "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
+        const res = await app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
         expect(res.statusCode).toBe(202);
         expect(res.json()).toEqual({ runId: "mock-upload-run", status: "pending" });
         expect(runnerMock.runMediaPipeline).toHaveBeenCalledWith(expect.objectContaining({ intent: "finance", origin: { channel: "dashboard" }, mimeType: "video/mp4", idempotencyKey: "stockbot-key", analysisId: "analysis-upload" }));
@@ -636,7 +675,7 @@ describe("server routes", () => {
 
     it("POST /runs/upload rejects unknown and repeated singleton multipart fields", async () => {
       const boundary = "----invalid-fields";
-      const request = async (fields: Array<[string, string]>) => app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: `Bearer ${TOKEN}`, "content-type": `multipart/form-data; boundary=${boundary}` }, payload: Buffer.from([
+      const request = async (fields: Array<[string, string]>) => app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` }, payload: Buffer.from([
         ...fields.map(([name, value]) => `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`),
         `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}--\r\n`,
       ].join("")) });
@@ -658,23 +697,41 @@ describe("server routes", () => {
         `--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\nsigned-analysis\r\n`,
         `--${boundary}--\r\n`,
       ].join(""));
-      const headers = { "content-type": `multipart/form-data; boundary=${boundary}`, "x-stockbot-upload-token": uploadToken(claims, "upload-secret") };
+      const headers = { "content-type": `multipart/form-data; boundary=${boundary}`, "x-stockbot-upload-token": uploadToken(claims, "upload-secret"), origin: "https://stocks.example" };
+      process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
       try {
-        expect((await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body })).statusCode).toBe(202);
+        vi.mocked(runnerMock.runMediaPipeline).mockImplementationOnce(() => { throw new Error("durable registration failed"); });
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body })).statusCode).toBe(400);
+        const allowed = await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body });
+        expect(allowed.statusCode).toBe(202);
+        expect(allowed.headers["access-control-allow-origin"]).toBe("https://stocks.example");
         expect((await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body })).statusCode).toBe(409);
         const mismatchHeaders = { ...headers, "x-stockbot-upload-token": uploadToken({ ...claims, analysisId: "mismatch", idempotencyKey: "mismatch", size: 12 }, "upload-secret") };
         expect((await app.inject({ method: "POST", url: "/runs/upload", headers: mismatchHeaders, payload: body })).statusCode).toBe(400);
       } finally {
-        delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"];
+        delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"];
         fs.rmSync(mediaDir, { recursive: true, force: true });
       }
+    });
+
+    it("requires an exact Origin for signed uploads but not service-Bearer uploads", async () => {
+      process.env["STOCKBOT_UPLOAD_SECRET"] = "origin-secret"; process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+      const claims = { analysisId: "origin-analysis", idempotencyKey: "origin-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 1 };
+      const boundary = "----origin-upload";
+      const payload = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="x.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\norigin-key\r\n--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\norigin-analysis\r\n--${boundary}--\r\n`);
+      const base = { "content-type": `multipart/form-data; boundary=${boundary}`, "x-stockbot-upload-token": uploadToken(claims, "origin-secret") };
+      try {
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers: base, payload })).statusCode).toBe(403);
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers: { ...base, origin: "https://evil.example" }, payload })).statusCode).toBe(403);
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` }, payload })).statusCode).toBe(202);
+      } finally { delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; }
     });
 
     it("POST /runs rejects an unknown intent", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/runs",
-        headers: { authorization: `Bearer ${TOKEN}` },
+        headers: { authorization: "Bearer dispatch-secret" },
         payload: { url: "https://example.com/video", intent: "verdict" },
       });
       expect(res.statusCode).toBe(400);
@@ -686,7 +743,7 @@ describe("server routes", () => {
         const res = await app.inject({
           method: "POST",
           url: "/runs",
-          headers: { authorization: `Bearer ${TOKEN}` },
+          headers: { authorization: "Bearer dispatch-secret" },
           payload: { url, intent: "auto" },
         });
         expect(res.statusCode).toBe(400);
@@ -699,7 +756,7 @@ describe("server routes", () => {
         method: "POST",
         url: "/runs",
         headers: {
-          authorization: `Bearer ${TOKEN}`,
+          authorization: "Bearer dispatch-secret",
           "content-type": "application/json",
         },
         body: JSON.stringify({}),

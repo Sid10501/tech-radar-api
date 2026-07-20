@@ -16,6 +16,18 @@ describe("extract_post.py media helpers", () => {
     expect(source).toContain("match_filter");
     expect(source).toMatch(/duration[^\n]+1800|1800[^\n]+duration/);
   });
+  it("preserves subtitle cue timestamps as transcript segments", () => {
+    const output = runPythonSnippet(`
+import json, tempfile
+from pathlib import Path
+from scripts.extract_post import parse_vtt_segments
+with tempfile.TemporaryDirectory() as directory:
+    cue = Path(directory) / "captions.vtt"
+    cue.write_text("WEBVTT\\n\\n00:00:01.000 --> 00:00:03.500\\nFirst claim\\n\\n00:29:00.000 --> 00:29:04.000\\nLate claim\\n")
+    print(json.dumps(parse_vtt_segments(cue)))
+`);
+    expect(JSON.parse(output)).toEqual([{ start_ms: 1_000, end_ms: 3_500, text: "First claim" }, { start_ms: 1_740_000, end_ms: 1_744_000, text: "Late claim" }]);
+  });
   it("blocks localhost and private-network fetch URLs", () => {
     const output = runPythonSnippet(`
 import json

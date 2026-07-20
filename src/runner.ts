@@ -45,6 +45,9 @@ export interface Run {
   classification?: SocialVideoClassification;
   processedBranches?: Array<"technology" | "finance">;
   extractionWorkDir?: string;
+  submissionIdempotencyKey?: string;
+  originalName?: string;
+  deduplicatedToRunId?: string;
 }
 
 export interface SocialVideoOrigin {
@@ -61,6 +64,7 @@ export interface RunPipelineOptions {
   intent?: SocialVideoIntent;
   origin?: SocialVideoOrigin;
   classifier?: SocialVideoModelClassifier;
+  idempotencyKey?: string;
 }
 
 function sendTelegram(text: string): void {
@@ -213,7 +217,7 @@ export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}, enqueue: (r
         if (!id || !sidecar.mediaPath) continue;
         const uploadState = sidecar as typeof sidecar & { idempotencyKey?: string; analysisId?: string };
         const existing = runs.get(id);
-        storeRun({ ...existing, id, url: existing?.url ?? sidecar.url ?? `https://uploads.invalid/${encodeURIComponent(id)}`, status: existing?.status === "running" ? "pending" : existing?.status ?? "awaiting_media", intent: sidecar.intent ?? existing?.intent, origin: sidecar.origin ?? existing?.origin, mediaPath: sidecar.mediaPath, evidenceIdempotencyKey: uploadState.idempotencyKey ?? existing?.evidenceIdempotencyKey, downstreamAnalysisId: uploadState.analysisId ?? existing?.downstreamAnalysisId, startedAt: sidecar.startedAt ?? existing?.startedAt ?? new Date().toISOString() });
+        storeRun({ ...existing, id, url: existing?.url ?? sidecar.url ?? `https://uploads.invalid/${encodeURIComponent(id)}`, status: existing?.status === "running" ? "pending" : existing?.status ?? "awaiting_media", intent: sidecar.intent ?? existing?.intent, origin: sidecar.origin ?? existing?.origin, mediaPath: sidecar.mediaPath, originalName: sidecar.originalName ?? existing?.originalName, evidenceIdempotencyKey: uploadState.idempotencyKey ?? existing?.evidenceIdempotencyKey, downstreamAnalysisId: uploadState.analysisId ?? existing?.downstreamAnalysisId, startedAt: sidecar.startedAt ?? existing?.startedAt ?? new Date().toISOString() });
       } catch { /* ignore malformed sidecars */ }
     }
   }
@@ -303,7 +307,7 @@ function canonicalizeIfPossible(url: string): string {
 }
 
 export class DuplicateRunError extends Error {
-  constructor(public readonly existingRun: Run) {
+  constructor(public readonly existingRun: Run, public readonly idempotent = false) {
     super(`URL already ${existingRun.status}: ${existingRun.url}`);
     this.name = "DuplicateRunError";
   }
@@ -311,6 +315,15 @@ export class DuplicateRunError extends Error {
 
 export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}): Run {
   const canonicalUrl = canonicalizeSocialUrl(url);
+  if (opts.idempotencyKey) {
+    const idempotent = [...runs.values()].find((candidate) => canonicalizeIfPossible(candidate.url) === canonicalUrl
+      && (candidate.intent ?? "technology") === (opts.intent ?? "technology")
+      && candidate.submissionIdempotencyKey === opts.idempotencyKey);
+    if (idempotent) throw new DuplicateRunError(idempotent, true);
+  }
+  const exactDuplicate = [...runs.values()].find((candidate) => canonicalizeIfPossible(candidate.url) === canonicalUrl
+    && (candidate.intent ?? "technology") === (opts.intent ?? "technology"));
+  if (exactDuplicate) throw new DuplicateRunError(exactDuplicate, true);
   if (!opts.force) {
     const requestedIntent = opts.intent ?? "technology";
     const existing = [...runs.values()].find((candidate) =>
@@ -327,6 +340,7 @@ export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}):
     status: "pending",
     intent: opts.intent ?? "technology",
     origin: opts.origin ?? { channel: "api" },
+    submissionIdempotencyKey: opts.idempotencyKey,
     startedAt: new Date().toISOString(),
   };
   storeRun(run);
@@ -363,6 +377,7 @@ export function registerAwaitingMediaRun(input: {
     origin: input.origin,
     mediaPath: input.mediaPath,
     evidenceIdempotencyKey: input.idempotencyKey,
+    originalName: input.originalName,
     downstreamAnalysisId: input.analysisId,
     startedAt: new Date().toISOString(),
   };
@@ -450,6 +465,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const extractResult = run.mediaPath
       ? await extractLocalMedia({ runId, mediaPath: run.mediaPath, workDir: extractionWorkDir })
       : await extract(url, { outDir: extractionWorkDir });
+    if (run.originalName) extractResult.title = run.originalName;
 
     // Bail early if the post has no usable content — skip agents entirely
     const hasContent = (extractResult.caption && extractResult.caption.trim()) ||
@@ -516,7 +532,27 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
         const submission = await client.submitVideoEvidence(evidence);
         run.downstreamAnalysisId = submission.analysisId;
         run.downstreamStatus = submission.status;
+        run.downstreamDetailUrl = submission.detailUrl ?? detailUrlFor(submission.analysisId);
         run.financeHandoffCompleted = true;
+        if (submission.deduplicated && submission.originRunId && submission.originRunId !== run.id) {
+          run.deduplicatedToRunId = submission.originRunId;
+          const original = runs.get(submission.originRunId);
+          if (original) {
+            original.downstreamAnalysisId = submission.analysisId;
+            original.downstreamStatus = submission.status;
+            original.downstreamDetailUrl = run.downstreamDetailUrl;
+            original.financeHandoffCompleted = true;
+            const originalTerminalStatus = stockBotTerminalRunStatus(submission);
+            if (originalTerminalStatus) {
+              original.status = originalTerminalStatus;
+              original.finishedAt = new Date().toISOString();
+            } else if (!["processed", "partial", "failed", "skipped", "needs_review"].includes(original.status)) {
+              original.status = "downstream_pending";
+              original.finishedAt = undefined;
+            }
+            storeRun(original);
+          }
+        }
         storeRun(run);
         return submission;
       },
@@ -528,9 +564,14 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const branchErrors = Object.values(routed.branchErrors ?? {});
     const noRoutedBranch = ["other", "needs_review"].includes(routed.classification.category);
     const hasFinance = Boolean(routed.finance);
-    run.status = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : hasFinance ? "downstream_pending" : "processed";
+    const terminalFinanceStatus = routed.finance ? stockBotTerminalRunStatus(routed.finance, run.id) : undefined;
+    run.status = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : "processed");
     run.error = branchErrors.length ? branchErrors.join("; ").slice(0, 1_000) : undefined;
     run.finishedAt = run.status === "downstream_pending" ? undefined : new Date().toISOString();
+    if (terminalFinanceStatus === "failed") run.error = "StockBot analysis failed";
+    if (terminalFinanceStatus === "skipped") run.error = run.deduplicatedToRunId
+      ? `Deduplicated to StockBot run ${run.deduplicatedToRunId}`
+      : "StockBot analysis canceled";
     const inboxFinding = hasFinance
       ? [findingFilename || null, `stockbot:${run.downstreamAnalysisId}`, `run:${run.id}`].filter(Boolean).join(";")
       : findingFilename;
@@ -538,7 +579,12 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     await repo.commitAndPush(hasFinance ? `tech-radar: StockBot handoff ${run.id}` : `tech-radar: ${run.status} ${run.id}`);
     storeRun(run);
 
-    if (noRoutedBranch) {
+    if (terminalFinanceStatus) {
+      const link = run.downstreamDetailUrl ? `\n${run.downstreamDetailUrl}` : "";
+      sendTelegram(run.deduplicatedToRunId
+        ? `⏭️ *Stock analysis deduplicated*\nReusing run ${run.deduplicatedToRunId}${link}`
+        : `${terminalFinanceStatus === "processed" ? "✅" : "⚠️"} *Stock analysis ${routed.finance!.status}*${link}`);
+    } else if (noRoutedBranch) {
       sendTelegram(`⚠️ *Needs review*\n\n${url.slice(0, 80)}\n\n${routed.classification.reasons.join("; ").slice(0, 300)}`);
     } else if (branchErrors.length) {
       sendTelegram(`⚠️ *Partial social-video analysis*\n\n${url.slice(0, 80)}\n\n${branchErrors.join("; ").slice(0, 300)}`);
@@ -576,6 +622,17 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     executingRuns.delete(runId);
     throw err;
   }
+}
+
+export function stockBotTerminalRunStatus(submission: Pick<StockBotSubmission, "status" | "deduplicated" | "originRunId">, currentRunId?: string): Run["status"] | undefined {
+  if (!submission.deduplicated) return undefined;
+  if (currentRunId && submission.originRunId && submission.originRunId !== currentRunId) return "skipped";
+  if (submission.status === "completed") return "processed";
+  if (submission.status === "partial") return "partial";
+  if (submission.status === "failed") return "failed";
+  if (submission.status === "canceled") return "skipped";
+  if (submission.status === "needs_review") return "needs_review";
+  return undefined;
 }
 
 async function extractAndEnrich(extractResult: ExtractResult): Promise<ExtractResult> {
@@ -629,23 +686,29 @@ export function buildSocialVideoEvidence(input: {
   if (input.extract.transcript_source) methods.add(input.extract.transcript_source);
   if (input.extract.visual_text_source) methods.add(input.extract.visual_text_source);
   if (input.extract.enriched_links) methods.add("link_enrichment");
-  const sourceTexts = [
-    { text: input.extract.caption?.trim(), timed: false },
-    { text: transcriptText, timed: true },
-    { text: input.extract.visual_text?.trim(), timed: false },
-  ].filter((source): source is { text: string; timed: boolean } => Boolean(source.text));
-  const sources = sourceTexts.flatMap((source) => splitClaimBlocks(source.text).map((text) => ({ text, timed: source.timed }))).slice(0, 100);
+  const rawTranscriptSegments = input.extract.transcript_segments?.length
+    ? input.extract.transcript_segments.map((segment) => ({ startMs: Math.round(segment.start_ms), endMs: Math.round(segment.end_ms), text: segment.text }))
+    : transcriptText ? buildUntimedTranscriptSegments(transcriptText, durationMs) : [];
+  const transcriptSegments = boundTranscriptSegments(rawTranscriptSegments);
+  const sources: Array<{ text: string; startMs?: number; endMs?: number }> = [
+    ...(input.extract.caption?.trim() ? splitClaimBlocks(input.extract.caption).map((text) => ({ text })) : []),
+    ...transcriptSegments.flatMap((segment) => splitClaimBlocks(segment.text).map((text) => ({ text, startMs: segment.startMs, endMs: segment.endMs }))),
+    ...(input.extract.visual_text?.trim() ? splitClaimBlocks(input.extract.visual_text).map((text) => ({ text })) : []),
+  ];
   const securities = extractSecurityMentions(sources).slice(0, 10);
   const publishedAt = normalizePublishedAt(input.extract.upload_date);
+  const uploaded = new URL(input.canonicalUrl).hostname === "uploads.invalid";
+  const contractUrl = uploaded ? `https://internal.invalid/tech-radar-upload/${encodeURIComponent(input.runId)}` : input.extract.url;
+  const contractCanonicalUrl = uploaded ? contractUrl : input.canonicalUrl;
   return SocialVideoEvidenceV1Schema.parse({
     schemaVersion: 1,
     idempotencyKey: input.idempotencyKey ?? `${input.runId}:finance-v1`,
     origin: { ...input.origin, runId: input.runId },
     source: {
-      url: input.extract.url,
-      canonicalUrl: input.canonicalUrl,
-      platform: input.extract.platform,
-      externalId: externalIdFromUrl(input.canonicalUrl),
+      url: contractUrl,
+      canonicalUrl: contractCanonicalUrl,
+      platform: uploaded ? "upload" : input.extract.platform,
+      externalId: uploaded ? input.runId : externalIdFromUrl(input.canonicalUrl),
       title: input.extract.title ?? undefined,
       creator: input.extract.creator ?? undefined,
       publishedAt,
@@ -654,7 +717,7 @@ export function buildSocialVideoEvidence(input: {
     classification: input.classification,
     transcript: {
       method: input.extract.transcript_source ?? undefined,
-      segments: transcriptText ? [{ startMs: 0, endMs: Math.min(1_800_000, durationMs), text: transcriptText }] : [],
+      segments: transcriptSegments,
     },
     visualTexts: input.extract.visual_text?.trim()
       ? [{ text: input.extract.visual_text, method: input.extract.visual_text_source ?? undefined }]
@@ -663,14 +726,42 @@ export function buildSocialVideoEvidence(input: {
     financeClaims: {
       securities: securities.map((security) => ({
         ...security,
-        claims: sources.filter((source) => securities.length === 1 || sourceMatchesSecurity(source.text, security)).map((source) => ({
+        claims: sampleEvenly(sources.filter((source) => securities.length === 1 || sourceMatchesSecurity(source.text, security)), 100).map((source) => ({
           text: source.text,
           confidence: 0.5,
-          ...(source.timed ? { startMs: 0, endMs: Math.min(1_800_000, durationMs) } : {}),
+          ...(source.startMs !== undefined && source.endMs !== undefined ? { startMs: source.startMs, endMs: source.endMs } : {}),
         })),
       })),
     },
   });
+}
+
+function buildUntimedTranscriptSegments(text: string, durationMs: number): Array<{ startMs: number; endMs: number; text: string }> {
+  const chunks: string[] = [];
+  for (const block of splitClaimBlocks(text)) {
+    for (let offset = 0; offset < block.length; offset += 4_000) chunks.push(block.slice(offset, offset + 4_000));
+  }
+  return chunks.map((chunk, index) => ({
+    startMs: Math.round(durationMs * index / Math.max(1, chunks.length)),
+    endMs: Math.round(durationMs * (index + 1) / Math.max(1, chunks.length)),
+    text: chunk,
+  }));
+}
+
+function boundTranscriptSegments(values: Array<{ startMs: number; endMs: number; text: string }>): Array<{ startMs: number; endMs: number; text: string }> {
+  let retained = sampleEvenly(values.flatMap((segment) => {
+    const text = segment.text.trim();
+    return Array.from({ length: Math.ceil(text.length / 4_000) }, (_, index) => ({ ...segment, text: text.slice(index * 4_000, (index + 1) * 4_000) })).filter((item) => item.text);
+  }), 3_600);
+  while (retained.reduce((total, segment) => total + segment.text.length, 0) > 120_000 && retained.length > 1) {
+    retained = sampleEvenly(retained, Math.ceil(retained.length / 2));
+  }
+  return retained;
+}
+
+function sampleEvenly<T>(values: T[], limit: number): T[] {
+  if (values.length <= limit) return values;
+  return Array.from({ length: limit }, (_, index) => values[Math.round(index * (values.length - 1) / (limit - 1))]);
 }
 
 function extractSecurityMentions(sources: Array<{ text: string }>): Array<{
@@ -735,7 +826,7 @@ function sourceMatchesSecurity(text: string, security: { symbol?: string; exchan
 }
 
 function splitClaimBlocks(text: string): string[] {
-  return text.split(/(?:\r?\n)+|(?<=[.!?])\s+/).map((value) => value.trim()).filter(Boolean).slice(0, 100);
+  return text.split(/(?:\r?\n)+|(?<=[.!?])\s+/).map((value) => value.trim()).filter(Boolean);
 }
 
 function normalizePublishedAt(value: string | null): string | undefined {
@@ -750,9 +841,9 @@ function externalIdFromUrl(url: string): string | undefined {
   return parsed.searchParams.get("v") ?? parsed.pathname.split("/").filter(Boolean).pop();
 }
 
-export function applyStockBotCompletion(event: StockBotCompletionEvent): Run | undefined {
-  const run = [...runs.values()].find((candidate) => candidate.downstreamAnalysisId === event.analysisId);
-  if (!run) return undefined;
+export async function applyStockBotCompletion(event: StockBotCompletionEvent): Promise<Run | undefined> {
+  const run = runs.get(event.runId);
+  if (!run || run.downstreamAnalysisId !== event.analysisId) return undefined;
   run.downstreamStatus = event.status;
   run.downstreamDetailUrl = event.detailUrl ?? detailUrlFor(event.analysisId);
   if (event.status === "completed") {
@@ -769,14 +860,22 @@ export function applyStockBotCompletion(event: StockBotCompletionEvent): Run | u
     run.status = "failed";
     run.error = stockBotErrorText(event.error) ?? "StockBot analysis failed";
     run.finishedAt = new Date().toISOString();
+  } else if (event.status === "needs_review") {
+    run.status = "needs_review";
+    run.finishedAt = new Date().toISOString();
   }
   storeRun(run);
-  persistCallbackState(run);
-  const concise = event.results.slice(0, 10).map((result) => `${result.symbol ?? result.companyName ?? "Security"}: ${result.claimGrade}, ${result.opinion}`).join("\n");
-  const link = run.downstreamDetailUrl ? `\n${run.downstreamDetailUrl}` : "";
-  const icon = event.status === "completed" ? "✅" : event.status === "partial" ? "⚠️" : event.status === "canceled" ? "⏭️" : "❌";
-  sendTelegram(`${icon} *Stock analysis ${event.status}*\n${concise || stockBotErrorText(event.error) || "No result details"}${link}`);
+  await persistCallbackState(run);
+  sendTelegram(stockBotCompletionNotification(event, run.downstreamDetailUrl));
   return run;
+}
+
+export function stockBotCompletionNotification(event: Pick<StockBotCompletionEvent, "status" | "results" | "error">, detailUrl?: string): string {
+  const concise = event.results.slice(0, 10).map((result) => `${result.symbol ?? result.companyName ?? "Security"}: ${result.claimGrade}, ${result.opinion}`).join("\n");
+  const link = detailUrl ? `\n${detailUrl}` : "";
+  if (event.status === "needs_review") return `⚠️ *Stock analysis needs review — action required*\n${concise || stockBotErrorText(event.error) || "No result details"}${link}`;
+  const icon = event.status === "completed" ? "✅" : event.status === "partial" ? "⚠️" : event.status === "canceled" ? "⏭️" : "❌";
+  return `${icon} *Stock analysis ${event.status}*\n${concise || stockBotErrorText(event.error) || "No result details"}${link}`;
 }
 
 function detailUrlFor(analysisId: string): string | undefined {
@@ -784,16 +883,16 @@ function detailUrlFor(analysisId: string): string | undefined {
   return base ? `${base.replace(/\/$/, "")}/${encodeURIComponent(analysisId)}` : undefined;
 }
 
-function persistCallbackState(run: Run): void {
+async function persistCallbackState(run: Run): Promise<void> {
   const baseDir = process.env["AI_MEMORY_LOCAL_DIR"];
   if (!baseDir) return;
-  const inboxPath = path.join(baseDir, "tech-radar", "INBOX.md");
-  if (!fs.existsSync(inboxPath)) return;
-  const lines = fs.readFileSync(inboxPath, "utf8").split("\n");
-  const index = lines.findIndex((line) => line.includes(`| ${run.url} |`));
-  if (index < 0) return;
   const date = new Date().toISOString().slice(0, 10);
   const finding = [run.findingPath?.split("/").pop(), `stockbot:${run.downstreamAnalysisId}`, `run:${run.id}`].filter(Boolean).join(";");
-  lines[index] = `| ${date} | ${run.url} | ${run.status} | ${finding} | ${(run.error ?? "").slice(0, 120).replace(/\|/g, "/")} |`;
-  fs.writeFileSync(inboxPath, lines.join("\n"), "utf8");
+  const remoteUrl = process.env["AI_MEMORY_REPO"];
+  if (!remoteUrl) return;
+  const repo = new AiMemoryRepo({ remoteUrl, localDir: baseDir, gitAuthor: { name: "Tech Radar Bot", email: "bot@tech-radar.local" } });
+  await repo.init();
+  await repo.pullLatest();
+  await repo.updateInbox({ url: run.url, status: run.status, finding, date, error: run.error });
+  await repo.commitAndPush(`tech-radar: StockBot ${run.status} ${run.id}`);
 }

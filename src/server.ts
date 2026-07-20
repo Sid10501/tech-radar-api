@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
+import os from "node:os";
 import { runPipeline, runMediaPipeline, getRun, listRuns, hydrateRunsFromInbox, recoverAndEnqueueRuns, DuplicateRunError, applyStockBotCompletion } from "./runner.js";
 import { MAX_LOCAL_MEDIA_BYTES } from "./localMedia.js";
 import { handleTelegramUpdate } from "./telegram.js";
@@ -145,6 +146,14 @@ async function ensureAiMemoryCheckout(): Promise<void> {
 }
 
 export function buildServer() {
+  if (process.env["NODE_ENV"] === "production") {
+    const configured = process.env["RUN_STATE_DIR"];
+    const resolved = configured ? path.resolve(configured) : "";
+    const temporaryRoot = path.resolve(os.tmpdir());
+    if (!resolved || resolved === temporaryRoot || resolved.startsWith(`${temporaryRoot}${path.sep}`) || resolved === "/tmp" || resolved.startsWith("/tmp/")) {
+      throw new Error("production RUN_STATE_DIR must be configured on persistent storage");
+    }
+  }
   const app = Fastify({ logger: true });
   app.register(multipart, { limits: { files: 1, fileSize: MAX_LOCAL_MEDIA_BYTES, fields: 10, parts: 11 } });
   const callbackStatePath = process.env["RUN_STATE_DIR"]
@@ -165,16 +174,25 @@ export function buildServer() {
   );
   const consumedUploadTokens = new StockBotEventDeduper(10_000, callbackStatePath ? path.join(path.dirname(callbackStatePath), "stockbot-upload-tokens.json") : undefined);
   const uploadAuthMiddleware = (request: any, reply: any, done: () => void): void => {
-    if (process.env["AUTH_TOKEN"] && isAuthorized(request)) return done();
+    const bearer = request.headers["authorization"]?.replace(/^Bearer\s+/i, "");
+    if (process.env["STOCKBOT_DISPATCH_TOKEN"] && bearer === process.env["STOCKBOT_DISPATCH_TOKEN"]) return done();
     const token = request.headers["x-stockbot-upload-token"];
     if (typeof token !== "string") return reply.code(401).send({ error: "Upload authorization required" });
     try {
+      const origin = request.headers.origin;
+      const allowed = new Set((process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] ?? "").split(",").map((value) => value.trim()).filter(Boolean));
+      if (typeof origin !== "string" || !allowed.has(origin)) return reply.code(403).send({ error: "Upload Origin is not allowed" });
       request.uploadClaims = verifyUploadToken(token, process.env["STOCKBOT_UPLOAD_SECRET"] ?? "");
       request.uploadToken = token;
       done();
     } catch (error) {
       reply.code(401).send({ error: error instanceof Error ? error.message : "Invalid upload authorization" });
     }
+  };
+  const dispatchAuthMiddleware = (request: any, reply: any, done: () => void): void => {
+    const bearer = request.headers["authorization"]?.replace(/^Bearer\s+/i, "");
+    if (process.env["STOCKBOT_DISPATCH_TOKEN"] && bearer === process.env["STOCKBOT_DISPATCH_TOKEN"]) return done();
+    reply.code(401).send({ error: "Unauthorized" });
   };
 
   app.removeContentTypeParser("application/json");
@@ -225,14 +243,6 @@ export function buildServer() {
     }
   });
 
-  // Set auth token cookie via ?token= query param (one-time web UI flow)
-  app.addHook("onRequest", async (request, reply) => {
-    const token = (request.query as Record<string, string>)?.["token"];
-    if (token && token === process.env["AUTH_TOKEN"]) {
-      reply.header("Set-Cookie", `auth_token=${token}; HttpOnly; SameSite=Strict; Path=/`);
-    }
-  });
-
   app.get("/healthz", async () => {
     return { ok: true };
   });
@@ -259,7 +269,7 @@ export function buildServer() {
 
   app.post<{ Body: { url: string; intent?: SocialVideoIntent } }>(
     "/runs",
-    { preHandler: authMiddleware },
+    { preHandler: dispatchAuthMiddleware },
     async (request, reply) => {
       const { url, intent = "auto" } = request.body ?? {};
       if (!url || typeof url !== "string") {
@@ -275,11 +285,14 @@ export function buildServer() {
         return reply.code(400).send({ error: "url must be an absolute http or https URL" });
       }
       try {
-        const completion = runPipeline(canonicalUrl, { intent, origin: { channel: "api" } });
+        const idempotencyKey = request.headers["idempotency-key"];
+        if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 300)) return reply.code(400).send({ error: "Idempotency-Key must be 1-300 characters" });
+        const completion = runPipeline(canonicalUrl, { intent, origin: { channel: "api" }, idempotencyKey });
         completion.catch(() => {});
-        return reply.code(202).send({ runId: completion.runId });
+        return reply.code(202).send({ runId: completion.runId, deduplicated: false });
       } catch (err) {
         if (err instanceof DuplicateRunError) {
+          if (err.idempotent) return reply.code(202).send({ runId: err.existingRun.id, status: err.existingRun.status, deduplicated: true });
           return reply.code(409).send({ error: `URL already ${err.existingRun.status}`, runId: err.existingRun.id });
         }
         throw err;
@@ -297,6 +310,7 @@ export function buildServer() {
     let originChannel: "shortcut" | "dashboard" | "api" = "api";
     let idempotencyKey: string | undefined;
     let analysisId: string | undefined;
+    let uploadReservationId: string | undefined;
     const seenFields = new Set<string>();
     const allowedFields = new Set(["intent", "origin", "idempotencyKey", "analysisId"]);
     try {
@@ -339,15 +353,18 @@ export function buildServer() {
       if (uploadClaims) {
         const size = (await fs.promises.stat(mediaPath)).size;
         if (intent !== uploadClaims.intent || String(originChannel) !== uploadClaims.origin || idempotencyKey !== uploadClaims.idempotencyKey || analysisId !== uploadClaims.analysisId || size !== uploadClaims.size) throw new Error("multipart fields or size do not match upload token");
-        if (!consumedUploadTokens.accept(`${uploadClaims.analysisId}:${uploadClaims.idempotencyKey}`)) {
+        uploadReservationId = `${uploadClaims.analysisId}:${uploadClaims.idempotencyKey}`;
+        if (!consumedUploadTokens.begin(uploadReservationId)) {
           await fs.promises.unlink(mediaPath).catch(() => {});
           return reply.code(409).send({ error: "upload token already consumed" });
         }
       }
       const completion = runMediaPipeline({ fileUniqueId: randomUUID(), mediaPath, intent, origin: { channel: originChannel }, mimeType, originalName: filename, idempotencyKey, analysisId });
+      if (uploadReservationId) consumedUploadTokens.markApplied(uploadReservationId);
       completion.catch(() => {});
       return reply.code(202).send({ runId: completion.runId, status: "pending" });
     } catch (error) {
+      if (uploadReservationId) consumedUploadTokens.forget(uploadReservationId);
       if (mediaPath) await fs.promises.unlink(mediaPath).catch(() => {});
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -379,17 +396,24 @@ export function buildServer() {
     if (typeof timestamp !== "string" || typeof signature !== "string" || !rawBody) {
       return reply.code(401).send({ error: "Invalid StockBot callback" });
     }
+    let event;
     try {
-      const event = verifyStockBotCallback({ rawBody, timestamp, signature, secret });
-      if (!callbackEvents.accept(event.eventId)) return { ok: true, deduplicated: true };
-      const run = applyStockBotCompletion(event);
+      event = verifyStockBotCallback({ rawBody, timestamp, signature, secret });
+    } catch {
+      return reply.code(401).send({ error: "Invalid StockBot callback" });
+    }
+    if (!callbackEvents.begin(event.eventId)) return { ok: true, deduplicated: true };
+    try {
+      const run = await applyStockBotCompletion(event);
       if (!run) {
         callbackEvents.forget(event.eventId);
         return reply.code(404).send({ error: "Run not found for analysis" });
       }
+      callbackEvents.markApplied(event.eventId);
       return { ok: true, deduplicated: false };
     } catch {
-      return reply.code(401).send({ error: "Invalid StockBot callback" });
+      callbackEvents.forget(event.eventId);
+      return reply.code(500).send({ error: "StockBot callback could not be applied" });
     }
   });
 
@@ -515,6 +539,7 @@ export function buildServer() {
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
+  const app = buildServer();
   // Hydrate run history from persisted INBOX.md on startup
   const aiMemoryDir = process.env["AI_MEMORY_LOCAL_DIR"];
   if (aiMemoryDir) {
@@ -526,7 +551,6 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
     console.warn("[warn] AI_MEMORY_REPO_URL not set — Telegram finding links will be bare paths");
   }
 
-  const app = buildServer();
   const port = Number(process.env["PORT"] ?? 3000);
   await app.listen({ port, host: "0.0.0.0" });
   console.log(`listening on port ${port}`);

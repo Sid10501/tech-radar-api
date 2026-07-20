@@ -1,27 +1,20 @@
 import { z } from "zod";
-import { wrapAsUntrusted } from "../lib/untrustedContent.js";
 
 const MAX_MEDIA_SECONDS = 1_800;
 const MAX_MEDIA_MS = MAX_MEDIA_SECONDS * 1_000;
 
-function externalText(max: number, label: string) {
-  return z.string().min(1).transform((value) => {
-    if (value.startsWith("The following is UNTRUSTED ")) return value;
-    const emptyEnvelope = wrapAsUntrusted("", { maxChars: 0, label });
-    const budget = Math.max(1, max - emptyEnvelope.length);
-    return wrapAsUntrusted(value, { maxChars: budget, label });
-  }).pipe(z.string().min(1).max(max));
-}
+const boundedText = (max: number) => z.string().max(max).refine((value) => value.trim().length > 0, { message: "must not be blank" });
+const boundedIdentifier = (max: number) => boundedText(max);
 
 const TranscriptSegmentSchema = z.object({
   startMs: z.number().int().min(0).max(MAX_MEDIA_MS),
   endMs: z.number().int().min(0).max(MAX_MEDIA_MS),
-  text: externalText(4_000, "transcript segment"),
+  text: boundedText(4_000),
 }).strict().refine((segment) => segment.endMs >= segment.startMs, { message: "endMs must not precede startMs" });
 
 const FinanceClaimSchema = z.object({
-  text: externalText(4_000, "finance claim"),
-  stance: z.string().max(100).nullable().optional(),
+  text: boundedText(4_000),
+  stance: boundedText(100).nullable().optional(),
   confidence: z.number().min(0).max(1).nullable().optional(),
   startMs: z.number().int().min(0).max(MAX_MEDIA_MS).nullable().optional(),
   endMs: z.number().int().min(0).max(MAX_MEDIA_MS).nullable().optional(),
@@ -30,9 +23,9 @@ const FinanceClaimSchema = z.object({
 });
 
 const SecurityClaimsSchema = z.object({
-  symbol: z.string().trim().min(1).max(32).nullable().optional(),
-  exchange: z.string().trim().max(40).nullable().optional(),
-  companyName: externalText(300, "security name").nullable().optional(),
+  symbol: boundedIdentifier(32).nullable().optional(),
+  exchange: boundedIdentifier(40).nullable().optional(),
+  companyName: boundedText(300).nullable().optional(),
   assetType: z.enum(["stock", "etf", "unsupported"]),
   confidence: z.number().min(0).max(1),
   claims: z.array(FinanceClaimSchema).max(100),
@@ -40,42 +33,42 @@ const SecurityClaimsSchema = z.object({
 
 export const SocialVideoEvidenceV1Schema = z.object({
   schemaVersion: z.literal(1),
-  idempotencyKey: z.string().trim().min(1).max(300),
+  idempotencyKey: boundedIdentifier(300),
   origin: z.object({
-    channel: z.string().trim().min(1).max(40),
-    runId: z.string().trim().min(1).max(200),
-    chatId: z.string().trim().max(200).nullable().optional(),
-    messageId: z.string().trim().max(200).nullable().optional(),
+    channel: boundedIdentifier(40),
+    runId: boundedIdentifier(200),
+    chatId: boundedIdentifier(200).nullable().optional(),
+    messageId: boundedIdentifier(200).nullable().optional(),
   }).strict(),
   source: z.object({
     url: z.string().url().min(8).max(2_048).refine((value) => /^https?:\/\//.test(value)),
     canonicalUrl: z.string().url().min(8).max(2_048).refine((value) => /^https?:\/\//.test(value)),
-    platform: z.string().trim().min(1).max(40),
-    externalId: z.string().trim().max(300).nullable().optional(),
-    title: externalText(1_000, "source title").nullable().optional(),
-    creator: externalText(300, "source creator").nullable().optional(),
+    platform: boundedIdentifier(40),
+    externalId: boundedIdentifier(300).nullable().optional(),
+    title: boundedText(1_000).nullable().optional(),
+    creator: boundedText(300).nullable().optional(),
     publishedAt: z.string().datetime().nullable().optional(),
     durationSeconds: z.number().int().min(0).max(MAX_MEDIA_SECONDS).nullable().optional(),
   }).strict(),
   classification: z.object({
-    category: z.string().trim().min(1).max(50),
+    category: boundedIdentifier(50),
     confidence: z.number().min(0).max(1),
-    reasons: z.array(z.string().min(1).max(500)).max(20),
+    reasons: z.array(boundedText(500)).max(20),
   }).strict(),
   transcript: z.object({
-    language: z.string().trim().max(30).nullable().optional(),
-    method: z.string().trim().max(100).nullable().optional(),
-    hash: z.string().trim().max(200).nullable().optional(),
+    language: boundedIdentifier(30).nullable().optional(),
+    method: boundedIdentifier(100).nullable().optional(),
+    hash: boundedIdentifier(200).nullable().optional(),
     segments: z.array(TranscriptSegmentSchema).max(3_600),
   }).strict(),
   visualTexts: z.array(z.object({
-    text: externalText(4_000, "visual text"),
+    text: boundedText(4_000),
     timestampMs: z.number().int().min(0).max(MAX_MEDIA_MS).nullable().optional(),
-    method: z.string().trim().max(100).nullable().optional(),
+    method: boundedIdentifier(100).nullable().optional(),
   }).strict()).max(500),
   extraction: z.object({
-    methods: z.array(z.string().min(1).max(300)).max(20),
-    warnings: z.array(externalText(1_000, "extraction warning")).max(50),
+    methods: z.array(boundedIdentifier(300)).max(20),
+    warnings: z.array(boundedText(1_000)).max(50),
   }).strict(),
   financeClaims: z.object({ securities: z.array(SecurityClaimsSchema).max(10) }).strict(),
 }).strict().superRefine((evidence, context) => {

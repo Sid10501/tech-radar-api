@@ -37,6 +37,7 @@ export interface ExtractResult {
   hashtags: string[];
   duration_sec: number | null;
   transcript: string | null;
+  transcript_segments?: Array<{ start_ms: number; end_ms: number; text: string }>;
   transcript_source: "whisper" | "subs" | "document" | null;
   visual_text: string | null;
   visual_text_source: "ocr" | "browser_ocr" | "vision_ocr" | null;

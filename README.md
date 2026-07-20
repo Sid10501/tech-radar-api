@@ -143,7 +143,8 @@ Copy `.env.example` to `.env`:
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
 | `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
 | `GIT_DEPLOY_KEY_B64` | Yes | Base64-encoded SSH private key with write access |
-| `AUTH_TOKEN` | Recommended | Bearer token protecting `POST /runs` |
+| `AUTH_TOKEN` | Recommended | Browser/admin bearer token; not accepted by StockBot dispatch routes |
+| `STOCKBOT_DISPATCH_TOKEN` | For StockBot dispatch | Dedicated bearer token protecting `POST /runs` and service uploads |
 | `OWNER_NAME` | No | Your name — used in agent prompts (default: `the developer`) |
 | `TARGET_PROJECTS` | No | Comma-separated list of your projects for the implementation agent |
 | `AI_MEMORY_REPO_URL` | No | Public HTTPS URL of your ai-memory repo (for finding links in the UI) |
@@ -160,7 +161,7 @@ Copy `.env.example` to `.env`:
 | `TELEGRAM_WEBHOOK_SECRET` | No | Random string to verify Telegram webhook requests |
 | `MEDIA_UPLOAD_DIR` | For Telegram files | Private media directory (default `/tmp/tech-radar-media`) |
 | `EXTRACTION_WORK_ROOT` | No | Dedicated managed root for temporary extraction artifacts (default: `$TMPDIR/tech-radar-extraction`) |
-| `RUN_STATE_DIR` | Recommended | Durable accepted-run records (default `/tmp/tech-radar-runs`; mount persistent storage in production) |
+| `RUN_STATE_DIR` | Required in production | Durable accepted-run/callback records; production rejects missing, default, or temporary paths |
 | `STOCKBOT_API_URL` | For finance | StockBot base URL |
 | `STOCKBOT_SERVICE_TOKEN` | For finance | Dedicated Radar → StockBot bearer service token |
 | `STOCKBOT_CALLBACK_SECRET` | For finance | Shared HMAC-SHA256 callback secret |
@@ -199,7 +200,9 @@ Key variables to set (see `.env.example` for full list):
 | `ANTHROPIC_API_KEY` | Yes | Claude API |
 | `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
 | `GIT_DEPLOY_KEY_B64` | Yes | SSH deploy key (base64) |
-| `AUTH_TOKEN` | Recommended | Protects POST /runs |
+| `AUTH_TOKEN` | Recommended | Protects browser/admin APIs |
+| `STOCKBOT_DISPATCH_TOKEN` | For StockBot dispatch | Protects `POST /runs` and service uploads |
+| `RUN_STATE_DIR` | Yes in production | Non-temporary persistent volume for run and callback state |
 | `GITHUB_TOKEN` | Recommended | GitHub API (5000 req/hr vs 60) |
 | `YOUTUBE_API_KEY` | Optional | Official YouTube comments fetch before yt-dlp fallback |
 | `YOUTUBE_MAX_COMMENTS` | Optional | Bounded YouTube comments captured per video |
@@ -254,23 +257,23 @@ Returns `{ ok: true }`.
 Web UI — submit URLs, view run history.
 
 ### `POST /runs`
-Requires `Authorization: Bearer <AUTH_TOKEN>` if `AUTH_TOKEN` is set.
+Requires `Authorization: Bearer <STOCKBOT_DISPATCH_TOKEN>`. The broader browser/admin token, cookies, and query-string tokens are not accepted. Callers should send a stable `Idempotency-Key` header.
 
 ```json
 { "url": "https://www.instagram.com/reel/...", "intent": "auto" }
 ```
 
-Returns `202 { "runId": "..." }`.
+Returns `202 { "runId": "...", "deduplicated": false }`. Repeating the same canonical source and exact intent returns the existing run as `202` with `deduplicated: true`, including when `force` is requested. Technology and finance remain distinct explicit passes.
 
-`intent` is optional and must be `auto`, `technology`, or `finance`. The URL is canonicalized and deduplicated before queueing. Finance and mixed runs send the bounded `SocialVideoEvidenceV1` contract to StockBot at `POST /api/internal/video-evidence`; Tech Radar does not calculate finance verdicts.
+`intent` is optional and must be `auto`, `technology`, or `finance`. The URL is canonicalized and deduplicated before queueing. Finance and mixed runs send the bounded, raw-text `SocialVideoEvidenceV1` contract to StockBot at `POST /api/internal/video-evidence`; untrusted-content wrappers are added only at LLM prompt boundaries. Tech Radar does not calculate finance verdicts.
 
 ### `POST /runs/upload`
 
-Streams one multipart file field named `file` (maximum 20 MB) plus `intent`, `origin`, `idempotencyKey`, and `analysisId`. Server-to-server callers use the normal bearer token. Direct StockBot dashboard uploads use `X-StockBot-Upload-Token`: base64url compact sorted JSON claims plus a hex HMAC-SHA256 over the encoded segment. Tickets expire within ten minutes, bind every multipart field and the exact streamed byte count, and are consumed once. CORS applies only to this endpoint and only to exact `STOCKBOT_UPLOAD_ALLOWED_ORIGINS` values.
+Streams one multipart file field named `file` (maximum 20 MB) plus `intent`, `origin`, `idempotencyKey`, and `analysisId`. Server-to-server callers use `Authorization: Bearer <STOCKBOT_DISPATCH_TOKEN>` and may omit `Origin`. Direct StockBot dashboard uploads use `X-StockBot-Upload-Token`: base64url compact sorted JSON claims plus a hex HMAC-SHA256 over the encoded segment. Signed browser requests must include an exact `STOCKBOT_UPLOAD_ALLOWED_ORIGINS` match, and successful responses include the matching CORS origin. Tickets expire within ten minutes, bind every multipart field and the exact streamed byte count, and are consumed only after durable run registration succeeds.
 
 ### `POST /api/internal/stockbot/completion`
 
-StockBot completion callback. It requires `X-StockBot-Timestamp` and `X-StockBot-Signature`; the signature is lowercase hex HMAC-SHA256 over `timestamp + "." + rawBody`. The route enforces a five-minute replay window and event-ID dedupe under `RUN_STATE_DIR` before updating the run and sending the Telegram result/deep link.
+StockBot completion callback. It requires `X-StockBot-Timestamp` and `X-StockBot-Signature`; the signature is lowercase hex HMAC-SHA256 over `timestamp + "." + rawBody`. The body must identify both `runId` and `analysisId`, and terminal status may include `needs_review`. The route uses an atomic `pending`/`applied` event reservation under persistent `RUN_STATE_DIR`, rolls the reservation back when application fails, updates the exact correlated run through the durable INBOX repository, and sends the Telegram result/deep link before marking the event applied.
 
 ### `GET /runs`
 Returns last 50 runs.

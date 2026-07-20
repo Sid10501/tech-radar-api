@@ -13,6 +13,8 @@ export interface StockBotSubmission {
   analysisId: string;
   status: string;
   deduplicated: boolean;
+  detailUrl?: string;
+  originRunId?: string;
 }
 
 export class StockBotClientError extends Error {
@@ -31,6 +33,10 @@ const ResponseSchema = z.object({
   analysisId: z.string().min(1).optional(),
   status: z.string().min(1),
   deduplicated: z.boolean(),
+  detail_url: z.string().url().optional(),
+  detailUrl: z.string().url().optional(),
+  run_id: z.string().min(1).optional(),
+  runId: z.string().min(1).optional(),
 }).refine((value) => Boolean(value.analysis_id ?? value.analysisId), { message: "analysis id is required" });
 
 export class StockBotClient {
@@ -72,6 +78,6 @@ export class StockBotClient {
     } catch {
       throw new StockBotClientError("invalid_response", "StockBot returned an invalid response", response.status);
     }
-    return { analysisId: parsed.analysis_id ?? parsed.analysisId!, status: parsed.status, deduplicated: parsed.deduplicated };
+    return { analysisId: parsed.analysis_id ?? parsed.analysisId!, status: parsed.status, deduplicated: parsed.deduplicated, detailUrl: parsed.detail_url ?? parsed.detailUrl, originRunId: parsed.run_id ?? parsed.runId };
   }
 }

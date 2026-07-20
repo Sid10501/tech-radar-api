@@ -1,6 +1,7 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { StockBotEventDeduper, verifyStockBotCallback } from "../src/stockbotCallback.js";
+import { StockBotCompletionEventSchema } from "../src/stockbotCallback.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -8,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const payload = {
   eventId: "event-1",
+  runId: "run-1",
   analysisId: "analysis-1",
   status: "completed",
   detailUrl: "https://stockbot.test/analysis/analysis-1",
@@ -59,19 +61,59 @@ describe("StockBot callback verification", () => {
     }
   });
 
+  it("accepts needs_review as an exact terminal callback status", () => {
+    expect(() => StockBotCompletionEventSchema.parse({ ...payload, status: "needs_review" })).not.toThrow();
+  });
+
   it("deduplicates event IDs for exactly-once callback side effects", () => {
     const deduper = new StockBotEventDeduper();
-    expect(deduper.accept("event-1")).toBe(true);
-    expect(deduper.accept("event-1")).toBe(false);
-    expect(deduper.accept("event-2")).toBe(true);
+    expect(deduper.begin("event-1")).toBe(true);
+    expect(deduper.begin("event-1")).toBe(false);
+    deduper.forget("event-1");
+    expect(deduper.begin("event-1")).toBe(true);
+    deduper.markApplied("event-1");
+    expect(deduper.begin("event-1")).toBe(false);
   });
 
   it("preserves callback event dedupe across a RUN_STATE_DIR-style restart", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "callback-state-"));
     const statePath = path.join(dir, "stockbot-callback-events.json");
     try {
-      expect(new StockBotEventDeduper(100, statePath).accept("restart-event")).toBe(true);
-      expect(new StockBotEventDeduper(100, statePath).accept("restart-event")).toBe(false);
+      const first = new StockBotEventDeduper(100, statePath);
+      expect(first.begin("restart-event")).toBe(true);
+      first.markApplied("restart-event");
+      expect(new StockBotEventDeduper(100, statePath).begin("restart-event")).toBe(false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("atomically excludes a concurrent reservation from another process instance", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "callback-concurrent-"));
+    const statePath = path.join(dir, "events.json");
+    try {
+      const first = new StockBotEventDeduper(100, statePath);
+      const second = new StockBotEventDeduper(100, statePath);
+      expect(first.begin("same-event")).toBe(true);
+      expect(second.begin("same-event")).toBe(false);
+      first.forget("same-event");
+      expect(second.begin("same-event")).toBe(true);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("reclaims a stale pending reservation after a crashed process", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "callback-stale-"));
+    const statePath = path.join(dir, "events.json");
+    try {
+      const first = new (StockBotEventDeduper as any)(100, statePath, 50);
+      expect(first.begin("crashed-event")).toBe(true);
+      const old = Date.now() - 1_000;
+      const central = JSON.parse(fs.readFileSync(statePath, "utf8"));
+      central[0][1].at = old;
+      fs.writeFileSync(statePath, JSON.stringify(central));
+      const reservationPath = path.join(`${statePath}.events`, createHash("sha256").update("crashed-event").digest("hex"));
+      const reservation = JSON.parse(fs.readFileSync(reservationPath, "utf8"));
+      reservation.at = old;
+      fs.writeFileSync(reservationPath, JSON.stringify(reservation));
+      expect(new (StockBotEventDeduper as any)(100, statePath, 50).begin("crashed-event")).toBe(true);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

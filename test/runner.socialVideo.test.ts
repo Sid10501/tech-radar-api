@@ -7,6 +7,8 @@ import {
   recoverAndEnqueueRuns,
   registerPipelineRun,
   routeEnrichedExtract,
+  stockBotCompletionNotification,
+  stockBotTerminalRunStatus,
 } from "../src/runner.js";
 
 const enriched = {
@@ -31,6 +33,17 @@ const enriched = {
 };
 
 describe("social-video runner routing", () => {
+  it("maps terminal dedupe responses and skips a shadow run when an active original run is reused", () => {
+    expect(stockBotTerminalRunStatus({ status: "completed", deduplicated: true })).toBe("processed");
+    expect(stockBotTerminalRunStatus({ status: "needs_review", deduplicated: true })).toBe("needs_review");
+    expect(stockBotTerminalRunStatus({ status: "pending", deduplicated: true, originRunId: "original" }, "retry")).toBe("skipped");
+    expect(stockBotTerminalRunStatus({ status: "completed", deduplicated: false })).toBeUndefined();
+  });
+
+  it("renders needs-review callbacks as action required and keeps the detail link", () => {
+    expect(stockBotCompletionNotification({ ...({ status: "needs_review", results: [], error: null } as any) }, "https://stocks.example/review/1"))
+      .toBe("⚠️ *Stock analysis needs review — action required*\nNo result details\nhttps://stocks.example/review/1");
+  });
   it("runs mixed extraction through technology and finance handlers exactly once", async () => {
     const technology = vi.fn(async () => "finding.md");
     const finance = vi.fn(async () => ({ analysisId: "analysis-1", status: "pending", deduplicated: false }));
@@ -73,8 +86,8 @@ describe("social-video runner routing", () => {
     });
     expect(evidence.idempotencyKey).toBe("stockbot-upload-key");
     expect(evidence.source.canonicalUrl).toBe("https://www.youtube.com/watch?v=abc");
-    expect(evidence.transcript.segments[0].text).toContain("UNTRUSTED transcript segment");
-    expect(evidence.visualTexts[0].text).toContain("UNTRUSTED visual text");
+    expect(evidence.transcript.segments.map((segment) => segment.text).join(" ")).toBe(enriched.transcript);
+    expect(evidence.visualTexts[0].text).toBe(enriched.visual_text);
     expect(evidence.extraction.methods).toEqual(expect.arrayContaining(["yt-dlp", "whisper", "vision_ocr", "link_enrichment"]));
     expect(evidence.financeClaims.securities[0].symbol).toBe("NVDA");
     expect(evidence.financeClaims.securities[0].claims.length).toBeGreaterThanOrEqual(3);
@@ -138,6 +151,51 @@ describe("social-video runner routing", () => {
     expect(evidence.financeClaims.securities[0].symbol).toBe("AAPL");
   });
 
+  it("preserves timestamped transcript segments and samples claims through the end of long videos", () => {
+    const transcriptSegments = Array.from({ length: 150 }, (_, index) => ({ start_ms: index * 10_000, end_ms: index * 10_000 + 5_000, text: index === 149 ? "$LATE may rally" : `segment ${index}` }));
+    const evidence = buildSocialVideoEvidence({ extract: { ...enriched, caption: null, transcript: transcriptSegments.map((item) => item.text).join(". "), transcript_segments: transcriptSegments, visual_text: null, duration_sec: 1_500 }, classification: { category: "finance", confidence: 1, reasons: [] }, runId: "whole-video", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" } });
+    expect(evidence.transcript.segments).toHaveLength(150);
+    expect(evidence.transcript.segments[149]).toEqual({ startMs: 1_490_000, endMs: 1_495_000, text: "$LATE may rally" });
+    expect(evidence.financeClaims.securities.find((security) => security.symbol === "LATE")?.claims.find((claim) => claim.text.includes("LATE"))).toMatchObject({ startMs: 1_490_000, endMs: 1_495_000 });
+  });
+
+  it("compacts oversized segment sets while retaining whole-video coverage and the late claim", () => {
+    const transcriptSegments = Array.from({ length: 4_001 }, (_, index) => ({ start_ms: index * 400, end_ms: index * 400 + 300, text: index === 4_000 ? `$LATE ${"z".repeat(100)}` : `segment-${index} ${"x".repeat(110)}` }));
+    const evidence = buildSocialVideoEvidence({ extract: { ...enriched, caption: null, transcript: "oversized", transcript_segments: transcriptSegments, visual_text: null, duration_sec: 1_800 }, classification: { category: "finance", confidence: 1, reasons: [] }, runId: "bounded-whole-video", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" } });
+    expect(evidence.transcript.segments.length).toBeLessThanOrEqual(3_600);
+    expect(evidence.transcript.segments.reduce((sum, segment) => sum + segment.text.length, 0)).toBeLessThanOrEqual(120_000);
+    expect(evidence.transcript.segments.at(-1)).toMatchObject({ endMs: 1_600_300, text: expect.stringContaining("$LATE") });
+    expect(evidence.financeClaims.securities.find((security) => security.symbol === "LATE")?.claims.some((claim) => claim.text.includes("LATE"))).toBe(true);
+  });
+
+  it("uses a non-public upload sentinel and preserves the original filename as raw title metadata", () => {
+    const evidence = buildSocialVideoEvidence({ extract: { ...enriched, url: "https://uploads.invalid/file-id", platform: "other", title: "earnings-call.mp4" }, classification: { category: "finance", confidence: 1, reasons: [] }, runId: "upload-run", canonicalUrl: "https://uploads.invalid/file-id", origin: { channel: "dashboard" } });
+    expect(evidence.source).toMatchObject({ platform: "upload", title: "earnings-call.mp4", url: "https://internal.invalid/tech-radar-upload/upload-run", canonicalUrl: "https://internal.invalid/tech-radar-upload/upload-run" });
+  });
+
+  it("deduplicates the same canonical intent and submission idempotency key even when forced", () => {
+    const url = `https://youtu.be/request-idem-${Date.now()}`;
+    const first = registerPipelineRun(url, { intent: "finance", idempotencyKey: "request-key" });
+    try { registerPipelineRun(url, { intent: "finance", idempotencyKey: "request-key", force: true }); } catch (error: any) {
+      expect(error.existingRun.id).toBe(first.id);
+      expect(error.idempotent).toBe(true);
+      return;
+    }
+    throw new Error("expected idempotent duplicate");
+  });
+
+  it("does not let force bypass an exact finance duplicate after a terminal failure", () => {
+    const url = `https://youtu.be/terminal-finance-${Date.now()}`;
+    const first = registerPipelineRun(url, { intent: "finance" });
+    first.status = "failed";
+    try { registerPipelineRun(url, { intent: "finance", force: true }); } catch (error: any) {
+      expect(error.existingRun.id).toBe(first.id);
+      expect(error.idempotent).toBe(true);
+      return;
+    }
+    throw new Error("expected terminal finance duplicate");
+  });
+
   it("allows an explicit finance pass after a technology-only pass", () => {
     const id = `intent-${Date.now()}`;
     registerPipelineRun(`https://youtu.be/${id}`, { intent: "technology" });
@@ -168,15 +226,38 @@ describe("social-video runner routing", () => {
 });
 
 describe("run registration and recovery", () => {
-  it("maps every StockBot terminal callback to a terminal run state", () => {
+  it("maps every StockBot terminal callback to a terminal run state", async () => {
     for (const [status, expected] of [["partial", "partial"], ["canceled", "skipped"], ["failed", "failed"]] as const) {
       const run = registerPipelineRun(`https://youtu.be/callback-${status}-${Date.now()}`, { intent: "finance" });
       run.downstreamAnalysisId = `analysis-${status}`;
       run.status = "downstream_pending";
-      applyStockBotCompletion({ eventId: `event-${status}`, analysisId: `analysis-${status}`, status, detailUrl: null, results: [], error: null });
+      await applyStockBotCompletion({ eventId: `event-${status}`, runId: run.id, analysisId: `analysis-${status}`, status, detailUrl: null, results: [], error: null });
       expect(run.status).toBe(expected);
       expect(run.finishedAt).toBeTruthy();
     }
+  });
+  it("correlates callbacks by run and analysis id and maps needs_review with a detail link", async () => {
+    const first = registerPipelineRun(`https://youtu.be/correlation-first-${Date.now()}`, { intent: "finance" });
+    const second = registerPipelineRun(`https://youtu.be/correlation-second-${Date.now()}`, { intent: "finance" });
+    first.downstreamAnalysisId = second.downstreamAnalysisId = "reused-analysis";
+    const applied = await applyStockBotCompletion({ eventId: "correlated-event", runId: second.id, analysisId: "reused-analysis", status: "needs_review", detailUrl: "https://stocks.example/analysis/reused-analysis", results: [], error: null });
+    expect(applied?.id).toBe(second.id);
+    expect(first.status).toBe("pending");
+    expect(second).toMatchObject({ status: "needs_review", downstreamDetailUrl: "https://stocks.example/analysis/reused-analysis" });
+  });
+  it("commits callback lifecycle updates through the durable INBOX repository", async () => {
+    const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path"); const { execFileSync } = await import("node:child_process");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "callback-inbox-")); const bare = path.join(root, "remote.git"); const seed = path.join(root, "seed"); const local = path.join(root, "local"); const verify = path.join(root, "verify");
+    execFileSync("git", ["init", "--bare", bare]); execFileSync("git", ["init", "-b", "master", seed]); execFileSync("git", ["-C", seed, "config", "user.email", "test@example.com"]); execFileSync("git", ["-C", seed, "config", "user.name", "Test"]);
+    const url = `https://www.youtube.com/watch?v=callback-git-${Date.now()}`; fs.mkdirSync(path.join(seed, "tech-radar")); fs.writeFileSync(path.join(seed, "tech-radar", "INBOX.md"), `| Date | URL | Status | Finding | Error |\n|---|---|---|---|---|\n| 2026-07-20 | ${url} | downstream_pending | stockbot:git-analysis | |\n`);
+    execFileSync("git", ["-C", seed, "add", "."]); execFileSync("git", ["-C", seed, "commit", "-m", "seed"]); execFileSync("git", ["-C", seed, "remote", "add", "origin", bare]); execFileSync("git", ["-C", seed, "push", "-u", "origin", "master"]);
+    process.env["AI_MEMORY_REPO"] = bare; process.env["AI_MEMORY_LOCAL_DIR"] = local;
+    try {
+      const run = registerPipelineRun(url, { intent: "finance" }); run.downstreamAnalysisId = "git-analysis"; run.status = "downstream_pending";
+      await applyStockBotCompletion({ eventId: "git-event", runId: run.id, analysisId: "git-analysis", status: "completed", detailUrl: null, results: [], error: null });
+      execFileSync("git", ["clone", "-b", "master", bare, verify]);
+      expect(fs.readFileSync(path.join(verify, "tech-radar", "INBOX.md"), "utf8")).toContain(`| ${url} | processed |`);
+    } finally { delete process.env["AI_MEMORY_REPO"]; delete process.env["AI_MEMORY_LOCAL_DIR"]; fs.rmSync(root, { recursive: true, force: true }); }
   });
   it("registers and returns the actual run id before work starts and canonicalizes dedupe", () => {
     const first = registerPipelineRun("https://youtu.be/unique123?si=tracker", { intent: "finance" });
