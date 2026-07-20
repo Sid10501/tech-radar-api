@@ -121,6 +121,8 @@ describe("server routes", () => {
     expect(res.body).toContain("data-filter=\"ocr\"");
     expect(res.body).not.toContain("class=\"tabs\"");
     expect(res.body).not.toContain("evidence-tab");
+    expect(res.body).not.toContain("https://x.com");
+    expect(res.body).toContain("window.__RUNS__ = [];");
   });
 
   it("scopes direct-upload preflight to exact configured origins", async () => {
@@ -676,7 +678,7 @@ describe("server routes", () => {
         headers: { cookie: `theme=light; auth_token=${TOKEN}; other=value` },
       });
       expect(res.statusCode).toBe(200);
-      expect(Array.isArray(res.json())).toBe(true);
+      expect(res.json()).toEqual(expect.arrayContaining([expect.objectContaining({ url: "https://x.com" })]));
     });
 
     it("GET /runs/:id returns 404 for unknown id", async () => {

@@ -274,9 +274,8 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
   });
 
   app.get("/", async (_request, reply) => {
-    const runs = listRuns();
     reply.header("Content-Type", "text/html; charset=utf-8");
-    return DASHBOARD_HTML(runs);
+    return DASHBOARD_HTML([]);
   });
 
   app.post<{ Body: { url: string; intent?: SocialVideoIntent; force?: boolean } }>(
