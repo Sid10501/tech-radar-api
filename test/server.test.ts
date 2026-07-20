@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vites
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHmac } from "node:crypto";
 
 const gitMocks = vi.hoisted(() => ({
   init: vi.fn(async () => {}),
@@ -11,9 +12,13 @@ const gitMocks = vi.hoisted(() => ({
 
 // Mock runner before importing server so the routes work without a real pipeline
 vi.mock("../src/runner.js", () => ({
-  runPipeline: vi.fn(async () => ({ runId: "mock-run-id", findingPath: "tech-radar/findings/test.md" })),
+  runPipeline: vi.fn(() => Object.assign(
+    Promise.resolve({ runId: "mock-run-id", findingPath: "tech-radar/findings/test.md" }),
+    { runId: "mock-run-id" },
+  )),
   getRun: vi.fn((id: string) => id === "existing" ? { id, url: "https://x.com", status: "processed", startedAt: new Date().toISOString() } : undefined),
   listRuns: vi.fn(() => [{ id: "existing", url: "https://x.com", status: "processed", startedAt: new Date().toISOString() }]),
+  applyStockBotCompletion: vi.fn(() => ({ id: "finance-run", status: "processed" })),
 }));
 
 vi.mock("../src/git.js", () => ({
@@ -409,7 +414,71 @@ describe("server routes", () => {
       expect(unauthorized.statusCode).toBe(401);
       expect(authorized.statusCode).toBe(200);
       expect(runnerMock.runPipeline).toHaveBeenCalledTimes(1);
-      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://example.com/accepted");
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://example.com/accepted", {
+        intent: "auto",
+        origin: { channel: "telegram", chatId: "123", messageId: undefined },
+      });
+    });
+  });
+
+  describe("StockBot completion callback", () => {
+    const secret = "stockbot-callback-secret";
+    const event = {
+      eventId: "callback-event-1",
+      analysisId: "analysis-1",
+      status: "completed",
+      detailUrl: "https://stockbot.test/analyses/analysis-1",
+      results: [{ symbol: "NVDA", claimGrade: "supported", opinion: "watch", confidence: 0.8 }],
+    };
+
+    beforeEach(() => {
+      process.env["STOCKBOT_CALLBACK_SECRET"] = secret;
+      vi.mocked(runnerMock.applyStockBotCompletion).mockClear();
+    });
+
+    afterAll(() => {
+      delete process.env["STOCKBOT_CALLBACK_SECRET"];
+    });
+
+    function headers(raw: string, timestamp = String(Math.floor(Date.now() / 1_000))) {
+      return {
+        "content-type": "application/json",
+        "x-stockbot-timestamp": timestamp,
+        "x-stockbot-signature": createHmac("sha256", secret).update(`${timestamp}.${raw}`).digest("hex"),
+      };
+    }
+
+    it("accepts a signed callback and applies it once", async () => {
+      const raw = JSON.stringify(event);
+      const res = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, deduplicated: false });
+      expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledWith(event);
+    });
+
+    it("rejects invalid signatures and stale callbacks", async () => {
+      const raw = JSON.stringify({ ...event, eventId: "invalid-event" });
+      const invalid = await app.inject({
+        method: "POST",
+        url: "/api/internal/stockbot/completion",
+        headers: { ...headers(raw), "x-stockbot-signature": "00" },
+        payload: raw,
+      });
+      const staleTimestamp = String(Math.floor((Date.now() - 301_000) / 1_000));
+      const stale = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw, staleTimestamp), payload: raw });
+      expect(invalid.statusCode).toBe(401);
+      expect(stale.statusCode).toBe(401);
+      expect(runnerMock.applyStockBotCompletion).not.toHaveBeenCalled();
+    });
+
+    it("deduplicates callback event IDs before side effects", async () => {
+      const duplicateEvent = { ...event, eventId: `dedupe-${Date.now()}` };
+      const raw = JSON.stringify(duplicateEvent);
+      const first = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      const second = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      expect(first.json()).toEqual({ ok: true, deduplicated: false });
+      expect(second.json()).toEqual({ ok: true, deduplicated: true });
+      expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -503,7 +572,7 @@ describe("server routes", () => {
       expect(res.json().id).toBe("existing");
     });
 
-    it("POST /runs accepts a URL and returns 202 with runId", async () => {
+    it("POST /runs validates intent and returns the actual registered runId", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/runs",
@@ -511,10 +580,35 @@ describe("server routes", () => {
           authorization: `Bearer ${TOKEN}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ url: "https://www.youtube.com/shorts/abc123" }),
+        body: JSON.stringify({ url: "https://www.youtube.com/shorts/abc123", intent: "finance" }),
       });
       expect(res.statusCode).toBe(202);
-      expect(res.json()).toHaveProperty("runId");
+      expect(res.json()).toEqual({ runId: "mock-run-id" });
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.youtube.com/watch?v=abc123", expect.objectContaining({ intent: "finance" }));
+    });
+
+    it("POST /runs rejects an unknown intent", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/runs",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { url: "https://example.com/video", intent: "verdict" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(runnerMock.runPipeline).not.toHaveBeenCalled();
+    });
+
+    it("POST /runs rejects malformed and non-http URLs", async () => {
+      for (const url of ["not-a-url", "file:///etc/passwd"]) {
+        const res = await app.inject({
+          method: "POST",
+          url: "/runs",
+          headers: { authorization: `Bearer ${TOKEN}` },
+          payload: { url, intent: "auto" },
+        });
+        expect(res.statusCode).toBe(400);
+      }
+      expect(runnerMock.runPipeline).not.toHaveBeenCalled();
     });
 
     it("POST /runs returns 400 without url", async () => {

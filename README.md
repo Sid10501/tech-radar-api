@@ -156,7 +156,15 @@ Copy `.env.example` to `.env`:
 | `PDF_MAX_CHARS` | No | PDF text extraction character cap (default: 20000) |
 | `TELEGRAM_BOT_TOKEN` | No | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | No | Your chat ID — enables notifications and two-way control |
+| `TELEGRAM_USER_ID` | Recommended | Owner user ID; both chat and user must match when configured |
 | `TELEGRAM_WEBHOOK_SECRET` | No | Random string to verify Telegram webhook requests |
+| `MEDIA_UPLOAD_DIR` | For Telegram files | Private media directory (default `/tmp/tech-radar-media`) |
+| `STOCKBOT_API_URL` | For finance | StockBot base URL |
+| `STOCKBOT_SERVICE_TOKEN` | For finance | Dedicated Radar → StockBot bearer service token |
+| `STOCKBOT_CALLBACK_SECRET` | For finance | Shared HMAC-SHA256 callback secret |
+| `STOCKBOT_DETAIL_BASE_URL` | No | StockBot result deep-link base |
+| `STOCKBOT_TIMEOUT_MS` | No | Handoff timeout (default 10000 ms; maximum 30000 ms) |
+| `ROUTER_MODEL` | No | Model used only when deterministic routing is inconclusive |
 | `PUBLIC_FEED_ALLOWED_ORIGINS` | No | Comma-separated exact origins granted CORS access to `/api/public/*` (no wildcard; empty = no CORS) |
 | `PUBLIC_SITE_RADAR_BASE` | No | Base URL for RSS item links, e.g. `https://your-site.dev/radar` (default: the request origin) |
 | `PORT` | No | HTTP port (default: `3000`) |
@@ -221,7 +229,9 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
   -d '{"url":"https://YOUR-RAILWAY-URL/telegram/webhook","secret_token":"YOUR_WEBHOOK_SECRET"}'
 ```
 
-Bot commands: send any URL to queue it, `/status`, `/list`, `/help`.
+Bot commands: send or caption any public URL, `/stock <url>` for finance, `/tech <url>` for technology, `/status`, `/list`, `/help`. Owner-supplied videos are limited to 20 MB. Public URL media is limited to 30 minutes, and finance evidence contains at most ten securities.
+
+Uploaded media is owner-authorized, saved under a generated filename with mode `0600`, and never forwarded to StockBot. The current extractor accepts public URLs only, so uploads remain in the typed `awaiting_media` state. This boundary is `DONE_WITH_CONCERNS`: a future local-file adapter must accept an already validated file, retain all byte/duration/time/filename controls, and delete the file after extraction. Do not weaken this with cookies, browser sessions, proxies, or private-content bypasses.
 
 ---
 
@@ -243,10 +253,16 @@ Web UI — submit URLs, view run history.
 Requires `Authorization: Bearer <AUTH_TOKEN>` if `AUTH_TOKEN` is set.
 
 ```json
-{ "url": "https://www.instagram.com/reel/..." }
+{ "url": "https://www.instagram.com/reel/...", "intent": "auto" }
 ```
 
 Returns `202 { "runId": "..." }`.
+
+`intent` is optional and must be `auto`, `technology`, or `finance`. The URL is canonicalized and deduplicated before queueing. Finance and mixed runs send the bounded `SocialVideoEvidenceV1` contract to StockBot at `POST /api/internal/video-evidence`; Tech Radar does not calculate finance verdicts.
+
+### `POST /api/internal/stockbot/completion`
+
+StockBot completion callback. It requires `X-StockBot-Timestamp` and `X-StockBot-Signature`; the signature is lowercase hex HMAC-SHA256 over `timestamp + "." + rawBody`. The route enforces a five-minute replay window and event-ID dedupe before updating the run and sending the Telegram result/deep link.
 
 ### `GET /runs`
 Returns last 50 runs.

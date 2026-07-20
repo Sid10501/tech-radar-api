@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import path from "node:path";
-import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError } from "./runner.js";
+import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError, applyStockBotCompletion } from "./runner.js";
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 import {
@@ -15,6 +15,8 @@ import { auditFindings, auditPublicFindings, enrichmentProfile, filterCounts, fi
 import { listReleaseNotes } from "./releaseNotes.js";
 import { buildRssXml } from "./rss.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
+import { canonicalizeSocialUrl, type SocialVideoIntent } from "./socialVideoRouting.js";
+import { StockBotEventDeduper, verifyStockBotCallback } from "./stockbotCallback.js";
 
 const SECURITY_HEADERS = {
   "Content-Security-Policy":
@@ -130,6 +132,23 @@ async function ensureAiMemoryCheckout(): Promise<void> {
 
 export function buildServer() {
   const app = Fastify({ logger: true });
+  const callbackEvents = new StockBotEventDeduper(
+    1_000,
+    process.env["AI_MEMORY_LOCAL_DIR"]
+      ? path.join(process.env["AI_MEMORY_LOCAL_DIR"], "tech-radar", "stockbot-callback-events.json")
+      : undefined,
+  );
+
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
+    const rawBody = (body as Buffer).toString("utf8");
+    (request as typeof request & { rawBody?: string }).rawBody = rawBody;
+    try {
+      done(null, rawBody ? JSON.parse(rawBody) : {});
+    } catch (error) {
+      done(error as Error, undefined);
+    }
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
@@ -184,28 +203,33 @@ export function buildServer() {
     return DASHBOARD_HTML(runs);
   });
 
-  app.post<{ Body: { url: string } }>(
+  app.post<{ Body: { url: string; intent?: SocialVideoIntent } }>(
     "/runs",
     { preHandler: authMiddleware },
     async (request, reply) => {
-      const { url } = request.body;
+      const { url, intent = "auto" } = request.body ?? {};
       if (!url || typeof url !== "string") {
         return reply.code(400).send({ error: "url is required" });
       }
-      // Check for duplicate before queuing
+      if (!["auto", "technology", "finance"].includes(intent)) {
+        return reply.code(400).send({ error: "intent must be auto, technology, or finance" });
+      }
+      let canonicalUrl: string;
       try {
-        // runPipeline registers the run synchronously before its first await,
-        // so listRuns()[0] is reliably set after one microtask tick.
-        runPipeline(url).catch(() => {}); // errors are captured inside runPipeline
+        canonicalUrl = canonicalizeSocialUrl(url);
+      } catch {
+        return reply.code(400).send({ error: "url must be an absolute http or https URL" });
+      }
+      try {
+        const completion = runPipeline(canonicalUrl, { intent, origin: { channel: "api" } });
+        completion.catch(() => {});
+        return reply.code(202).send({ runId: completion.runId });
       } catch (err) {
         if (err instanceof DuplicateRunError) {
           return reply.code(409).send({ error: `URL already ${err.existingRun.status}`, runId: err.existingRun.id });
         }
         throw err;
       }
-      await Promise.resolve(); // yield to let runPipeline register the run
-      const latest = listRuns()[0];
-      return reply.code(202).send({ runId: latest?.id ?? "unknown" });
     },
   );
 
@@ -225,6 +249,29 @@ export function buildServer() {
       return reply.code(200).send();
     },
   );
+
+  app.post("/api/internal/stockbot/completion", async (request, reply) => {
+    const secret = process.env["STOCKBOT_CALLBACK_SECRET"];
+    if (!secret) return reply.code(503).send({ error: "StockBot callback secret is not configured" });
+    const timestamp = request.headers["x-stockbot-timestamp"];
+    const signature = request.headers["x-stockbot-signature"];
+    const rawBody = (request as typeof request & { rawBody?: string }).rawBody ?? "";
+    if (typeof timestamp !== "string" || typeof signature !== "string" || !rawBody) {
+      return reply.code(401).send({ error: "Invalid StockBot callback" });
+    }
+    try {
+      const event = verifyStockBotCallback({ rawBody, timestamp, signature, secret });
+      if (!callbackEvents.accept(event.eventId)) return { ok: true, deduplicated: true };
+      const run = applyStockBotCompletion(event);
+      if (!run) {
+        callbackEvents.forget(event.eventId);
+        return reply.code(404).send({ error: "Run not found for analysis" });
+      }
+      return { ok: true, deduplicated: false };
+    } catch {
+      return reply.code(401).send({ error: "Invalid StockBot callback" });
+    }
+  });
 
   app.get("/runs", { preHandler: authMiddleware }, async () => {
     return listRuns();

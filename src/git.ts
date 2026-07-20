@@ -12,7 +12,7 @@ export interface AiMemoryRepoOptions {
 
 export interface InboxRow {
   url: string;
-  status: "pending" | "processed" | "failed" | "skipped";
+  status: "pending" | "running" | "awaiting_media" | "downstream_pending" | "processed" | "failed" | "skipped";
   finding: string | null;
   date: string;
   error?: string;
@@ -141,10 +141,10 @@ export class AiMemoryRepo {
         content += `\n${newRow}`;
       }
     } else {
-      // Find the pending row for this URL — match regardless of spacing around "pending"
+      // Replace the active lifecycle row for this URL.
       const lines = content.split("\n");
       const pendingIdx = lines.findIndex(
-        (l) => l.includes(row.url) && /\|\s*pending\s*\|/.test(l)
+        (l) => l.includes(row.url) && /\|\s*(?:pending|running|awaiting_media|downstream_pending)\s*\|/.test(l)
       );
       if (pendingIdx >= 0) {
         lines[pendingIdx] = newRow;
