@@ -104,7 +104,10 @@ The original implementation was `DONE_WITH_CONCERNS` because uploads stopped at 
 ## Commit
 
 - `252e971 feat: route social video stock analysis`
-- The report is ignored and intentionally not committed.
+- `d81f7ff fix: complete social video integration boundaries`
+- `233fcd8 fix: close social video recovery and upload gaps`
+- `251605b fix: finalize social video duration and attribution`
+- This ignored report was intentionally force-added and committed with the correction history.
 
 ## 2026-07-20 second-review correction
 
@@ -157,5 +160,21 @@ RED: focused runner/extractor/server suites produced eight expected failures cov
 - `git diff --check` → clean.
 - `npx tsc --noEmit` → exit 0.
 - `npm test` → 33 files, 283 tests passed, 0 failures.
+- `npm run build` → exit 0.
+- `npm audit --omit=dev` → 0 vulnerabilities.
+
+## Narrow-review correction
+
+- Named stock and ETF matching now runs globally alongside symbol extraction, retaining multiple unresolved company names while deduplicating names directly paired with a ticker.
+- Persisted cleanup paths are treated as untrusted. Media deletion requires regular non-symlink media and sidecar files directly under `MEDIA_UPLOAD_DIR`, with sidecar ownership matching the run. Extraction deletion requires a regular non-symlink directory directly under the dedicated `EXTRACTION_WORK_ROOT` and a run-specific managed name.
+- Terminal cleanup clears both persisted artifact paths after safe cleanup. A stale terminal record cannot delete a newer upload whose sidecar belongs to a different run.
+
+RED: the focused runner suite produced four expected failures for mixed symbol/company extraction, persisted stale paths, outside-path deletion, and old-run/new-upload collision. A same-block identity test separately demonstrated over-broad symbol/name deduplication before the adjacency fix. GREEN: all 20 focused runner tests pass.
+
+### Final verification after narrow review
+
+- `git diff --check` → clean.
+- `npx tsc --noEmit` → exit 0.
+- `npm test` → 33 files, 287 tests passed, 0 failures.
 - `npm run build` → exit 0.
 - `npm audit --omit=dev` → 0 vulnerabilities.

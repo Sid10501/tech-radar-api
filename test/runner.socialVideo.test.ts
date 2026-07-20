@@ -120,6 +120,24 @@ describe("social-video runner routing", () => {
     }
   });
 
+  it("keeps every ambiguous company mention alongside resolved symbols", () => {
+    const evidence = buildSocialVideoEvidence({ extract: { ...enriched, caption: "$AAPL rose while Tesla stock fell. Acme Corp shares recovered. Vanguard Growth ETF gained.", transcript: null, visual_text: null }, classification: { category: "finance", confidence: 1, reasons: [] }, runId: "mixed-identities", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" } });
+    expect(evidence.financeClaims.securities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbol: "AAPL" }),
+      expect.objectContaining({ companyName: expect.stringContaining("Tesla") }),
+      expect.objectContaining({ companyName: expect.stringContaining("Acme Corp") }),
+      expect.objectContaining({ companyName: expect.stringContaining("Vanguard Growth ETF"), assetType: "etf" }),
+    ]));
+    expect(evidence.financeClaims.securities).toHaveLength(4);
+    expect(evidence.financeClaims.securities.filter((security) => security.companyName).every((security) => security.symbol === undefined)).toBe(true);
+  });
+
+  it("dedupes a named stock that directly accompanies its symbol", () => {
+    const evidence = buildSocialVideoEvidence({ extract: { ...enriched, caption: "$AAPL Apple stock rose.", transcript: null, visual_text: null }, classification: { category: "finance", confidence: 1, reasons: [] }, runId: "overlap", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" } });
+    expect(evidence.financeClaims.securities).toHaveLength(1);
+    expect(evidence.financeClaims.securities[0].symbol).toBe("AAPL");
+  });
+
   it("allows an explicit finance pass after a technology-only pass", () => {
     const id = `intent-${Date.now()}`;
     registerPipelineRun(`https://youtu.be/${id}`, { intent: "technology" });
@@ -221,12 +239,12 @@ describe("run registration and recovery", () => {
 
   it("removes retained upload and extraction artifacts for recovered terminal and downstream runs", async () => {
     const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "recovery-cleanup-")); const stateDir = path.join(root, "state"); const mediaDir = path.join(root, "media");
-    fs.mkdirSync(stateDir); fs.mkdirSync(mediaDir);
-    process.env["RUN_STATE_DIR"] = stateDir; process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "recovery-cleanup-")); const stateDir = path.join(root, "state"); const mediaDir = path.join(root, "media"); const workRoot = path.join(root, "work");
+    fs.mkdirSync(stateDir); fs.mkdirSync(mediaDir); fs.mkdirSync(workRoot);
+    process.env["RUN_STATE_DIR"] = stateDir; process.env["MEDIA_UPLOAD_DIR"] = mediaDir; process.env["EXTRACTION_WORK_ROOT"] = workRoot;
     try {
       for (const [id, status] of [["terminal-clean", "processed"], ["downstream-clean", "downstream_pending"]] as const) {
-        const mediaPath = path.join(mediaDir, `${id}.mp4`); const work = path.join(root, `${id}-work`);
+        const mediaPath = path.join(mediaDir, `${id}.mp4`); const work = path.join(workRoot, `tech-radar-extract-${id}-saved`);
         fs.writeFileSync(mediaPath, "x"); fs.writeFileSync(`${mediaPath}.run.json`, JSON.stringify({ schemaVersion: 1, runId: id, mediaPath })); fs.mkdirSync(work); fs.writeFileSync(path.join(work, "frame.jpg"), "x");
         fs.writeFileSync(path.join(stateDir, `${id}.json`), JSON.stringify({ id, url: `https://uploads.invalid/${id}`, status, mediaPath, extractionWorkDir: work, startedAt: new Date().toISOString() }));
       }
@@ -234,8 +252,48 @@ describe("run registration and recovery", () => {
       for (const id of ["terminal-clean", "downstream-clean"]) {
         expect(fs.existsSync(path.join(mediaDir, `${id}.mp4`))).toBe(false);
         expect(fs.existsSync(path.join(mediaDir, `${id}.mp4.run.json`))).toBe(false);
-        expect(fs.existsSync(path.join(root, `${id}-work`))).toBe(false);
+        expect(fs.existsSync(path.join(workRoot, `tech-radar-extract-${id}-saved`))).toBe(false);
+        const persisted = JSON.parse(fs.readFileSync(path.join(stateDir, `${id}.json`), "utf8"));
+        expect(persisted).not.toHaveProperty("mediaPath");
+        expect(persisted).not.toHaveProperty("extractionWorkDir");
       }
+    } finally { delete process.env["RUN_STATE_DIR"]; delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["EXTRACTION_WORK_ROOT"]; fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("never deletes cleanup paths outside managed roots or through symlinks", async () => {
+    const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "recovery-tamper-")); const stateDir = path.join(root, "state"); const mediaDir = path.join(root, "media"); const workRoot = path.join(root, "work");
+    fs.mkdirSync(stateDir); fs.mkdirSync(mediaDir); fs.mkdirSync(workRoot);
+    const outsideMedia = path.join(root, "outside.mp4"); const outsideWork = path.join(root, "outside-work");
+    fs.writeFileSync(outsideMedia, "sentinel"); fs.mkdirSync(outsideWork); fs.writeFileSync(path.join(outsideWork, "sentinel"), "keep");
+    const linkedMedia = path.join(mediaDir, "linked.mp4"); fs.symlinkSync(outsideMedia, linkedMedia);
+    const linkedWork = path.join(workRoot, "tech-radar-extract-tampered-link"); fs.symlinkSync(outsideWork, linkedWork);
+    fs.writeFileSync(path.join(stateDir, "tampered-outside.json"), JSON.stringify({ id: "tampered-outside", url: "https://uploads.invalid/outside", status: "processed", mediaPath: outsideMedia, extractionWorkDir: outsideWork, startedAt: new Date().toISOString() }));
+    fs.writeFileSync(path.join(stateDir, "tampered-link.json"), JSON.stringify({ id: "tampered-link", url: "https://uploads.invalid/link", status: "processed", mediaPath: linkedMedia, extractionWorkDir: linkedWork, startedAt: new Date().toISOString() }));
+    fs.writeFileSync(path.join(stateDir, "tampered-root.json"), JSON.stringify({ id: "tampered-root", url: "https://uploads.invalid/root", status: "processed", extractionWorkDir: workRoot, startedAt: new Date().toISOString() }));
+    process.env["RUN_STATE_DIR"] = stateDir; process.env["MEDIA_UPLOAD_DIR"] = mediaDir; process.env["EXTRACTION_WORK_ROOT"] = workRoot;
+    try {
+      recoverAndEnqueueRuns({}, () => {});
+      expect(fs.readFileSync(outsideMedia, "utf8")).toBe("sentinel");
+      expect(fs.readFileSync(path.join(outsideWork, "sentinel"), "utf8")).toBe("keep");
+      expect(fs.existsSync(workRoot)).toBe(true);
+    } finally { delete process.env["RUN_STATE_DIR"]; delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["EXTRACTION_WORK_ROOT"]; fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("does not let an old terminal record delete a replacement upload with the same file id", async () => {
+    const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "reupload-recovery-")); const stateDir = path.join(root, "state"); const mediaDir = path.join(root, "media");
+    fs.mkdirSync(stateDir); fs.mkdirSync(mediaDir);
+    const mediaPath = path.join(mediaDir, "stable-file-id.mp4"); fs.writeFileSync(mediaPath, "new-upload");
+    fs.writeFileSync(path.join(stateDir, "old-run.json"), JSON.stringify({ id: "old-run", url: "https://uploads.invalid/stable-file-id", status: "processed", mediaPath, startedAt: new Date().toISOString() }));
+    fs.writeFileSync(`${mediaPath}.run.json`, JSON.stringify({ schemaVersion: 1, runId: "new-run", mediaPath, intent: "finance" }));
+    process.env["RUN_STATE_DIR"] = stateDir; process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+    const enqueued: string[] = [];
+    try {
+      recoverAndEnqueueRuns({}, (run) => enqueued.push(run.id));
+      expect(fs.readFileSync(mediaPath, "utf8")).toBe("new-upload");
+      expect(enqueued).toContain("new-run");
+      expect(JSON.parse(fs.readFileSync(path.join(stateDir, "old-run.json"), "utf8"))).not.toHaveProperty("mediaPath");
     } finally { delete process.env["RUN_STATE_DIR"]; delete process.env["MEDIA_UPLOAD_DIR"]; fs.rmSync(root, { recursive: true, force: true }); }
   });
 });

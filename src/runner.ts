@@ -22,7 +22,7 @@ import {
 import { SocialVideoEvidenceV1Schema, type SocialVideoEvidenceV1 } from "./schemas/socialVideoEvidence.js";
 import { StockBotClient, type StockBotSubmission } from "./stockbotClient.js";
 import { stockBotErrorText, type StockBotCompletionEvent } from "./stockbotCallback.js";
-import { cleanupRegisteredMedia, extractLocalMedia } from "./localMedia.js";
+import { extractLocalMedia } from "./localMedia.js";
 
 export interface Run {
   id: string;
@@ -142,6 +142,54 @@ function runStateDir(): string | undefined {
   return process.env["NODE_ENV"] === "test" ? undefined : "/tmp/tech-radar-runs";
 }
 
+function extractionWorkRoot(): string {
+  return path.resolve(process.env["EXTRACTION_WORK_ROOT"] ?? path.join(process.env["TMPDIR"] ?? "/tmp", "tech-radar-extraction"));
+}
+
+function safeRunPathPart(runId: string): string | undefined {
+  return /^[A-Za-z0-9_-]{1,200}$/.test(runId) ? runId : undefined;
+}
+
+function removeManagedExtractionWorkDir(candidate: string, runId: string): void {
+  const safeId = safeRunPathPart(runId);
+  if (!safeId) return;
+  const root = extractionWorkRoot();
+  const resolved = path.resolve(candidate);
+  if (path.dirname(resolved) !== root || !path.basename(resolved).startsWith(`tech-radar-extract-${safeId}-`)) return;
+  try {
+    const stat = fs.lstatSync(resolved);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+    if (path.dirname(fs.realpathSync(resolved)) !== fs.realpathSync(root)) return;
+    fs.rmSync(resolved, { recursive: true, force: true });
+  } catch { /* missing or untrusted path */ }
+}
+
+function removeOwnedMedia(mediaPath: string, runId: string): void {
+  const mediaRoot = path.resolve(process.env["MEDIA_UPLOAD_DIR"] ?? "/tmp/tech-radar-media");
+  const resolvedMedia = path.resolve(mediaPath);
+  const sidecarPath = `${resolvedMedia}.run.json`;
+  if (path.dirname(resolvedMedia) !== mediaRoot || path.dirname(sidecarPath) !== mediaRoot) return;
+  try {
+    const mediaStat = fs.lstatSync(resolvedMedia);
+    const sidecarStat = fs.lstatSync(sidecarPath);
+    if (!mediaStat.isFile() || mediaStat.isSymbolicLink() || !sidecarStat.isFile() || sidecarStat.isSymbolicLink()) return;
+    const realRoot = fs.realpathSync(mediaRoot);
+    if (path.dirname(fs.realpathSync(resolvedMedia)) !== realRoot || path.dirname(fs.realpathSync(sidecarPath)) !== realRoot) return;
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath, "utf8")) as { runId?: unknown; mediaPath?: unknown };
+    if (sidecar.runId !== runId || typeof sidecar.mediaPath !== "string" || path.resolve(sidecar.mediaPath) !== resolvedMedia) return;
+    fs.unlinkSync(resolvedMedia);
+    fs.unlinkSync(sidecarPath);
+  } catch { /* missing or untrusted path */ }
+}
+
+function cleanupRunArtifacts(run: Run): void {
+  if (run.mediaPath) removeOwnedMedia(run.mediaPath, run.id);
+  if (run.extractionWorkDir) removeManagedExtractionWorkDir(run.extractionWorkDir, run.id);
+  run.mediaPath = undefined;
+  run.extractionWorkDir = undefined;
+  storeRun(run);
+}
+
 const executingRuns = new Set<string>();
 
 export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}, enqueue: (run: Run, opts: RunPipelineOptions) => void = (run, options) => { void executeRegisteredPipeline(run, options).catch(() => {}); }): number {
@@ -171,17 +219,14 @@ export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}, enqueue: (r
   }
   let enqueued = 0;
   for (const run of runs.values()) {
+    if (["processed", "partial", "failed", "skipped", "needs_review", "downstream_pending"].includes(run.status)) {
+      cleanupRunArtifacts(run);
+      continue;
+    }
     if (run.extractionWorkDir) {
-      fs.rmSync(run.extractionWorkDir, { recursive: true, force: true });
+      removeManagedExtractionWorkDir(run.extractionWorkDir, run.id);
       run.extractionWorkDir = undefined;
       storeRun(run);
-    }
-    if (["processed", "partial", "failed", "skipped", "needs_review", "downstream_pending"].includes(run.status)) {
-      if (run.mediaPath) {
-        try { fs.unlinkSync(run.mediaPath); } catch { /* already removed */ }
-        try { fs.unlinkSync(`${run.mediaPath}.run.json`); } catch { /* already removed */ }
-      }
-      continue;
     }
     if (!["pending", "awaiting_media"].includes(run.status) || executingRuns.has(run.id)) continue;
     enqueued++;
@@ -385,7 +430,9 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
   };
 
   const repo = new AiMemoryRepo(repoOpts);
-  const extractionWorkDir = fs.mkdtempSync(path.join(process.env["TMPDIR"] ?? "/tmp", `tech-radar-extract-${runId}-`));
+  const workRoot = extractionWorkRoot();
+  fs.mkdirSync(workRoot, { recursive: true, mode: 0o700 });
+  const extractionWorkDir = fs.mkdtempSync(path.join(workRoot, `tech-radar-extract-${runId}-`));
   run.extractionWorkDir = extractionWorkDir;
   storeRun(run);
 
@@ -424,8 +471,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
       storeRun(run);
 
       sendTelegram(`⏭️ *Skipped* (${skipReason}):\n${url.slice(0, 80)}`);
-      if (run.mediaPath) await cleanupRegisteredMedia(run.mediaPath);
-      await fs.promises.rm(extractionWorkDir, { recursive: true, force: true });
+      cleanupRunArtifacts(run);
       releaseSlot();
       executingRuns.delete(runId);
       return { runId, findingPath: "" };
@@ -503,8 +549,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
       sendTelegram(`✅ *Tech Radar finding ready*\n\n[${findingFilename.replace(".md", "")}](${fileLink})\n\nSource: ${url.slice(0, 60)}${childNote}`);
     }
 
-    if (run.mediaPath) await cleanupRegisteredMedia(run.mediaPath);
-    await fs.promises.rm(extractionWorkDir, { recursive: true, force: true });
+    cleanupRunArtifacts(run);
     releaseSlot();
     executingRuns.delete(runId);
     return { runId, findingPath };
@@ -526,8 +571,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
 
     sendTelegram(`❌ *Tech Radar run failed*\n\n${url.slice(0, 80)}\n\nError: \`${(run.error ?? "unknown").slice(0, 200)}\``);
 
-    if (run.mediaPath) await cleanupRegisteredMedia(run.mediaPath);
-    await fs.promises.rm(extractionWorkDir, { recursive: true, force: true });
+    cleanupRunArtifacts(run);
     releaseSlot();
     executingRuns.delete(runId);
     throw err;
@@ -638,33 +682,49 @@ function extractSecurityMentions(sources: Array<{ text: string }>): Array<{
 }> {
   const text = sources.map((source) => source.text).join("\n");
   const bySymbol = new Map<string, { symbol: string; exchange?: string; companyName?: string; assetType: "stock" | "etf" | "unsupported"; confidence: number }>();
-  const matches = [
-    ...text.matchAll(/\$([A-Z][A-Z0-9.-]{0,9})\b/g),
-    ...text.matchAll(/\b(NASDAQ|NYSE|TSX|ASX|LSE)\s*:\s*([A-Z][A-Z0-9.-]{0,9})\b/g),
-  ];
-  for (const match of matches) {
-    const symbol = (match[2] ?? match[1]).toUpperCase();
-    const exchange = match[2] ? match[1].toUpperCase() : undefined;
-    const nearby = text.slice(Math.max(0, (match.index ?? 0) - 80), (match.index ?? 0) + match[0].length + 80);
-    const isEtf = /\bETF\b/i.test(nearby);
-    bySymbol.set(symbol, { symbol, exchange, assetType: isEtf ? "etf" : "stock", confidence: exchange ? 0.85 : 0.7 });
+  for (const source of sources) {
+    const matches = [
+      ...source.text.matchAll(/\$([A-Z][A-Z0-9.-]{0,9})\b/g),
+      ...source.text.matchAll(/\b(NASDAQ|NYSE|TSX|ASX|LSE)\s*:\s*([A-Z][A-Z0-9.-]{0,9})\b/g),
+    ];
+    for (const match of matches) {
+      const symbol = (match[2] ?? match[1]).toUpperCase();
+      const exchange = match[2] ? match[1].toUpperCase() : undefined;
+      bySymbol.set(symbol, { symbol, exchange, assetType: /\bETF\b/i.test(source.text) ? "etf" : "stock", confidence: exchange ? 0.85 : 0.7 });
+    }
   }
-  const company = text.match(/\b([A-Z][A-Za-z&.' -]{1,80}(?:Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|PLC))\s*\(([A-Z][A-Z0-9.-]{0,9})\)/);
-  if (company) {
+  for (const company of text.matchAll(/\b([A-Z][A-Za-z&.' -]{1,80}(?:Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|PLC))\s*\(([A-Z][A-Z0-9.-]{0,9})\)/g)) {
     const symbol = company[2];
     const current = bySymbol.get(symbol);
     bySymbol.set(symbol, { symbol, companyName: company[1].trim(), assetType: current?.assetType ?? "stock", exchange: current?.exchange, confidence: 0.9 });
   }
-  if (bySymbol.size === 0) {
-    const etf = text.match(/\b([A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,5}\s+ETF)\b/);
-    const namedStock = text.match(/\b([A-Z][A-Za-z&.'-]*(?:\s+(?:[A-Z][A-Za-z&.'-]*|Corp\.?|Corporation|Inc\.?|Ltd\.?)){0,4})\s+(?:stock|shares?)\b/);
-    const name = etf?.[1] ?? namedStock?.[1];
-    if (name && !/^(?:This|The|A|An|Company)\b/i.test(name)) return [{ companyName: name.trim(), assetType: etf ? "etf" : "stock", confidence: 0.3 }];
+  const named = new Map<string, { companyName: string; assetType: "stock" | "etf"; confidence: number }>();
+  const resolvedNames = new Set([...bySymbol.values()].flatMap((security) => security.companyName ? [normalizeSecurityName(security.companyName)] : []));
+  for (const source of sources) {
+    const mentions: Array<{ match: RegExpMatchArray; assetType: "stock" | "etf" }> = [
+      ...[...source.text.matchAll(/(?<![$A-Za-z0-9])\b([A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,5}\s+ETF)\b/g)].map((match) => ({ match, assetType: "etf" as const })),
+      ...[...source.text.matchAll(/(?<![$A-Za-z0-9])\b([A-Z][A-Za-z&.'-]*(?:\s+(?:[A-Z][A-Za-z&.'-]*|Corp\.?|Corporation|Inc\.?|Ltd\.?)){0,4})\s+(?:stock|shares?)\b/g)].map((match) => ({ match, assetType: "stock" as const })),
+    ];
+    for (const { match, assetType } of mentions) {
+      const companyName = match[1].trim();
+      const normalized = normalizeSecurityName(companyName);
+      const index = match.index ?? 0;
+      const before = source.text.slice(0, index);
+      const after = source.text.slice(index + match[0].length);
+      const adjacentSymbol = /(?:\$[A-Z][A-Z0-9.-]{0,9}|(?:NASDAQ|NYSE|TSX|ASX|LSE)\s*:\s*[A-Z][A-Z0-9.-]{0,9})\s*$/.test(before)
+        || /^\s*(?:\(\s*[A-Z][A-Z0-9.-]{0,9}\s*\)|(?:[-–—]\s*)?\$[A-Z][A-Z0-9.-]{0,9}\b|(?:NASDAQ|NYSE|TSX|ASX|LSE)\s*:\s*[A-Z][A-Z0-9.-]{0,9}\b)/.test(after);
+      if (adjacentSymbol || /^(?:This|The|A|An|Company)\b/i.test(companyName) || resolvedNames.has(normalized)) continue;
+      named.set(normalized, { companyName, assetType, confidence: 0.3 });
+    }
   }
-  if (bySymbol.size === 0 && /\b(?:stock|shares?|security|company|investment)\b/i.test(text)) {
+  if (bySymbol.size === 0 && named.size === 0 && /\b(?:stock|shares?|security|company|investment)\b/i.test(text)) {
     return [{ assetType: /\bETF\b/i.test(text) ? "etf" : "stock", confidence: 0.2 }];
   }
-  return [...bySymbol.values()];
+  return [...bySymbol.values(), ...named.values()];
+}
+
+function normalizeSecurityName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function sourceMatchesSecurity(text: string, security: { symbol?: string; exchange?: string; companyName?: string }): boolean {

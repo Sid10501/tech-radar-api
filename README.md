@@ -159,6 +159,7 @@ Copy `.env.example` to `.env`:
 | `TELEGRAM_USER_ID` | Recommended | Owner user ID; both chat and user must match when configured |
 | `TELEGRAM_WEBHOOK_SECRET` | No | Random string to verify Telegram webhook requests |
 | `MEDIA_UPLOAD_DIR` | For Telegram files | Private media directory (default `/tmp/tech-radar-media`) |
+| `EXTRACTION_WORK_ROOT` | No | Dedicated managed root for temporary extraction artifacts (default: `$TMPDIR/tech-radar-extraction`) |
 | `RUN_STATE_DIR` | Recommended | Durable accepted-run records (default `/tmp/tech-radar-runs`; mount persistent storage in production) |
 | `STOCKBOT_API_URL` | For finance | StockBot base URL |
 | `STOCKBOT_SERVICE_TOKEN` | For finance | Dedicated Radar → StockBot bearer service token |
