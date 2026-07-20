@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import os from "node:os";
-import { runPipeline, runMediaPipeline, getRun, listRuns, hydrateRunsFromInbox, recoverAndEnqueueRuns, DuplicateRunError, applyStockBotCompletion } from "./runner.js";
+import { runPipeline, runMediaPipeline, getRun, listRuns, hydrateRunsFromInbox, recoverAndEnqueueRuns, DuplicateRunError, applyStockBotCompletion, findMediaRunBySubmission } from "./runner.js";
 import { MAX_LOCAL_MEDIA_BYTES } from "./localMedia.js";
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
@@ -153,7 +153,7 @@ async function ensureAiMemoryCheckout(): Promise<void> {
   await aiMemorySync;
 }
 
-type EventReservationStore = Pick<StockBotEventDeduper, "begin" | "state" | "markApplied" | "forget">;
+type EventReservationStore = Pick<StockBotEventDeduper, "begin" | "state" | "markApplied" | "forget"> & Partial<Pick<StockBotEventDeduper, "startHeartbeat">>;
 
 export function buildServer(dependencies: { callbackEvents?: EventReservationStore; consumedUploadTokens?: EventReservationStore } = {}) {
   if (process.env["NODE_ENV"] === "production") {
@@ -163,6 +163,7 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
     if (!resolved || resolved === temporaryRoot || resolved.startsWith(`${temporaryRoot}${path.sep}`) || resolved === "/tmp" || resolved.startsWith("/tmp/")) {
       throw new Error("production RUN_STATE_DIR must be configured on persistent storage");
     }
+    if (!process.env["AUTH_TOKEN"]?.trim()) throw new Error("production AUTH_TOKEN must be configured for private owner surfaces");
   }
   const app = Fastify({ logger: true });
   app.register(multipart, { limits: { files: 1, fileSize: MAX_LOCAL_MEDIA_BYTES, fields: 10, parts: 11 } });
@@ -301,7 +302,7 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
         if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 300)) return reply.code(400).send({ error: "Idempotency-Key must be 1-300 characters" });
         const completion = runPipeline(canonicalUrl, { intent, origin: { channel: "api" }, idempotencyKey, force });
         completion.catch(() => {});
-        return reply.code(202).send({ runId: completion.runId, deduplicated: false });
+        return reply.code(202).send({ runId: completion.runId, status: getRun(completion.runId)?.status ?? "pending", deduplicated: false });
       } catch (err) {
         if (err instanceof DuplicateRunError) {
           if (err.idempotent) return reply.code(202).send({ runId: err.existingRun.id, status: err.existingRun.status, deduplicated: true });
@@ -366,6 +367,12 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
         const size = (await fs.promises.stat(mediaPath)).size;
         if (intent !== uploadClaims.intent || String(originChannel) !== uploadClaims.origin || idempotencyKey !== uploadClaims.idempotencyKey || analysisId !== uploadClaims.analysisId || size !== uploadClaims.size) throw new Error("multipart fields or size do not match upload token");
         uploadReservationId = `${uploadClaims.analysisId}:${uploadClaims.idempotencyKey}`;
+        const existing = findMediaRunBySubmission(uploadClaims.analysisId, uploadClaims.idempotencyKey);
+        if (existing) {
+          try { consumedUploadTokens.markApplied(uploadReservationId); } catch { /* durable run identity remains authoritative */ }
+          await fs.promises.unlink(mediaPath).catch(() => {});
+          return reply.code(202).send({ runId: existing.id, status: existing.status, deduplicated: true });
+        }
         if (!consumedUploadTokens.begin(uploadReservationId)) {
           await fs.promises.unlink(mediaPath).catch(() => {});
           return reply.code(409).send({ error: "upload token already consumed" });
@@ -424,6 +431,7 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
       if (callbackEvents.state(event.eventId) === "applied") return { ok: true, deduplicated: true };
       return reply.code(425).send({ error: "StockBot callback is still being applied" });
     }
+    const stopHeartbeat = callbackEvents.startHeartbeat?.(event.eventId) ?? (() => {});
     try {
       const run = await applyStockBotCompletion(event);
       if (!run) {
@@ -435,6 +443,8 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
     } catch {
       callbackEvents.forget(event.eventId);
       return reply.code(500).send({ error: "StockBot callback could not be applied" });
+    } finally {
+      stopHeartbeat();
     }
   });
 

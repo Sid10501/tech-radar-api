@@ -143,7 +143,7 @@ Copy `.env.example` to `.env`:
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
 | `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
 | `GIT_DEPLOY_KEY_B64` | Yes | Base64-encoded SSH private key with write access |
-| `AUTH_TOKEN` | Recommended | Owner browser/admin credential; accepted by `POST /runs` as a cookie or bearer for the dashboard and iOS Shortcut |
+| `AUTH_TOKEN` | Required in production | Owner browser/admin credential; accepted by `POST /runs` as a cookie or bearer for the dashboard and iOS Shortcut |
 | `STOCKBOT_DISPATCH_TOKEN` | For StockBot dispatch | Dedicated service bearer protecting `POST /runs` and service uploads; do not expose it to browsers or Shortcuts |
 | `OWNER_NAME` | No | Your name — used in agent prompts (default: `the developer`) |
 | `TARGET_PROJECTS` | No | Comma-separated list of your projects for the implementation agent |
@@ -200,7 +200,7 @@ Key variables to set (see `.env.example` for full list):
 | `ANTHROPIC_API_KEY` | Yes | Claude API |
 | `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
 | `GIT_DEPLOY_KEY_B64` | Yes | SSH deploy key (base64) |
-| `AUTH_TOKEN` | Recommended | Protects browser/admin APIs |
+| `AUTH_TOKEN` | Required in production | Protects browser/admin APIs; production startup fails when it is empty or unset |
 | `STOCKBOT_DISPATCH_TOKEN` | For StockBot dispatch | Protects `POST /runs` and service uploads |
 | `RUN_STATE_DIR` | Yes in production | Non-temporary persistent volume for run and callback state |
 | `GITHUB_TOKEN` | Recommended | GitHub API (5000 req/hr vs 60) |

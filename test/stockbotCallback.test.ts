@@ -128,4 +128,24 @@ describe("StockBot callback verification", () => {
       expect(new (StockBotEventDeduper as any)(100, statePath, 50).begin("crashed-event")).toBe(true);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it("renews a pending reservation across processes until callback application finishes", async () => {
+    vi.useFakeTimers();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "callback-heartbeat-"));
+    const statePath = path.join(dir, "events.json");
+    try {
+      const owner = new StockBotEventDeduper(100, statePath, 60);
+      const contender = new StockBotEventDeduper(100, statePath, 60);
+      expect(owner.begin("slow-event")).toBe(true);
+      const stop = owner.startHeartbeat("slow-event");
+      await vi.advanceTimersByTimeAsync(240);
+      expect(contender.begin("slow-event")).toBe(false);
+      expect(contender.state("slow-event")).toBe("pending");
+      stop();
+      owner.markApplied("slow-event");
+    } finally {
+      vi.useRealTimers();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

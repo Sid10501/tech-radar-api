@@ -129,6 +129,31 @@ export class StockBotEventDeduper {
     try { this.persist(); } catch { /* the durable per-event marker is authoritative */ }
   }
 
+  startHeartbeat(eventId: string): () => void {
+    let active = true;
+    const renew = () => {
+      if (!active || this.seen.get(eventId)?.state !== "pending") return;
+      const pending = { state: "pending" as const, at: Date.now() };
+      try {
+        if (this.persistencePath) {
+          const reservation = this.reservationPath(eventId);
+          const current = JSON.parse(fs.readFileSync(reservation, "utf8")) as { eventId?: string; state?: string };
+          if (current.eventId !== eventId || current.state !== "pending") return;
+          this.atomicWrite(reservation, JSON.stringify({ eventId, ...pending }));
+        }
+        this.seen.set(eventId, pending);
+        try { this.persist(); } catch { /* the per-event lease remains authoritative */ }
+      } catch { /* retry on the next heartbeat; callback processing remains authoritative */ }
+    };
+    renew();
+    const interval = setInterval(renew, Math.max(10, Math.floor(this.pendingTtlMs / 3)));
+    interval.unref?.();
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }
+
   has(eventId: string): boolean { return this.seen.has(eventId); }
   record(eventId: string): void { if (!this.begin(eventId)) throw new Error("event already recorded"); this.markApplied(eventId); }
   accept(eventId: string): boolean { if (!this.begin(eventId)) return false; this.markApplied(eventId); return true; }

@@ -3,10 +3,12 @@ import {
   buildSocialVideoEvidence,
   applyStockBotCompletion,
   hydrateRunsFromInbox,
+  findMediaRunBySubmission,
   listRuns,
   recoverAndEnqueueRuns,
   registerAwaitingMediaRun,
   registerPipelineRun,
+  runPipeline,
   mergeRunStatus,
   routeEnrichedExtract,
   stockBotCompletionNotification,
@@ -195,6 +197,17 @@ describe("social-video runner routing", () => {
     expect(retry.status).toBe("pending");
   });
 
+  it("lets force replace a partial run only when finance handoff never completed", () => {
+    const retryableUrl = `https://youtu.be/partial-no-finance-${Date.now()}`;
+    const retryable = registerPipelineRun(retryableUrl, { intent: "finance" });
+    retryable.status = "partial"; retryable.financeHandoffCompleted = false;
+    expect(registerPipelineRun(retryableUrl, { intent: "finance", force: true }).id).not.toBe(retryable.id);
+    const successfulUrl = `https://youtu.be/partial-with-finance-${Date.now()}`;
+    const successful = registerPipelineRun(successfulUrl, { intent: "finance" });
+    successful.status = "partial"; successful.financeHandoffCompleted = true; successful.downstreamAnalysisId = "analysis-ok";
+    expect(() => registerPipelineRun(successfulUrl, { intent: "finance", force: true })).toThrow(/already partial/i);
+  });
+
   it("keeps terminal canonical requests idempotent without explicit force", () => {
     const url = `https://youtu.be/terminal-idempotent-${Date.now()}`;
     const first = registerPipelineRun(url, { intent: "finance", idempotencyKey: "stable-key" });
@@ -267,6 +280,28 @@ describe("run registration and recovery", () => {
       const applied = await applyStockBotCompletion({ eventId: "lazy-event", runId: durable.id, analysisId: "lazy-analysis", status: "completed", detailUrl: null, results: [], error: null });
       expect(applied).toMatchObject({ id: durable.id, status: "processed" });
     } finally { delete process.env["RUN_STATE_DIR"]; fs.rmSync(stateDir, { recursive: true, force: true }); }
+  });
+
+  it("finds a signed upload replay identity by scanning durable run state", async () => {
+    const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "upload-identity-")); process.env["RUN_STATE_DIR"] = stateDir;
+    const durable = { id: `upload-identity-${Date.now()}`, url: "https://uploads.invalid/replay", status: "awaiting_media", downstreamAnalysisId: "analysis-replay", evidenceIdempotencyKey: "idem-replay", startedAt: new Date().toISOString() };
+    fs.writeFileSync(path.join(stateDir, `${durable.id}.json`), JSON.stringify(durable));
+    try { expect(findMediaRunBySubmission("analysis-replay", "idem-replay")).toMatchObject({ id: durable.id }); }
+    finally { delete process.env["RUN_STATE_DIR"]; fs.rmSync(stateDir, { recursive: true, force: true }); }
+  });
+
+  it("clears execution ownership when setup fails before the checkout mutex is acquired", async () => {
+    const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "setup-cleanup-")); const stateDir = path.join(root, "state"); const invalidWorkRoot = path.join(root, "not-a-directory"); fs.mkdirSync(stateDir); fs.writeFileSync(invalidWorkRoot, "x");
+    process.env["RUN_STATE_DIR"] = stateDir; process.env["EXTRACTION_WORK_ROOT"] = invalidWorkRoot;
+    const pipeline = runPipeline(`https://youtu.be/setup-failure-${Date.now()}`, { intent: "technology" });
+    await expect(pipeline).rejects.toThrow();
+    const persisted = JSON.parse(fs.readFileSync(path.join(stateDir, `${pipeline.runId}.json`), "utf8"));
+    fs.writeFileSync(path.join(stateDir, `${pipeline.runId}.json`), JSON.stringify({ ...persisted, status: "pending" }));
+    const enqueued: string[] = [];
+    try { recoverAndEnqueueRuns({}, (run) => enqueued.push(run.id)); expect(enqueued).toContain(pipeline.runId); }
+    finally { delete process.env["RUN_STATE_DIR"]; delete process.env["EXTRACTION_WORK_ROOT"]; fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   it("rolls back a sidecar when durable awaiting-media registration fails", async () => {

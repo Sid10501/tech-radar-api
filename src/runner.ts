@@ -273,6 +273,26 @@ export function getRun(runId: string): Run | undefined {
   }
 }
 
+export function findMediaRunBySubmission(analysisId: string, idempotencyKey: string): Run | undefined {
+  const matches = (run: Run) => run.downstreamAnalysisId === analysisId
+    && run.evidenceIdempotencyKey === idempotencyKey;
+  const inMemory = [...runs.values()].reverse().find(matches);
+  if (inMemory) return inMemory;
+
+  const stateDir = runStateDir();
+  if (!stateDir || !fs.existsSync(stateDir)) return undefined;
+  for (const name of fs.readdirSync(stateDir).filter((entry) => entry.endsWith(".json"))) {
+    try {
+      const recovered = JSON.parse(fs.readFileSync(path.join(stateDir, name), "utf8")) as Run;
+      if (!recovered || typeof recovered.id !== "string" || typeof recovered.url !== "string" || typeof recovered.status !== "string") continue;
+      if (!matches(recovered)) continue;
+      runs.set(recovered.id, recovered);
+      return recovered;
+    } catch { /* ignore unrelated or corrupt state files */ }
+  }
+  return undefined;
+}
+
 export function listRuns(): Run[] {
   return Array.from(runs.values()).reverse().slice(0, 50);
 }
@@ -305,7 +325,8 @@ export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}):
   const requestedIntent = opts.intent ?? "technology";
   const candidates = [...runs.values()].reverse().filter((candidate) => canonicalizeIfPossible(candidate.url) === canonicalUrl
     && (candidate.intent ?? "technology") === requestedIntent);
-  const retryableTerminal = (candidate: Run) => ["failed", "skipped", "needs_review"].includes(candidate.status);
+  const retryableTerminal = (candidate: Run) => ["failed", "skipped", "needs_review"].includes(candidate.status)
+    || (candidate.status === "partial" && !candidate.financeHandoffCompleted && !candidate.downstreamAnalysisId);
   if (opts.idempotencyKey) {
     const idempotent = candidates.find((candidate) => candidate.submissionIdempotencyKey === opts.idempotencyKey);
     if (idempotent && !(opts.force && retryableTerminal(idempotent))) throw new DuplicateRunError(idempotent, true);
@@ -413,9 +434,11 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
 
   if (executingRuns.has(runId)) throw new Error(`run ${runId} is already executing`);
   executingRuns.add(runId);
-
-  run.status = "running";
-  storeRun(run);
+  let repo: AiMemoryRepo | undefined;
+  let releaseMutation: (() => void) | undefined;
+  try {
+    run.status = "running";
+    storeRun(run);
 
   const remoteUrl = opts.remoteUrl ?? process.env["AI_MEMORY_REPO"] ?? "";
   const localDir = opts.localDir ?? `/tmp/ai-memory-${runId}`;
@@ -435,15 +458,14 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     sshKeyPath,
   };
 
-  const repo = new AiMemoryRepo(repoOpts);
+  repo = new AiMemoryRepo(repoOpts);
   const workRoot = extractionWorkRoot();
   fs.mkdirSync(workRoot, { recursive: true, mode: 0o700 });
   const extractionWorkDir = fs.mkdtempSync(path.join(workRoot, `tech-radar-extract-${runId}-`));
   run.extractionWorkDir = extractionWorkDir;
   storeRun(run);
 
-  const releaseMutation = await acquireAiMemoryRepoMutation();
-  try {
+  releaseMutation = await acquireAiMemoryRepoMutation();
     await repo.init();
     await repo.pullLatest();
 
@@ -479,9 +501,6 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
       storeRun(run);
 
       sendTelegram(`⏭️ *Skipped* (${skipReason}):\n${url.slice(0, 80)}`);
-      cleanupRunArtifacts(run);
-      releaseMutation();
-      executingRuns.delete(runId);
       return { runId, findingPath: "" };
     }
 
@@ -489,6 +508,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     let findingPath = "";
     let childCount = 0;
     let findingFilename = "";
+    const activeRepo = repo;
 
     const routed = await routeEnrichedExtract(enrichedExtract, run.intent ?? "technology", {
       classifier: opts.classifier,
@@ -499,10 +519,10 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
           : localDir;
         const implementationResult = await runImplementation(sharedExtract, researchResult, implementationMemoryDir);
         const composed = composeFinding({ extract: sharedExtract, research: researchResult, implementation: implementationResult });
-        const write = await repo.writeFindingForSource({ sourceUrl: url, filename: composed.filename, body: composed.body, date: today });
-        await repo.updateIndex({ date: today, title: sharedExtract.title ?? write.filename, finding: write.filename, targetProject: implementationResult.target_project });
+        const write = await activeRepo.writeFindingForSource({ sourceUrl: url, filename: composed.filename, body: composed.body, date: today });
+        await activeRepo.updateIndex({ date: today, title: sharedExtract.title ?? write.filename, finding: write.filename, targetProject: implementationResult.target_project });
         for (const row of childArtifactInboxRows(sharedExtract, { date: today, parentFinding: write.filename })) {
-          if (await repo.updateInboxIfMissing(row)) childCount++;
+          if (await activeRepo.updateInboxIfMissing(row)) childCount++;
         }
         findingPath = `tech-radar/findings/${write.filename}`;
         findingFilename = write.filename;
@@ -588,9 +608,6 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
       sendTelegram(`✅ *Tech Radar finding ready*\n\n[${findingFilename.replace(".md", "")}](${fileLink})\n\nSource: ${url.slice(0, 60)}${childNote}`);
     }
 
-    cleanupRunArtifacts(run);
-    releaseMutation();
-    executingRuns.delete(runId);
     return { runId, findingPath };
 
   } catch (err) {
@@ -602,18 +619,22 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     // Best-effort: try to mark inbox as failed
     try {
       const today = new Date().toISOString().slice(0, 10);
-      await repo.updateInbox({ url, status: "failed", finding: null, date: today, error: run.error });
-      await repo.commitAndPush(`tech-radar: failed ${url.slice(0, 60)}`);
+      await repo?.updateInbox({ url, status: "failed", finding: null, date: today, error: run.error });
+      await repo?.commitAndPush(`tech-radar: failed ${url.slice(0, 60)}`);
     } catch {
       // ignore secondary errors
     }
 
     sendTelegram(`❌ *Tech Radar run failed*\n\n${url.slice(0, 80)}\n\nError: \`${(run.error ?? "unknown").slice(0, 200)}\``);
 
-    cleanupRunArtifacts(run);
-    releaseMutation();
-    executingRuns.delete(runId);
     throw err;
+  } finally {
+    try {
+      cleanupRunArtifacts(run);
+    } finally {
+      releaseMutation?.();
+      executingRuns.delete(runId);
+    }
   }
 }
 
