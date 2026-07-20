@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getFindingDetail, getPublicFindingDetail, listFindings, listPublicFindings, parseFindingMarkdown, toPublicFinding } from "../src/findings.js";
+import {
+  getFindingDetail,
+  getPublicFindingDetail,
+  listClusteredFindings,
+  listFindings,
+  listPublicFindings,
+  parseFindingMarkdown,
+  toPublicFinding,
+} from "../src/findings.js";
 
 const SAMPLE_FINDING = `# Ponytail agent rubric
 
@@ -1065,7 +1073,7 @@ describe("listFindings()", () => {
     expect(findings[1].saved).toBe("2026-05-01");
   });
 
-  it("annotates duplicate findings by normalized source URL", () => {
+  it("clusters duplicate findings by normalized source URL around one canonical finding", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duplicate-source-findings-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
     fs.mkdirSync(findingsDir, { recursive: true });
@@ -1084,7 +1092,48 @@ describe("listFindings()", () => {
 
     expect(findings.map((finding) => finding.diagnostics.duplicateGroup?.count)).toEqual([2, 2]);
     expect(findings[0].diagnostics.duplicateGroup?.reason).toBe("same source URL");
+    expect(findings.map((finding) => finding.diagnostics.duplicateGroup?.canonicalFindingId)).toEqual(["a.md", "a.md"]);
+    expect(listClusteredFindings(dir).map((finding) => finding.id)).toEqual(["a.md"]);
+    expect(listPublicFindings(dir).map((finding) => finding.id)).toEqual(["a.md"]);
     expect(listPublicFindings(dir)[0].diagnostics.duplicateGroup?.count).toBe(2);
+  });
+
+  it("canonicalizes known Instagram permalink variants by media identity", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "instagram-variant-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/AbC123/?igsh=one"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Same Instagram media")
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://instagram.com/p/AbC123/?utm_source=two"),
+    );
+
+    const findings = listFindings(dir);
+
+    expect(findings.map((finding) => finding.diagnostics.duplicateGroup?.canonicalFindingId)).toEqual(["a.md", "a.md"]);
+    expect(listPublicFindings(dir)).toHaveLength(1);
+  });
+
+  it.each([
+    ["YouTube", "https://youtu.be/Video123?si=share", "https://www.youtube.com/shorts/Video123?feature=share"],
+    ["TikTok", "https://www.tiktok.com/@creator/video/1234567890?is_from_webapp=1", "https://m.tiktok.com/v/1234567890.html?share_app_id=1"],
+    ["X", "https://x.com/creator/status/12345?s=20", "https://mobile.twitter.com/another/status/12345?ref_src=twsrc"],
+  ])("canonicalizes known %s permalink variants by post identity", (_platform, firstUrl, secondUrl) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "social-variant-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(path.join(findingsDir, "a.md"), SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", firstUrl));
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING.replace("Ponytail agent rubric", "Same social post").replace("https://www.instagram.com/reel/DZmyMFoqCRm/", secondUrl),
+    );
+
+    expect(listPublicFindings(dir).map((finding) => finding.id)).toEqual(["a.md"]);
   });
 
   it("does not collapse source URLs that differ by identity-bearing query parameters", () => {
@@ -1105,6 +1154,25 @@ describe("listFindings()", () => {
     const findings = listFindings(dir);
 
     expect(findings.map((finding) => finding.diagnostics.duplicateGroup)).toEqual([undefined, undefined]);
+  });
+
+  it("does not cluster the same tool title from distinct source posts", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "distinct-source-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/first-post/"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/second-post/"),
+    );
+
+    const findings = listFindings(dir);
+
+    expect(findings.map((finding) => finding.diagnostics.duplicateGroup)).toEqual([undefined, undefined]);
+    expect(listPublicFindings(dir)).toHaveLength(2);
   });
 
   it("annotates duplicate findings by normalized title, creator, and platform when source URL is missing", () => {

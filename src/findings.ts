@@ -54,6 +54,7 @@ export interface FindingDiagnostics {
 export interface FindingDuplicateGroup {
   id: string;
   count: number;
+  canonicalFindingId: string;
   reason: "same source URL" | "same title and creator";
 }
 
@@ -637,6 +638,7 @@ function publicDiagnostics(diagnostics: FindingDiagnostics): FindingDiagnostics 
     ? {
         id: diagnostics.duplicateGroup.id,
         count: diagnostics.duplicateGroup.count,
+        canonicalFindingId: diagnostics.duplicateGroup.canonicalFindingId,
         reason: diagnostics.duplicateGroup.reason,
       }
     : undefined;
@@ -842,13 +844,14 @@ function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] 
 
   for (const [key, group] of sourceGroups.entries()) {
     if (group.length < 2) continue;
-    const duplicateGroup = duplicateGroupFor(key, group.length, "same source URL");
+    const duplicateGroup = duplicateGroupFor(key, group, "same source URL");
     for (const finding of group) duplicateByFilename.set(finding.filename, duplicateGroup);
   }
 
   const fallbackGroups = new Map<string, FindingSummary[]>();
   for (const finding of findings) {
     if (duplicateByFilename.has(finding.filename)) continue;
+    if (normalizeDuplicateUrl(finding.source.url)) continue;
     const key = fallbackDuplicateGroupKey(finding);
     if (!key) continue;
     fallbackGroups.set(key, [...(fallbackGroups.get(key) ?? []), finding]);
@@ -856,7 +859,7 @@ function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] 
 
   for (const [key, group] of fallbackGroups.entries()) {
     if (group.length < 2) continue;
-    const duplicateGroup = duplicateGroupFor(key, group.length, "same title and creator");
+    const duplicateGroup = duplicateGroupFor(key, group, "same title and creator");
     for (const finding of group) duplicateByFilename.set(finding.filename, duplicateGroup);
   }
 
@@ -877,10 +880,12 @@ function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] 
   });
 }
 
-function duplicateGroupFor(key: string, count: number, reason: FindingDuplicateGroup["reason"]): FindingDuplicateGroup {
+function duplicateGroupFor(key: string, group: FindingSummary[], reason: FindingDuplicateGroup["reason"]): FindingDuplicateGroup {
+  const canonicalFindingId = [...group].sort((a, b) => a.filename.localeCompare(b.filename))[0].filename;
   return {
     id: stableDuplicateId(key),
-    count,
+    count: group.length,
+    canonicalFindingId,
     reason,
   };
 }
@@ -898,14 +903,46 @@ function normalizeDuplicateUrl(rawUrl: string | null): string | null {
   try {
     const parsed = new URL(rawUrl);
     parsed.hash = "";
-    parsed.hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    parsed.hostname = parsed.hostname.replace(/^(?:www|m|mobile)\./, "").toLowerCase();
     parsed.pathname = parsed.pathname.replace(/\/+$/, "");
     stripTrackingParams(parsed.searchParams);
+    const socialKey = canonicalSocialSourceKey(parsed);
+    if (socialKey) return socialKey;
     parsed.searchParams.sort();
     return parsed.toString().replace(/\/$/, "");
   } catch {
     return normalizeDuplicateText(rawUrl) || null;
   }
+}
+
+function canonicalSocialSourceKey(url: URL): string | null {
+  const host = url.hostname;
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (host === "instagram.com" && /^(?:p|reel|reels|tv)$/i.test(segments[0] ?? "") && segments[1]) {
+    return `instagram:${segments[1]}`;
+  }
+
+  if (host === "youtu.be" && segments[0]) return `youtube:${segments[0]}`;
+  if ((host === "youtube.com" || host === "music.youtube.com") && url.searchParams.get("v")) {
+    return `youtube:${url.searchParams.get("v")}`;
+  }
+  if ((host === "youtube.com" || host === "music.youtube.com") && /^(?:shorts|embed|live)$/i.test(segments[0] ?? "") && segments[1]) {
+    return `youtube:${segments[1]}`;
+  }
+
+  if (host === "tiktok.com") {
+    const videoIndex = segments.findIndex((segment) => segment.toLowerCase() === "video");
+    if (videoIndex >= 0 && segments[videoIndex + 1]) return `tiktok:${segments[videoIndex + 1]}`;
+    const legacyVideo = segments[0]?.toLowerCase() === "v" ? segments[1]?.replace(/\.html$/i, "") : null;
+    if (legacyVideo) return `tiktok:${legacyVideo}`;
+  }
+
+  if ((host === "x.com" || host === "twitter.com") && segments[1]?.toLowerCase() === "status" && segments[2]) {
+    return `x:${segments[2]}`;
+  }
+
+  return null;
 }
 
 function stripTrackingParams(params: URLSearchParams): void {
@@ -945,7 +982,14 @@ function stableDuplicateId(value: string): string {
 
 export function listPublicFindings(aiMemoryDir = getAiMemoryDir()): PublicFindingSummary[] {
   const appliedMap = loadAppliedMap(aiMemoryDir);
-  return listFindings(aiMemoryDir).map((finding) => toPublicFinding(finding, appliedMap));
+  return listClusteredFindings(aiMemoryDir).map((finding) => toPublicFinding(finding, appliedMap));
+}
+
+export function listClusteredFindings(aiMemoryDir = getAiMemoryDir()): FindingSummary[] {
+  return listFindings(aiMemoryDir).filter((finding) => {
+    const duplicateGroup = finding.diagnostics.duplicateGroup;
+    return !duplicateGroup || duplicateGroup.canonicalFindingId === finding.id;
+  });
 }
 
 export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir()): FindingDetail | null {
