@@ -99,6 +99,18 @@ describe("StockBot callback verification", () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
+  it("treats a durable per-event applied marker as authoritative if the summary cache write fails", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "callback-summary-fail-"));
+    const statePath = path.join(dir, "summary");
+    try {
+      const deduper = new StockBotEventDeduper(100, statePath);
+      expect(deduper.begin("summary-event")).toBe(true);
+      fs.unlinkSync(statePath); fs.mkdirSync(statePath);
+      expect(() => deduper.markApplied("summary-event")).not.toThrow();
+      expect(deduper.state("summary-event")).toBe("applied");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it("reclaims a stale pending reservation after a crashed process", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "callback-stale-"));
     const statePath = path.join(dir, "events.json");

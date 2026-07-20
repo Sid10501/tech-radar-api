@@ -5,7 +5,9 @@ import {
   hydrateRunsFromInbox,
   listRuns,
   recoverAndEnqueueRuns,
+  registerAwaitingMediaRun,
   registerPipelineRun,
+  mergeRunStatus,
   routeEnrichedExtract,
   stockBotCompletionNotification,
   stockBotTerminalRunStatus,
@@ -173,7 +175,7 @@ describe("social-video runner routing", () => {
     expect(evidence.source).toMatchObject({ platform: "upload", title: "earnings-call.mp4", url: "https://internal.invalid/tech-radar-upload/upload-run", canonicalUrl: "https://internal.invalid/tech-radar-upload/upload-run" });
   });
 
-  it("deduplicates the same canonical intent and submission idempotency key even when forced", () => {
+  it("deduplicates active canonical intent and submission idempotency key even when forced", () => {
     const url = `https://youtu.be/request-idem-${Date.now()}`;
     const first = registerPipelineRun(url, { intent: "finance", idempotencyKey: "request-key" });
     try { registerPipelineRun(url, { intent: "finance", idempotencyKey: "request-key", force: true }); } catch (error: any) {
@@ -184,16 +186,20 @@ describe("social-video runner routing", () => {
     throw new Error("expected idempotent duplicate");
   });
 
-  it("does not let force bypass an exact finance duplicate after a terminal failure", () => {
+  it("lets force create a fresh exact finance run after a terminal failure", () => {
     const url = `https://youtu.be/terminal-finance-${Date.now()}`;
     const first = registerPipelineRun(url, { intent: "finance" });
     first.status = "failed";
-    try { registerPipelineRun(url, { intent: "finance", force: true }); } catch (error: any) {
-      expect(error.existingRun.id).toBe(first.id);
-      expect(error.idempotent).toBe(true);
-      return;
-    }
-    throw new Error("expected terminal finance duplicate");
+    const retry = registerPipelineRun(url, { intent: "finance", force: true });
+    expect(retry.id).not.toBe(first.id);
+    expect(retry.status).toBe("pending");
+  });
+
+  it("keeps terminal canonical requests idempotent without explicit force", () => {
+    const url = `https://youtu.be/terminal-idempotent-${Date.now()}`;
+    const first = registerPipelineRun(url, { intent: "finance", idempotencyKey: "stable-key" });
+    first.status = "needs_review";
+    expect(() => registerPipelineRun(url, { intent: "finance", idempotencyKey: "stable-key" })).toThrow(/already needs_review/i);
   });
 
   it("allows an explicit finance pass after a technology-only pass", () => {
@@ -223,9 +229,55 @@ describe("social-video runner routing", () => {
     registerPipelineRun(url, { intent: "auto" });
     expect(() => registerPipelineRun(url, { intent: "finance" })).toThrow(/already pending/i);
   });
+
+  it("does not let force bypass an active or successful auto run that covers finance", () => {
+    const activeUrl = `https://youtu.be/auto-active-force-${Date.now()}`;
+    registerPipelineRun(activeUrl, { intent: "auto" });
+    expect(() => registerPipelineRun(activeUrl, { intent: "finance", force: true })).toThrow(/already pending/i);
+    const successUrl = `https://youtu.be/auto-success-force-${Date.now()}`;
+    const success = registerPipelineRun(successUrl, { intent: "auto" });
+    success.status = "processed"; success.processedBranches = ["finance"];
+    expect(() => registerPipelineRun(successUrl, { intent: "finance", force: true })).toThrow(/already processed/i);
+  });
 });
 
 describe("run registration and recovery", () => {
+  it("never lets a downstream-pending pipeline write overwrite a fast terminal callback", () => {
+    expect(mergeRunStatus("processed", "downstream_pending")).toBe("processed");
+    expect(mergeRunStatus("needs_review", "downstream_pending")).toBe("needs_review");
+    expect(mergeRunStatus("running", "downstream_pending")).toBe("downstream_pending");
+  });
+  it("retains more than 50 durable runs for exact callback lookup while listing only recent history", async () => {
+    const created = Array.from({ length: 55 }, (_, index) => registerPipelineRun(`https://youtu.be/backlog-${Date.now()}-${index}`, { intent: "finance" }));
+    const oldest = created[0];
+    oldest.downstreamAnalysisId = "backlog-analysis";
+    oldest.status = "downstream_pending";
+    const applied = await applyStockBotCompletion({ eventId: "backlog-event", runId: oldest.id, analysisId: "backlog-analysis", status: "completed", detailUrl: null, results: [], error: null });
+    expect(applied?.status).toBe("processed");
+    expect(listRuns()).toHaveLength(50);
+  });
+
+  it("lazy-loads an exact run from durable state by run id", async () => {
+    const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "lazy-run-"));
+    process.env["RUN_STATE_DIR"] = stateDir;
+    const durable = { id: `lazy-${Date.now()}`, url: "https://youtu.be/lazy", status: "downstream_pending", downstreamAnalysisId: "lazy-analysis", startedAt: new Date().toISOString() };
+    fs.writeFileSync(path.join(stateDir, `${durable.id}.json`), JSON.stringify(durable));
+    try {
+      const applied = await applyStockBotCompletion({ eventId: "lazy-event", runId: durable.id, analysisId: "lazy-analysis", status: "completed", detailUrl: null, results: [], error: null });
+      expect(applied).toMatchObject({ id: durable.id, status: "processed" });
+    } finally { delete process.env["RUN_STATE_DIR"]; fs.rmSync(stateDir, { recursive: true, force: true }); }
+  });
+
+  it("rolls back a sidecar when durable awaiting-media registration fails", async () => {
+    const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "register-rollback-")); const mediaPath = path.join(root, "clip.mp4"); const invalidStateDir = path.join(root, "not-a-dir");
+    fs.writeFileSync(mediaPath, "video"); fs.writeFileSync(invalidStateDir, "file"); process.env["RUN_STATE_DIR"] = invalidStateDir;
+    try {
+      expect(() => registerAwaitingMediaRun({ fileUniqueId: `rollback-${Date.now()}`, mediaPath, intent: "finance", origin: { channel: "dashboard" } })).toThrow();
+      expect(fs.existsSync(`${mediaPath}.run.json`)).toBe(false);
+    } finally { delete process.env["RUN_STATE_DIR"]; fs.rmSync(root, { recursive: true, force: true }); }
+  });
   it("maps every StockBot terminal callback to a terminal run state", async () => {
     for (const [status, expected] of [["partial", "partial"], ["canceled", "skipped"], ["failed", "failed"]] as const) {
       const run = registerPipelineRun(`https://youtu.be/callback-${status}-${Date.now()}`, { intent: "finance" });

@@ -30,6 +30,7 @@ vi.mock("../src/runner.js", () => ({
 
 vi.mock("../src/git.js", () => ({
   setupSshKey: gitMocks.setupSshKey,
+  withAiMemoryRepoMutation: vi.fn(async (operation: () => Promise<unknown>) => operation()),
   AiMemoryRepo: vi.fn().mockImplementation(() => ({
     init: gitMocks.init,
     pullLatest: gitMocks.pullLatest,
@@ -132,6 +133,38 @@ describe("server routes", () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
     expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("does not treat an unconfigured owner token as authorization for POST /runs", async () => {
+    const res = await app.inject({ method: "POST", url: "/runs", payload: { url: "https://youtu.be/no-owner-token", intent: "finance" } });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rolls back a signed upload reservation and media when run registration fails", async () => {
+    const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "upload-register-fail-"));
+    const reservation = { begin: vi.fn(() => true), markApplied: vi.fn(), forget: vi.fn(), state: vi.fn() };
+    process.env["MEDIA_UPLOAD_DIR"] = mediaDir; process.env["STOCKBOT_UPLOAD_SECRET"] = "upload-fail-secret"; process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+    vi.mocked(runnerMock.runMediaPipeline).mockImplementationOnce(() => { throw new Error("registration failed"); });
+    const isolated = buildServer({ consumedUploadTokens: reservation as any }); await isolated.ready();
+    const boundary = "----register-fail"; const claims = { analysisId: "fail-analysis", idempotencyKey: "fail-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 1 };
+    const payload = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="x.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\nfail-key\r\n--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\nfail-analysis\r\n--${boundary}--\r\n`);
+    try {
+      const res = await isolated.inject({ method: "POST", url: "/runs/upload", headers: { origin: "https://stocks.example", "x-stockbot-upload-token": uploadToken(claims, "upload-fail-secret"), "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
+      expect(res.statusCode).toBe(400); expect(reservation.forget).toHaveBeenCalledWith("fail-analysis:fail-key"); expect(fs.readdirSync(mediaDir)).toEqual([]);
+    } finally { await isolated.close(); delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; fs.rmSync(mediaDir, { recursive: true, force: true }); }
+  });
+
+  it("keeps a durably registered signed upload accepted when markApplied persistence fails", async () => {
+    const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "upload-apply-fail-"));
+    const reservation = { begin: vi.fn(() => true), markApplied: vi.fn(() => { throw new Error("reservation disk failed"); }), forget: vi.fn(), state: vi.fn() };
+    process.env["MEDIA_UPLOAD_DIR"] = mediaDir; process.env["STOCKBOT_UPLOAD_SECRET"] = "upload-apply-secret"; process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+    const isolated = buildServer({ consumedUploadTokens: reservation as any }); await isolated.ready();
+    const boundary = "----apply-fail"; const claims = { analysisId: "apply-analysis", idempotencyKey: "apply-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 1 };
+    const payload = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="x.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\napply-key\r\n--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\napply-analysis\r\n--${boundary}--\r\n`);
+    try {
+      const res = await isolated.inject({ method: "POST", url: "/runs/upload", headers: { origin: "https://stocks.example", "x-stockbot-upload-token": uploadToken(claims, "upload-apply-secret"), "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
+      expect(res.statusCode).toBe(202); expect(res.json().runId).toBe("mock-upload-run"); expect(reservation.markApplied).toHaveBeenCalledWith("apply-analysis:apply-key"); expect(reservation.forget).not.toHaveBeenCalled(); expect(fs.readdirSync(mediaDir)).toHaveLength(1);
+    } finally { await isolated.close(); delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; fs.rmSync(mediaDir, { recursive: true, force: true }); }
   });
 
   it("GET /api/public/findings returns public findings without auth", async () => {
@@ -517,6 +550,19 @@ describe("server routes", () => {
       expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(1);
     });
 
+    it("returns retryable non-2xx while the same callback event is still pending", async () => {
+      const pendingEvent = { ...event, eventId: `pending-${Date.now()}` };
+      const raw = JSON.stringify(pendingEvent);
+      let release!: () => void;
+      vi.mocked(runnerMock.applyStockBotCompletion).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ id: "finance-run", status: "processed" } as never); }));
+      const firstPromise = app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      await vi.waitFor(() => expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(1));
+      const overlap = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      expect(overlap.statusCode).toBe(425);
+      release();
+      expect((await firstPromise).statusCode).toBe(200);
+    });
+
     it("retries the same callback event when applying it fails", async () => {
       const retryEvent = { ...event, eventId: `retry-${Date.now()}` };
       const raw = JSON.stringify(retryEvent);
@@ -645,9 +691,24 @@ describe("server routes", () => {
       expect(res.json()).toEqual({ runId: "existing-id", status: "processed", deduplicated: true });
     });
 
-    it("POST /runs does not accept the general service bearer as the dispatch token", async () => {
+    it("POST /runs accepts the owner bearer for iOS Shortcut submissions", async () => {
       const res = await app.inject({ method: "POST", url: "/runs", headers: { authorization: `Bearer ${TOKEN}` }, payload: { url: "https://youtu.be/auth-boundary", intent: "finance" } });
-      expect(res.statusCode).toBe(401);
+      expect(res.statusCode).toBe(202);
+    });
+
+    it("POST /runs accepts the owner dashboard cookie but not a query token", async () => {
+      const cookie = await app.inject({ method: "POST", url: "/runs", headers: { cookie: `auth_token=${TOKEN}` }, payload: { url: "https://youtu.be/dashboard-cookie", intent: "finance" } });
+      const query = await app.inject({ method: "POST", url: `/runs?token=${TOKEN}`, payload: { url: "https://youtu.be/query-token", intent: "finance" } });
+      expect(cookie.statusCode).toBe(202);
+      expect(query.statusCode).toBe(401);
+    });
+
+    it("POST /runs accepts a strict force boolean and forwards it", async () => {
+      const accepted = await app.inject({ method: "POST", url: "/runs", headers: { authorization: `Bearer ${TOKEN}` }, payload: { url: "https://youtu.be/force-retry", intent: "finance", force: true } });
+      const rejected = await app.inject({ method: "POST", url: "/runs", headers: { authorization: `Bearer ${TOKEN}` }, payload: { url: "https://youtu.be/force-bad", intent: "finance", force: "yes" } });
+      expect(accepted.statusCode).toBe(202);
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.youtube.com/watch?v=force-retry", expect.objectContaining({ force: true }));
+      expect(rejected.statusCode).toBe(400);
     });
 
     it("POST /runs/upload streams a bounded authenticated file and returns its run id", async () => {

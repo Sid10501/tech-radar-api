@@ -108,10 +108,25 @@ export class StockBotEventDeduper {
     return true;
   }
 
+  state(eventId: string): "pending" | "applied" | undefined {
+    const memory = this.seen.get(eventId);
+    if (memory && !(memory.state === "pending" && this.pendingExpired(memory))) return memory.state;
+    if (!this.persistencePath) return undefined;
+    try {
+      const value = JSON.parse(fs.readFileSync(this.reservationPath(eventId), "utf8")) as { state?: "pending" | "applied"; at?: number };
+      if (!value.state || typeof value.at !== "number") return undefined;
+      if (value.state === "pending" && this.pendingExpired({ state: value.state, at: value.at })) return undefined;
+      return value.state;
+    } catch {
+      return undefined;
+    }
+  }
+
   markApplied(eventId: string): void {
-    this.seen.set(eventId, { state: "applied", at: Date.now() });
-    if (this.persistencePath) this.atomicWrite(this.reservationPath(eventId), JSON.stringify({ eventId, state: "applied", at: Date.now() }));
-    this.persist();
+    const applied = { state: "applied" as const, at: Date.now() };
+    if (this.persistencePath) this.atomicWrite(this.reservationPath(eventId), JSON.stringify({ eventId, ...applied }));
+    this.seen.set(eventId, applied);
+    try { this.persist(); } catch { /* the durable per-event marker is authoritative */ }
   }
 
   has(eventId: string): boolean { return this.seen.has(eventId); }

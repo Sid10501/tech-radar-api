@@ -143,8 +143,8 @@ Copy `.env.example` to `.env`:
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
 | `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
 | `GIT_DEPLOY_KEY_B64` | Yes | Base64-encoded SSH private key with write access |
-| `AUTH_TOKEN` | Recommended | Browser/admin bearer token; not accepted by StockBot dispatch routes |
-| `STOCKBOT_DISPATCH_TOKEN` | For StockBot dispatch | Dedicated bearer token protecting `POST /runs` and service uploads |
+| `AUTH_TOKEN` | Recommended | Owner browser/admin credential; accepted by `POST /runs` as a cookie or bearer for the dashboard and iOS Shortcut |
+| `STOCKBOT_DISPATCH_TOKEN` | For StockBot dispatch | Dedicated service bearer protecting `POST /runs` and service uploads; do not expose it to browsers or Shortcuts |
 | `OWNER_NAME` | No | Your name — used in agent prompts (default: `the developer`) |
 | `TARGET_PROJECTS` | No | Comma-separated list of your projects for the implementation agent |
 | `AI_MEMORY_REPO_URL` | No | Public HTTPS URL of your ai-memory repo (for finding links in the UI) |
@@ -257,13 +257,13 @@ Returns `{ ok: true }`.
 Web UI — submit URLs, view run history.
 
 ### `POST /runs`
-Requires `Authorization: Bearer <STOCKBOT_DISPATCH_TOKEN>`. The broader browser/admin token, cookies, and query-string tokens are not accepted. Callers should send a stable `Idempotency-Key` header.
+Accepts either `Authorization: Bearer <STOCKBOT_DISPATCH_TOKEN>` for StockBot service dispatch, or the owner `AUTH_TOKEN` as an HttpOnly `auth_token` cookie / bearer for the dashboard and iOS Shortcut. Query-string tokens are never accepted. Keep `STOCKBOT_DISPATCH_TOKEN` server-side. Callers should send a stable `Idempotency-Key` header.
 
 ```json
 { "url": "https://www.instagram.com/reel/...", "intent": "auto" }
 ```
 
-Returns `202 { "runId": "...", "deduplicated": false }`. Repeating the same canonical source and exact intent returns the existing run as `202` with `deduplicated: true`, including when `force` is requested. Technology and finance remain distinct explicit passes.
+Returns `202 { "runId": "...", "deduplicated": false }`. Repeating the same canonical source and exact intent returns the active or successful run as `202` with `deduplicated: true`. A strict JSON boolean `force: true` creates a new run only after a failed, canceled/skipped, or needs-review terminal result. Technology and finance remain distinct explicit passes.
 
 `intent` is optional and must be `auto`, `technology`, or `finance`. The URL is canonicalized and deduplicated before queueing. Finance and mixed runs send the bounded, raw-text `SocialVideoEvidenceV1` contract to StockBot at `POST /api/internal/video-evidence`; untrusted-content wrappers are added only at LLM prompt boundaries. Tech Radar does not calculate finance verdicts.
 
@@ -273,7 +273,7 @@ Streams one multipart file field named `file` (maximum 20 MB) plus `intent`, `or
 
 ### `POST /api/internal/stockbot/completion`
 
-StockBot completion callback. It requires `X-StockBot-Timestamp` and `X-StockBot-Signature`; the signature is lowercase hex HMAC-SHA256 over `timestamp + "." + rawBody`. The body must identify both `runId` and `analysisId`, and terminal status may include `needs_review`. The route uses an atomic `pending`/`applied` event reservation under persistent `RUN_STATE_DIR`, rolls the reservation back when application fails, updates the exact correlated run through the durable INBOX repository, and sends the Telegram result/deep link before marking the event applied.
+StockBot completion callback. It requires `X-StockBot-Timestamp` and `X-StockBot-Signature`; the signature is lowercase hex HMAC-SHA256 over `timestamp + "." + rawBody`. The body must identify both `runId` and `analysisId`, and terminal status may include `needs_review`. The route uses an atomic `pending`/`applied` event reservation under persistent `RUN_STATE_DIR`, returns retryable HTTP 425 for an overlapping pending delivery, rolls the reservation back when application fails, updates the exact correlated run through the durable INBOX repository, and sends the Telegram result/deep link before marking the event applied.
 
 ### `GET /runs`
 Returns last 50 runs.

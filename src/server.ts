@@ -20,7 +20,7 @@ import {
 import { auditFindings, auditPublicFindings, enrichmentProfile, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
 import { listReleaseNotes } from "./releaseNotes.js";
 import { buildRssXml } from "./rss.js";
-import { AiMemoryRepo, setupSshKey } from "./git.js";
+import { AiMemoryRepo, setupSshKey, withAiMemoryRepoMutation } from "./git.js";
 import { canonicalizeSocialUrl, type SocialVideoIntent } from "./socialVideoRouting.js";
 import { StockBotEventDeduper, verifyStockBotCallback } from "./stockbotCallback.js";
 import { verifyUploadToken, type UploadClaims } from "./uploadAuthorization.js";
@@ -88,6 +88,14 @@ function isAuthorized(request: any): boolean {
   return bearer === authToken || cookie === authToken;
 }
 
+function isOwnerAuthorized(request: any): boolean {
+  const authToken = process.env["AUTH_TOKEN"];
+  if (!authToken) return false;
+  const bearer = request.headers["authorization"]?.replace(/^Bearer\s+/i, "");
+  const cookie = getCookieValue(request.headers["cookie"], "auth_token");
+  return bearer === authToken || cookie === authToken;
+}
+
 function authMiddleware(request: any, reply: any, done: () => void): void {
   if (isAuthorized(request)) {
     done();
@@ -123,7 +131,7 @@ async function ensureAiMemoryCheckout(): Promise<void> {
   if (!remoteUrl) return;
   if (Date.now() - aiMemorySyncedAt < AI_MEMORY_SYNC_TTL_MS) return;
 
-  aiMemorySync ??= (async () => {
+  aiMemorySync ??= withAiMemoryRepoMutation(async () => {
     let sshKeyPath: string | undefined;
     const deployKeyB64 = process.env["GIT_DEPLOY_KEY_B64"];
     if (deployKeyB64) {
@@ -138,14 +146,16 @@ async function ensureAiMemoryCheckout(): Promise<void> {
     await repo.init();
     await repo.pullLatest();
     aiMemorySyncedAt = Date.now();
-  })().finally(() => {
+  }).finally(() => {
     aiMemorySync = null;
   });
 
   await aiMemorySync;
 }
 
-export function buildServer() {
+type EventReservationStore = Pick<StockBotEventDeduper, "begin" | "state" | "markApplied" | "forget">;
+
+export function buildServer(dependencies: { callbackEvents?: EventReservationStore; consumedUploadTokens?: EventReservationStore } = {}) {
   if (process.env["NODE_ENV"] === "production") {
     const configured = process.env["RUN_STATE_DIR"];
     const resolved = configured ? path.resolve(configured) : "";
@@ -168,11 +178,11 @@ export function buildServer() {
       fs.copyFileSync(legacy, callbackStatePath);
     }
   }
-  const callbackEvents = new StockBotEventDeduper(
+  const callbackEvents = dependencies.callbackEvents ?? new StockBotEventDeduper(
     1_000,
     callbackStatePath,
   );
-  const consumedUploadTokens = new StockBotEventDeduper(10_000, callbackStatePath ? path.join(path.dirname(callbackStatePath), "stockbot-upload-tokens.json") : undefined);
+  const consumedUploadTokens = dependencies.consumedUploadTokens ?? new StockBotEventDeduper(10_000, callbackStatePath ? path.join(path.dirname(callbackStatePath), "stockbot-upload-tokens.json") : undefined);
   const uploadAuthMiddleware = (request: any, reply: any, done: () => void): void => {
     const bearer = request.headers["authorization"]?.replace(/^Bearer\s+/i, "");
     if (process.env["STOCKBOT_DISPATCH_TOKEN"] && bearer === process.env["STOCKBOT_DISPATCH_TOKEN"]) return done();
@@ -192,6 +202,7 @@ export function buildServer() {
   const dispatchAuthMiddleware = (request: any, reply: any, done: () => void): void => {
     const bearer = request.headers["authorization"]?.replace(/^Bearer\s+/i, "");
     if (process.env["STOCKBOT_DISPATCH_TOKEN"] && bearer === process.env["STOCKBOT_DISPATCH_TOKEN"]) return done();
+    if (isOwnerAuthorized(request)) return done();
     reply.code(401).send({ error: "Unauthorized" });
   };
 
@@ -267,17 +278,18 @@ export function buildServer() {
     return DASHBOARD_HTML(runs);
   });
 
-  app.post<{ Body: { url: string; intent?: SocialVideoIntent } }>(
+  app.post<{ Body: { url: string; intent?: SocialVideoIntent; force?: boolean } }>(
     "/runs",
     { preHandler: dispatchAuthMiddleware },
     async (request, reply) => {
-      const { url, intent = "auto" } = request.body ?? {};
+      const { url, intent = "auto", force = false } = request.body ?? {};
       if (!url || typeof url !== "string") {
         return reply.code(400).send({ error: "url is required" });
       }
       if (!["auto", "technology", "finance"].includes(intent)) {
         return reply.code(400).send({ error: "intent must be auto, technology, or finance" });
       }
+      if (typeof force !== "boolean") return reply.code(400).send({ error: "force must be a boolean" });
       let canonicalUrl: string;
       try {
         canonicalUrl = canonicalizeSocialUrl(url);
@@ -287,7 +299,7 @@ export function buildServer() {
       try {
         const idempotencyKey = request.headers["idempotency-key"];
         if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 300)) return reply.code(400).send({ error: "Idempotency-Key must be 1-300 characters" });
-        const completion = runPipeline(canonicalUrl, { intent, origin: { channel: "api" }, idempotencyKey });
+        const completion = runPipeline(canonicalUrl, { intent, origin: { channel: "api" }, idempotencyKey, force });
         completion.catch(() => {});
         return reply.code(202).send({ runId: completion.runId, deduplicated: false });
       } catch (err) {
@@ -360,8 +372,14 @@ export function buildServer() {
         }
       }
       const completion = runMediaPipeline({ fileUniqueId: randomUUID(), mediaPath, intent, origin: { channel: originChannel }, mimeType, originalName: filename, idempotencyKey, analysisId });
-      if (uploadReservationId) consumedUploadTokens.markApplied(uploadReservationId);
       completion.catch(() => {});
+      if (uploadReservationId) {
+        try {
+          consumedUploadTokens.markApplied(uploadReservationId);
+        } catch {
+          return reply.code(202).send({ runId: completion.runId, status: "pending" });
+        }
+      }
       return reply.code(202).send({ runId: completion.runId, status: "pending" });
     } catch (error) {
       if (uploadReservationId) consumedUploadTokens.forget(uploadReservationId);
@@ -402,7 +420,10 @@ export function buildServer() {
     } catch {
       return reply.code(401).send({ error: "Invalid StockBot callback" });
     }
-    if (!callbackEvents.begin(event.eventId)) return { ok: true, deduplicated: true };
+    if (!callbackEvents.begin(event.eventId)) {
+      if (callbackEvents.state(event.eventId) === "applied") return { ok: true, deduplicated: true };
+      return reply.code(425).send({ error: "StockBot callback is still being applied" });
+    }
     try {
       const run = await applyStockBotCompletion(event);
       if (!run) {

@@ -2,6 +2,26 @@ import { simpleGit, SimpleGit } from "simple-git";
 import fs from "node:fs";
 import path from "node:path";
 
+let mutationTail = Promise.resolve();
+
+export async function acquireAiMemoryRepoMutation(): Promise<() => void> {
+  const previous = mutationTail;
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  mutationTail = previous.then(() => current, () => current);
+  await previous;
+  return release;
+}
+
+export async function withAiMemoryRepoMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const release = await acquireAiMemoryRepoMutation();
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
 export interface AiMemoryRepoOptions {
   remoteUrl: string;
   localDir: string;

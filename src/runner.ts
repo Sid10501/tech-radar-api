@@ -6,7 +6,7 @@ import { extract } from "./extract.js";
 import { runResearch } from "./agents/research.js";
 import { runImplementation } from "./agents/implementation.js";
 import { composeFinding } from "./compose.js";
-import { AiMemoryRepo, setupSshKey } from "./git.js";
+import { AiMemoryRepo, acquireAiMemoryRepoMutation, setupSshKey } from "./git.js";
 import type { AiMemoryRepoOptions } from "./git.js";
 import { enrichLinksFromExtract } from "./linkEnrichment.js";
 import { extractTextWithVision } from "./visionOcr.js";
@@ -83,7 +83,7 @@ function sendTelegram(text: string): void {
   req.end();
 }
 
-// In-memory run store (last 50)
+// Complete working set; history endpoints apply their own presentation cap.
 const runs = new Map<string, Run>();
 
 export function hydrateRunsFromInbox(inboxPath: string): void {
@@ -127,10 +127,6 @@ export function hydrateRunsFromInbox(inboxPath: string): void {
 
 function storeRun(run: Run): void {
   runs.set(run.id, run);
-  if (runs.size > 50) {
-    const oldest = runs.keys().next().value!;
-    runs.delete(oldest);
-  }
   const stateDir = runStateDir();
   if (stateDir) {
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -261,33 +257,24 @@ async function withVisionFallback(extractResult: ExtractResult): Promise<Extract
   };
 }
 
-// Single-slot queue: only one pipeline run at a time (git pushes must serialize)
-let running = false;
-const queue: Array<() => void> = [];
-
-async function acquireSlot(): Promise<void> {
-  if (!running) {
-    running = true;
-    return;
-  }
-  return new Promise((resolve) => queue.push(resolve));
-}
-
-function releaseSlot(): void {
-  const next = queue.shift();
-  if (next) {
-    next();
-  } else {
-    running = false;
-  }
-}
-
 export function getRun(runId: string): Run | undefined {
-  return runs.get(runId);
+  const inMemory = runs.get(runId);
+  if (inMemory) return inMemory;
+  const stateDir = runStateDir();
+  const safeId = safeRunPathPart(runId);
+  if (!stateDir || !safeId) return undefined;
+  try {
+    const recovered = JSON.parse(fs.readFileSync(path.join(stateDir, `${safeId}.json`), "utf8")) as Run;
+    if (recovered.id !== runId || typeof recovered.url !== "string" || typeof recovered.status !== "string") return undefined;
+    runs.set(recovered.id, recovered);
+    return recovered;
+  } catch {
+    return undefined;
+  }
 }
 
 export function listRuns(): Run[] {
-  return Array.from(runs.values()).reverse();
+  return Array.from(runs.values()).reverse().slice(0, 50);
 }
 
 export function findRunByUrl(url: string): Run | undefined {
@@ -315,24 +302,20 @@ export class DuplicateRunError extends Error {
 
 export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}): Run {
   const canonicalUrl = canonicalizeSocialUrl(url);
+  const requestedIntent = opts.intent ?? "technology";
+  const candidates = [...runs.values()].reverse().filter((candidate) => canonicalizeIfPossible(candidate.url) === canonicalUrl
+    && (candidate.intent ?? "technology") === requestedIntent);
+  const retryableTerminal = (candidate: Run) => ["failed", "skipped", "needs_review"].includes(candidate.status);
   if (opts.idempotencyKey) {
-    const idempotent = [...runs.values()].find((candidate) => canonicalizeIfPossible(candidate.url) === canonicalUrl
-      && (candidate.intent ?? "technology") === (opts.intent ?? "technology")
-      && candidate.submissionIdempotencyKey === opts.idempotencyKey);
-    if (idempotent) throw new DuplicateRunError(idempotent, true);
+    const idempotent = candidates.find((candidate) => candidate.submissionIdempotencyKey === opts.idempotencyKey);
+    if (idempotent && !(opts.force && retryableTerminal(idempotent))) throw new DuplicateRunError(idempotent, true);
   }
-  const exactDuplicate = [...runs.values()].find((candidate) => canonicalizeIfPossible(candidate.url) === canonicalUrl
-    && (candidate.intent ?? "technology") === (opts.intent ?? "technology"));
-  if (exactDuplicate) throw new DuplicateRunError(exactDuplicate, true);
-  if (!opts.force) {
-    const requestedIntent = opts.intent ?? "technology";
-    const existing = [...runs.values()].find((candidate) =>
-      canonicalizeIfPossible(candidate.url) === canonicalUrl
-      && runCoversIntent(candidate, requestedIntent)
-      && ["pending", "running", "awaiting_media", "downstream_pending", "processed", "partial"].includes(candidate.status));
-    if (existing && ["pending", "running", "awaiting_media", "downstream_pending", "processed"].includes(existing.status)) {
-      throw new DuplicateRunError(existing);
-    }
+  const exactDuplicate = candidates[0];
+  if (exactDuplicate && !(opts.force && retryableTerminal(exactDuplicate))) throw new DuplicateRunError(exactDuplicate, true);
+  const covered = [...runs.values()].reverse().find((candidate) =>
+    canonicalizeIfPossible(candidate.url) === canonicalUrl && runCoversIntent(candidate, requestedIntent));
+  if (covered && !(opts.force && retryableTerminal(covered))) {
+    throw new DuplicateRunError(covered, true);
   }
   const run: Run = {
     id: randomUUID(),
@@ -381,20 +364,29 @@ export function registerAwaitingMediaRun(input: {
     downstreamAnalysisId: input.analysisId,
     startedAt: new Date().toISOString(),
   };
-  fs.writeFileSync(`${input.mediaPath}.run.json`, JSON.stringify({
-    schemaVersion: 1,
-    runId: run.id,
-    status: run.status,
-    intent: run.intent,
-    origin: run.origin,
-    mediaPath: run.mediaPath,
-    mimeType: input.mimeType,
-    originalName: input.originalName,
-    idempotencyKey: input.idempotencyKey,
-    analysisId: input.analysisId,
-    startedAt: run.startedAt,
-  }), { encoding: "utf8", mode: 0o600, flag: "wx" });
-  storeRun(run);
+  const sidecarPath = `${input.mediaPath}.run.json`;
+  try {
+    fs.writeFileSync(sidecarPath, JSON.stringify({
+      schemaVersion: 1,
+      runId: run.id,
+      status: run.status,
+      intent: run.intent,
+      origin: run.origin,
+      mediaPath: run.mediaPath,
+      mimeType: input.mimeType,
+      originalName: input.originalName,
+      idempotencyKey: input.idempotencyKey,
+      analysisId: input.analysisId,
+      startedAt: run.startedAt,
+    }), { encoding: "utf8", mode: 0o600, flag: "wx" });
+    storeRun(run);
+  } catch (error) {
+    runs.delete(run.id);
+    fs.rmSync(sidecarPath, { force: true });
+    const stateDir = runStateDir();
+    if (stateDir) fs.rmSync(path.join(stateDir, `${run.id}.json`), { force: true });
+    throw error;
+  }
   return run;
 }
 
@@ -422,7 +414,6 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
   if (executingRuns.has(runId)) throw new Error(`run ${runId} is already executing`);
   executingRuns.add(runId);
 
-  await acquireSlot();
   run.status = "running";
   storeRun(run);
 
@@ -451,6 +442,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
   run.extractionWorkDir = extractionWorkDir;
   storeRun(run);
 
+  const releaseMutation = await acquireAiMemoryRepoMutation();
   try {
     await repo.init();
     await repo.pullLatest();
@@ -488,7 +480,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
 
       sendTelegram(`⏭️ *Skipped* (${skipReason}):\n${url.slice(0, 80)}`);
       cleanupRunArtifacts(run);
-      releaseSlot();
+      releaseMutation();
       executingRuns.delete(runId);
       return { runId, findingPath: "" };
     }
@@ -565,7 +557,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const noRoutedBranch = ["other", "needs_review"].includes(routed.classification.category);
     const hasFinance = Boolean(routed.finance);
     const terminalFinanceStatus = routed.finance ? stockBotTerminalRunStatus(routed.finance, run.id) : undefined;
-    run.status = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : "processed");
+    const pipelineStatus = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : "processed");
+    run.status = mergeRunStatus(run.status, pipelineStatus);
     run.error = branchErrors.length ? branchErrors.join("; ").slice(0, 1_000) : undefined;
     run.finishedAt = run.status === "downstream_pending" ? undefined : new Date().toISOString();
     if (terminalFinanceStatus === "failed") run.error = "StockBot analysis failed";
@@ -596,12 +589,12 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     }
 
     cleanupRunArtifacts(run);
-    releaseSlot();
+    releaseMutation();
     executingRuns.delete(runId);
     return { runId, findingPath };
 
   } catch (err) {
-    run.status = "failed";
+    run.status = mergeRunStatus(run.status, "failed");
     run.error = err instanceof Error ? err.message : String(err);
     run.finishedAt = new Date().toISOString();
     storeRun(run);
@@ -618,7 +611,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     sendTelegram(`❌ *Tech Radar run failed*\n\n${url.slice(0, 80)}\n\nError: \`${(run.error ?? "unknown").slice(0, 200)}\``);
 
     cleanupRunArtifacts(run);
-    releaseSlot();
+    releaseMutation();
     executingRuns.delete(runId);
     throw err;
   }
@@ -633,6 +626,12 @@ export function stockBotTerminalRunStatus(submission: Pick<StockBotSubmission, "
   if (submission.status === "canceled") return "skipped";
   if (submission.status === "needs_review") return "needs_review";
   return undefined;
+}
+
+export function mergeRunStatus(current: Run["status"], proposed: Run["status"]): Run["status"] {
+  const terminal = new Set<Run["status"]>(["processed", "partial", "needs_review", "failed", "skipped"]);
+  if (terminal.has(current) && ["pending", "running", "awaiting_media", "downstream_pending"].includes(proposed)) return current;
+  return proposed;
 }
 
 async function extractAndEnrich(extractResult: ExtractResult): Promise<ExtractResult> {
@@ -842,32 +841,29 @@ function externalIdFromUrl(url: string): string | undefined {
 }
 
 export async function applyStockBotCompletion(event: StockBotCompletionEvent): Promise<Run | undefined> {
-  const run = runs.get(event.runId);
-  if (!run || run.downstreamAnalysisId !== event.analysisId) return undefined;
-  run.downstreamStatus = event.status;
-  run.downstreamDetailUrl = event.detailUrl ?? detailUrlFor(event.analysisId);
-  if (event.status === "completed") {
-    run.status = "processed";
+  const releaseMutation = await acquireAiMemoryRepoMutation();
+  try {
+    const run = getRun(event.runId);
+    if (!run || run.downstreamAnalysisId !== event.analysisId) return undefined;
+    run.downstreamStatus = event.status;
+    run.downstreamDetailUrl = event.detailUrl ?? detailUrlFor(event.analysisId);
+    if (event.status === "completed") run.status = "processed";
+    else if (event.status === "partial") run.status = "partial";
+    else if (event.status === "canceled") {
+      run.status = "skipped";
+      run.error = stockBotErrorText(event.error) ?? "StockBot analysis canceled";
+    } else if (event.status === "failed") {
+      run.status = "failed";
+      run.error = stockBotErrorText(event.error) ?? "StockBot analysis failed";
+    } else if (event.status === "needs_review") run.status = "needs_review";
     run.finishedAt = new Date().toISOString();
-  } else if (event.status === "partial") {
-    run.status = "partial";
-    run.finishedAt = new Date().toISOString();
-  } else if (event.status === "canceled") {
-    run.status = "skipped";
-    run.error = stockBotErrorText(event.error) ?? "StockBot analysis canceled";
-    run.finishedAt = new Date().toISOString();
-  } else if (event.status === "failed") {
-    run.status = "failed";
-    run.error = stockBotErrorText(event.error) ?? "StockBot analysis failed";
-    run.finishedAt = new Date().toISOString();
-  } else if (event.status === "needs_review") {
-    run.status = "needs_review";
-    run.finishedAt = new Date().toISOString();
+    storeRun(run);
+    await persistCallbackState(run);
+    sendTelegram(stockBotCompletionNotification(event, run.downstreamDetailUrl));
+    return run;
+  } finally {
+    releaseMutation();
   }
-  storeRun(run);
-  await persistCallbackState(run);
-  sendTelegram(stockBotCompletionNotification(event, run.downstreamDetailUrl));
-  return run;
 }
 
 export function stockBotCompletionNotification(event: Pick<StockBotCompletionEvent, "status" | "results" | "error">, detailUrl?: string): string {

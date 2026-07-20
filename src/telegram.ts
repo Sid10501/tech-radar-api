@@ -53,7 +53,7 @@ type MediaDownloader = (fileId: string, token: string, maxBytes: number) => Prom
 
 interface TelegramDependencies {
   send?: (chatId: number, text: string) => void;
-  runPipeline?: (url: string, options: { intent: SocialVideoIntent; origin: SocialVideoOrigin }) => PipelinePromise | (Promise<unknown> & { runId?: string });
+  runPipeline?: (url: string, options: { intent: SocialVideoIntent; origin: SocialVideoOrigin; force?: boolean }) => PipelinePromise | (Promise<unknown> & { runId?: string });
   persistFile?: (input: MediaInput) => Promise<string>;
   registerAwaitingMedia?: (input: Parameters<typeof runMediaPipeline>[0]) => PipelinePromise | Run;
 }
@@ -108,9 +108,18 @@ export async function handleTelegramUpdate(update: Record<string, unknown>, deps
     const retryUrl = intake.text.replace(/^\/retry(?:@\w+)?/i, "").trim();
     if (!retryUrl) return send(chatId, "Usage: `/retry <url>`");
     send(chatId, `⏳ Force-retrying:\n${retryUrl}`);
-    runPipeline(retryUrl, { force: true, intent: "auto", origin: telegramOrigin(message, chatId) }).catch((error: unknown) => {
+    try {
+      const start = deps.runPipeline ?? runPipeline;
+      start(retryUrl, { force: true, intent: "auto", origin: telegramOrigin(message, chatId) }).catch((error: unknown) => {
+        send(chatId, `❌ Retry failed: \`${error instanceof Error ? error.message.slice(0, 200) : String(error)}\``);
+      });
+    } catch (error) {
+      if (error instanceof DuplicateRunError) {
+        send(chatId, `⚠️ Already ${error.existingRun.status}:\n${retryUrl}`);
+        return;
+      }
       send(chatId, `❌ Retry failed: \`${error instanceof Error ? error.message.slice(0, 200) : String(error)}\``);
-    });
+    }
     return;
   }
 

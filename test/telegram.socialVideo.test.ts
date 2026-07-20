@@ -7,6 +7,7 @@ import {
   parseTelegramIntake,
   persistTelegramMedia,
 } from "../src/telegram.js";
+import { DuplicateRunError } from "../src/runner.js";
 
 describe("Telegram social-video intake", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -44,6 +45,15 @@ describe("Telegram social-video intake", () => {
       origin: { channel: "telegram", chatId: "100", messageId: "77" },
     });
     expect(send).toHaveBeenCalledWith(100, expect.stringMatching(/Queued.*run-1/i));
+  });
+
+  it("reports a synchronous duplicate outcome for /retry without rejecting the update", async () => {
+    vi.stubEnv("TELEGRAM_CHAT_ID", "100");
+    const send = vi.fn();
+    const existing = { id: "existing", url: "https://youtu.be/abc", status: "processed", startedAt: new Date().toISOString() } as any;
+    const run = vi.fn(() => { throw new DuplicateRunError(existing, true); });
+    await expect(handleTelegramUpdate({ message: { chat: { id: 100 }, text: "/retry https://youtu.be/abc" } }, { send, runPipeline: run as any })).resolves.toBeUndefined();
+    expect(send).toHaveBeenCalledWith(100, expect.stringMatching(/already processed/i));
   });
 
   it("persists an owner file with a safe name before acknowledging awaiting-media", async () => {
