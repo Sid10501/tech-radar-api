@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { StockBotEventDeduper, verifyStockBotCallback } from "../src/stockbotCallback.js";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const payload = {
@@ -45,10 +46,32 @@ describe("StockBot callback verification", () => {
     expect(() => verifyStockBotCallback({ rawBody, timestamp: oldTimestamp, signature: signed(rawBody, oldTimestamp), secret: "callback-secret", nowMs })).toThrow(/replay/i);
   });
 
+  it("enforces exact terminal status, claim grade, and opinion enums", () => {
+    const nowMs = Date.now();
+    const timestamp = String(Math.floor(nowMs / 1000));
+    for (const mutation of [
+      { status: "queued" },
+      { results: [{ ...payload.results[0], claimGrade: "excellent" }] },
+      { results: [{ ...payload.results[0], opinion: "moon" }] },
+    ]) {
+      const rawBody = JSON.stringify({ ...payload, ...mutation });
+      expect(() => verifyStockBotCallback({ rawBody, timestamp, signature: signed(rawBody, timestamp), secret: "callback-secret", nowMs })).toThrow();
+    }
+  });
+
   it("deduplicates event IDs for exactly-once callback side effects", () => {
     const deduper = new StockBotEventDeduper();
     expect(deduper.accept("event-1")).toBe(true);
     expect(deduper.accept("event-1")).toBe(false);
     expect(deduper.accept("event-2")).toBe(true);
+  });
+
+  it("preserves callback event dedupe across a RUN_STATE_DIR-style restart", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "callback-state-"));
+    const statePath = path.join(dir, "stockbot-callback-events.json");
+    try {
+      expect(new StockBotEventDeduper(100, statePath).accept("restart-event")).toBe(true);
+      expect(new StockBotEventDeduper(100, statePath).accept("restart-event")).toBe(false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

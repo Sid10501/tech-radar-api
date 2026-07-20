@@ -165,6 +165,8 @@ Copy `.env.example` to `.env`:
 | `STOCKBOT_CALLBACK_SECRET` | For finance | Shared HMAC-SHA256 callback secret |
 | `STOCKBOT_DETAIL_BASE_URL` | No | StockBot result deep-link base |
 | `STOCKBOT_TIMEOUT_MS` | No | Handoff timeout (default 10000 ms; maximum 30000 ms) |
+| `STOCKBOT_UPLOAD_SECRET` | For direct browser upload | HMAC secret for StockBot-issued upload tickets |
+| `STOCKBOT_UPLOAD_ALLOWED_ORIGINS` | For direct browser upload | Exact comma-separated StockBot dashboard origins; wildcard and credentials are not allowed |
 | `ROUTER_MODEL` | No | Model used only when deterministic routing is inconclusive |
 | `PUBLIC_FEED_ALLOWED_ORIGINS` | No | Comma-separated exact origins granted CORS access to `/api/public/*` (no wildcard; empty = no CORS) |
 | `PUBLIC_SITE_RADAR_BASE` | No | Base URL for RSS item links, e.g. `https://your-site.dev/radar` (default: the request origin) |
@@ -232,7 +234,7 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 
 Bot commands: send or caption any public URL, `/stock <url>` for finance, `/tech <url>` for technology, `/status`, `/list`, `/help`. Owner-supplied videos are limited to 20 MB. Public URL media is limited to 30 minutes, and finance evidence contains at most ten securities.
 
-Uploaded media is owner-authorized, saved under a generated filename with mode `0600`, and never forwarded to StockBot. The current extractor accepts public URLs only, so uploads remain in the typed `awaiting_media` state. This boundary is `DONE_WITH_CONCERNS`: a future local-file adapter must accept an already validated file, retain all byte/duration/time/filename controls, and delete the file after extraction. Do not weaken this with cookies, browser sessions, proxies, or private-content bypasses.
+Uploaded media is owner-authorized, saved under a generated filename with mode `0600`, processed locally by Whisper/OCR without a network or `file://` bypass, and never forwarded to StockBot. Media, frames, OCR outputs, and sidecars are deleted after enrichment and handoff on success or failure. The StockBot owner dashboard is the upload UI; Tech Radar intentionally does not add a second dashboard upload surface.
 
 ---
 
@@ -261,9 +263,13 @@ Returns `202 { "runId": "..." }`.
 
 `intent` is optional and must be `auto`, `technology`, or `finance`. The URL is canonicalized and deduplicated before queueing. Finance and mixed runs send the bounded `SocialVideoEvidenceV1` contract to StockBot at `POST /api/internal/video-evidence`; Tech Radar does not calculate finance verdicts.
 
+### `POST /runs/upload`
+
+Streams one multipart file field named `file` (maximum 20 MB) plus `intent`, `origin`, `idempotencyKey`, and `analysisId`. Server-to-server callers use the normal bearer token. Direct StockBot dashboard uploads use `X-StockBot-Upload-Token`: base64url compact sorted JSON claims plus a hex HMAC-SHA256 over the encoded segment. Tickets expire within ten minutes, bind every multipart field and the exact streamed byte count, and are consumed once. CORS applies only to this endpoint and only to exact `STOCKBOT_UPLOAD_ALLOWED_ORIGINS` values.
+
 ### `POST /api/internal/stockbot/completion`
 
-StockBot completion callback. It requires `X-StockBot-Timestamp` and `X-StockBot-Signature`; the signature is lowercase hex HMAC-SHA256 over `timestamp + "." + rawBody`. The route enforces a five-minute replay window and event-ID dedupe before updating the run and sending the Telegram result/deep link.
+StockBot completion callback. It requires `X-StockBot-Timestamp` and `X-StockBot-Signature`; the signature is lowercase hex HMAC-SHA256 over `timestamp + "." + rawBody`. The route enforces a five-minute replay window and event-ID dedupe under `RUN_STATE_DIR` before updating the run and sending the Telegram result/deep link.
 
 ### `GET /runs`
 Returns last 50 runs.

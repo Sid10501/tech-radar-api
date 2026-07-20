@@ -42,6 +42,8 @@ export interface Run {
   financeHandoffCompleted?: boolean;
   mediaPath?: string;
   evidenceIdempotencyKey?: string;
+  classification?: SocialVideoClassification;
+  processedBranches?: Array<"technology" | "finance">;
 }
 
 export interface SocialVideoOrigin {
@@ -97,7 +99,7 @@ export function hydrateRunsFromInbox(inboxPath: string): void {
     const persistedRunId = finding?.match(/(?:^|;)run:([A-Za-z0-9-]+)/)?.[1];
     const downstreamAnalysisId = finding?.match(/(?:^|;)stockbot:([^;|]+)/)?.[1];
     const persistedFinding = finding?.split(";").find((part) => part.endsWith(".md"));
-    const run: Run = {
+    const inboxRun: Run = {
       id: persistedRunId ?? randomUUID(),
       url,
       status: recoveredStatus,
@@ -108,7 +110,13 @@ export function hydrateRunsFromInbox(inboxPath: string): void {
       downstreamStatus: downstreamAnalysisId ? recoveredStatus : undefined,
       financeHandoffCompleted: Boolean(downstreamAnalysisId),
     };
-    storeRun(run);
+    let richer: Run | undefined;
+    const stateDir = runStateDir();
+    if (persistedRunId && stateDir) {
+      try { richer = JSON.parse(fs.readFileSync(path.join(stateDir, `${persistedRunId}.json`), "utf8")) as Run; } catch { /* no durable record */ }
+    }
+    const existing = runs.get(inboxRun.id);
+    storeRun({ ...inboxRun, ...richer, ...existing, error: existing?.error ?? richer?.error ?? inboxRun.error });
   }
 }
 
@@ -135,12 +143,13 @@ function runStateDir(): string | undefined {
 
 const executingRuns = new Set<string>();
 
-export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}): number {
+export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}, enqueue: (run: Run, opts: RunPipelineOptions) => void = (run, options) => { void executeRegisteredPipeline(run, options).catch(() => {}); }): number {
   const stateDir = runStateDir();
   if (stateDir && fs.existsSync(stateDir)) {
     for (const name of fs.readdirSync(stateDir).filter((entry) => entry.endsWith(".json"))) {
       try {
         const recovered = JSON.parse(fs.readFileSync(path.join(stateDir, name), "utf8")) as Run;
+        if (!recovered || typeof recovered.id !== "string" || typeof recovered.url !== "string" || typeof recovered.status !== "string") continue;
         if (recovered.status === "running") recovered.status = "pending";
         storeRun(recovered);
       } catch { /* ignore corrupt isolated state records */ }
@@ -152,9 +161,10 @@ export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}): number {
       try {
         const sidecar = JSON.parse(fs.readFileSync(path.join(mediaDir, name), "utf8")) as Partial<Run> & { runId?: string };
         const id = sidecar.runId ?? sidecar.id;
-        if (!id || runs.has(id) || !sidecar.mediaPath) continue;
+        if (!id || !sidecar.mediaPath) continue;
         const uploadState = sidecar as typeof sidecar & { idempotencyKey?: string; analysisId?: string };
-        storeRun({ id, url: sidecar.url ?? `https://uploads.invalid/${encodeURIComponent(id)}`, status: "awaiting_media", intent: sidecar.intent, origin: sidecar.origin, mediaPath: sidecar.mediaPath, evidenceIdempotencyKey: uploadState.idempotencyKey, downstreamAnalysisId: uploadState.analysisId, startedAt: sidecar.startedAt ?? new Date().toISOString() });
+        const existing = runs.get(id);
+        storeRun({ ...existing, id, url: existing?.url ?? sidecar.url ?? `https://uploads.invalid/${encodeURIComponent(id)}`, status: existing?.status === "running" ? "pending" : existing?.status ?? "awaiting_media", intent: sidecar.intent ?? existing?.intent, origin: sidecar.origin ?? existing?.origin, mediaPath: sidecar.mediaPath, evidenceIdempotencyKey: uploadState.idempotencyKey ?? existing?.evidenceIdempotencyKey, downstreamAnalysisId: uploadState.analysisId ?? existing?.downstreamAnalysisId, startedAt: sidecar.startedAt ?? existing?.startedAt ?? new Date().toISOString() });
       } catch { /* ignore malformed sidecars */ }
     }
   }
@@ -162,7 +172,7 @@ export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}): number {
   for (const run of runs.values()) {
     if (!["pending", "awaiting_media"].includes(run.status) || executingRuns.has(run.id)) continue;
     enqueued++;
-    void executeRegisteredPipeline(run, opts).catch(() => {});
+    enqueue(run, opts);
   }
   return enqueued;
 }
@@ -247,7 +257,7 @@ export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}):
     const requestedIntent = opts.intent ?? "technology";
     const existing = [...runs.values()].find((candidate) =>
       canonicalizeIfPossible(candidate.url) === canonicalUrl
-      && intentsOverlap(candidate.intent ?? "technology", requestedIntent)
+      && runCoversIntent(candidate, requestedIntent)
       && ["pending", "running", "awaiting_media", "downstream_pending", "processed", "partial"].includes(candidate.status));
     if (existing && ["pending", "running", "awaiting_media", "downstream_pending", "processed"].includes(existing.status)) {
       throw new DuplicateRunError(existing);
@@ -265,9 +275,12 @@ export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}):
   return run;
 }
 
-function intentsOverlap(existing: SocialVideoIntent, requested: SocialVideoIntent): boolean {
-  if (existing === "auto" || requested === "auto") return true;
-  return existing === requested;
+function runCoversIntent(run: Run, requested: SocialVideoIntent): boolean {
+  const existing = run.intent ?? "technology";
+  if (requested === "auto") return existing === "auto";
+  if (existing === requested) return true;
+  if (existing !== "auto") return false;
+  return run.processedBranches?.includes(requested) ?? false;
 }
 
 export function registerAwaitingMediaRun(input: {
@@ -358,6 +371,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
   };
 
   const repo = new AiMemoryRepo(repoOpts);
+  const extractionWorkDir = fs.mkdtempSync(path.join(process.env["TMPDIR"] ?? "/tmp", `tech-radar-extract-${runId}-`));
 
   try {
     await repo.init();
@@ -371,8 +385,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
 
     // Step 1: Extract
     const extractResult = run.mediaPath
-      ? await extractLocalMedia({ runId, mediaPath: run.mediaPath })
-      : await extract(url);
+      ? await extractLocalMedia({ runId, mediaPath: run.mediaPath, workDir: extractionWorkDir })
+      : await extract(url, { outDir: extractionWorkDir });
 
     // Bail early if the post has no usable content — skip agents entirely
     const hasContent = (extractResult.caption && extractResult.caption.trim()) ||
@@ -392,6 +406,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
 
       sendTelegram(`⏭️ *Skipped* (${skipReason}):\n${url.slice(0, 80)}`);
       if (run.mediaPath) await cleanupRegisteredMedia(run.mediaPath);
+      await fs.promises.rm(extractionWorkDir, { recursive: true, force: true });
       releaseSlot();
       executingRuns.delete(runId);
       return { runId, findingPath: "" };
@@ -443,6 +458,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     });
 
     const requestedFinance = routed.classification.category === "finance" || routed.classification.category === "mixed";
+    run.classification = routed.classification;
+    run.processedBranches = [routed.technology !== undefined ? "technology" : undefined, routed.finance !== undefined ? "finance" : undefined].filter((branch): branch is "technology" | "finance" => Boolean(branch));
     const branchErrors = Object.values(routed.branchErrors ?? {});
     const noRoutedBranch = ["other", "needs_review"].includes(routed.classification.category);
     const hasFinance = Boolean(routed.finance);
@@ -468,6 +485,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     }
 
     if (run.mediaPath) await cleanupRegisteredMedia(run.mediaPath);
+    await fs.promises.rm(extractionWorkDir, { recursive: true, force: true });
     releaseSlot();
     executingRuns.delete(runId);
     return { runId, findingPath };
@@ -490,6 +508,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     sendTelegram(`❌ *Tech Radar run failed*\n\n${url.slice(0, 80)}\n\nError: \`${(run.error ?? "unknown").slice(0, 200)}\``);
 
     if (run.mediaPath) await cleanupRegisteredMedia(run.mediaPath);
+    await fs.promises.rm(extractionWorkDir, { recursive: true, force: true });
     releaseSlot();
     executingRuns.delete(runId);
     throw err;
@@ -539,7 +558,7 @@ export function buildSocialVideoEvidence(input: {
   origin: SocialVideoOrigin;
   idempotencyKey?: string;
 }): SocialVideoEvidenceV1 {
-  const durationSeconds = input.extract.duration_sec == null ? undefined : input.extract.duration_sec;
+  const durationSeconds = input.extract.duration_sec == null ? undefined : Math.min(1_800, Math.max(0, Math.round(input.extract.duration_sec)));
   const durationMs = Math.round((durationSeconds ?? 0) * 1_000);
   const transcriptText = input.extract.transcript?.trim();
   const methods = new Set(input.extract.extraction_methods ?? []);
@@ -579,7 +598,7 @@ export function buildSocialVideoEvidence(input: {
     financeClaims: {
       securities: securities.map((security) => ({
         ...security,
-        claims: sources.map((source) => ({
+        claims: sources.filter((source) => securities.length === 1 || sourceMatchesSecurity(source.text, security)).map((source) => ({
           text: source.text,
           confidence: 0.5,
           ...(source.timed ? { startMs: 0, endMs: Math.min(1_800_000, durationMs) } : {}),
@@ -616,9 +635,15 @@ function extractSecurityMentions(sources: Array<{ text: string }>): Array<{
     bySymbol.set(symbol, { symbol, companyName: company[1].trim(), assetType: current?.assetType ?? "stock", exchange: current?.exchange, confidence: 0.9 });
   }
   if (bySymbol.size === 0 && /\b(?:stock|shares?|security|company|investment)\b/i.test(text)) {
-    return [{ assetType: "unsupported", confidence: 0.2 }];
+    return [{ assetType: /\bETF\b/i.test(text) ? "etf" : "stock", confidence: 0.2 }];
   }
   return [...bySymbol.values()];
+}
+
+function sourceMatchesSecurity(text: string, security: { symbol?: string; exchange?: string; companyName?: string }): boolean {
+  return [security.symbol, security.exchange, security.companyName]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text));
 }
 
 function normalizePublishedAt(value: string | null): string | undefined {
@@ -641,18 +666,24 @@ export function applyStockBotCompletion(event: StockBotCompletionEvent): Run | u
   if (event.status === "completed") {
     run.status = "processed";
     run.finishedAt = new Date().toISOString();
+  } else if (event.status === "partial") {
+    run.status = "partial";
+    run.finishedAt = new Date().toISOString();
+  } else if (event.status === "canceled") {
+    run.status = "skipped";
+    run.error = stockBotErrorText(event.error) ?? "StockBot analysis canceled";
+    run.finishedAt = new Date().toISOString();
   } else if (event.status === "failed") {
     run.status = "failed";
     run.error = stockBotErrorText(event.error) ?? "StockBot analysis failed";
     run.finishedAt = new Date().toISOString();
-  } else {
-    run.status = "downstream_pending";
   }
   storeRun(run);
   persistCallbackState(run);
   const concise = event.results.slice(0, 10).map((result) => `${result.symbol ?? result.companyName ?? "Security"}: ${result.claimGrade}, ${result.opinion}`).join("\n");
   const link = run.downstreamDetailUrl ? `\n${run.downstreamDetailUrl}` : "";
-  sendTelegram(`${event.status === "completed" ? "✅" : "❌"} *Stock analysis ${event.status}*\n${concise || stockBotErrorText(event.error) || "No result details"}${link}`);
+  const icon = event.status === "completed" ? "✅" : event.status === "partial" ? "⚠️" : event.status === "canceled" ? "⏭️" : "❌";
+  sendTelegram(`${icon} *Stock analysis ${event.status}*\n${concise || stockBotErrorText(event.error) || "No result details"}${link}`);
   return run;
 }
 

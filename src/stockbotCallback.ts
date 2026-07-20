@@ -6,13 +6,13 @@ import { z } from "zod";
 export const StockBotCompletionEventSchema = z.object({
   eventId: z.string().min(1).max(200),
   analysisId: z.string().min(1).max(200),
-  status: z.string().min(1).max(100),
+  status: z.enum(["completed", "partial", "failed", "canceled"]),
   detailUrl: z.string().url().max(2_048).nullable().optional(),
   results: z.array(z.object({
     symbol: z.string().max(32).nullable().optional(),
     companyName: z.string().max(300).nullable().optional(),
-    claimGrade: z.string().max(100),
-    opinion: z.string().max(100),
+    claimGrade: z.enum(["supported", "mixed", "contradicted", "unverifiable"]),
+    opinion: z.enum(["buy", "hold", "sell", "watch", "avoid", "insufficient_data"]),
     confidence: z.number().min(0).max(1),
   }).strict()).max(10),
   error: z.union([

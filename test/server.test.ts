@@ -62,6 +62,12 @@ function expectNoPrivateFindingFields(value: unknown) {
   Object.values(value).forEach(expectNoPrivateFindingFields);
 }
 
+function uploadToken(claims: Record<string, unknown>, secret: string): string {
+  const sorted = Object.fromEntries(Object.entries(claims).sort(([a], [b]) => a.localeCompare(b)));
+  const segment = Buffer.from(JSON.stringify(sorted)).toString("base64url");
+  return `${segment}.${createHmac("sha256", secret).update(segment).digest("hex")}`;
+}
+
 describe("server routes", () => {
   const app = buildServer();
 
@@ -94,6 +100,18 @@ describe("server routes", () => {
     expect(res.body).toContain("data-filter=\"ocr\"");
     expect(res.body).not.toContain("class=\"tabs\"");
     expect(res.body).not.toContain("evidence-tab");
+  });
+
+  it("scopes direct-upload preflight to exact configured origins", async () => {
+    process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+    try {
+      const allowed = await app.inject({ method: "OPTIONS", url: "/runs/upload", headers: { origin: "https://stocks.example", "access-control-request-method": "POST" } });
+      expect(allowed.statusCode).toBe(204);
+      expect(allowed.headers["access-control-allow-origin"]).toBe("https://stocks.example");
+      expect(allowed.headers["access-control-allow-headers"]).toContain("X-StockBot-Upload-Token");
+      const denied = await app.inject({ method: "OPTIONS", url: "/runs/upload", headers: { origin: "https://evil.example" } });
+      expect(denied.statusCode).toBe(403);
+    } finally { delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; }
   });
 
   it("keeps token-query HTML responses no-store", async () => {
@@ -610,6 +628,32 @@ describe("server routes", () => {
         expect(runnerMock.runMediaPipeline).toHaveBeenCalledWith(expect.objectContaining({ intent: "finance", origin: { channel: "dashboard" }, mimeType: "video/mp4", idempotencyKey: "stockbot-key", analysisId: "analysis-upload" }));
       } finally {
         delete process.env["MEDIA_UPLOAD_DIR"];
+        fs.rmSync(mediaDir, { recursive: true, force: true });
+      }
+    });
+
+    it("accepts one matching signed dashboard upload and rejects replay and mismatch", async () => {
+      const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "signed-upload-"));
+      process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+      process.env["STOCKBOT_UPLOAD_SECRET"] = "upload-secret";
+      const boundary = "----signed-upload";
+      const claims = { analysisId: "signed-analysis", idempotencyKey: "signed-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 11 };
+      const body = Buffer.from([
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nvideo-bytes\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\nsigned-key\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\nsigned-analysis\r\n`,
+        `--${boundary}--\r\n`,
+      ].join(""));
+      const headers = { "content-type": `multipart/form-data; boundary=${boundary}`, "x-stockbot-upload-token": uploadToken(claims, "upload-secret") };
+      try {
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body })).statusCode).toBe(202);
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body })).statusCode).toBe(409);
+        const mismatchHeaders = { ...headers, "x-stockbot-upload-token": uploadToken({ ...claims, analysisId: "mismatch", idempotencyKey: "mismatch", size: 12 }, "upload-secret") };
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers: mismatchHeaders, payload: body })).statusCode).toBe(400);
+      } finally {
+        delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"];
         fs.rmSync(mediaDir, { recursive: true, force: true });
       }
     });

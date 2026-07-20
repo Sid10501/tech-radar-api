@@ -138,14 +138,14 @@ function resolveScriptPath(): string {
   );
 }
 
-export async function extract(url: string): Promise<ExtractResult> {
+export async function extract(url: string, options: { outDir?: string } = {}): Promise<ExtractResult> {
   if (!(await isAllowedSubmittedUrl(url))) {
     throw new ExtractError(`blocked submitted URL: ${url}`);
   }
   const scriptPath = resolveScriptPath();
 
   return new Promise((resolve, reject) => {
-    execFile("bash", [scriptPath, url], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("bash", [scriptPath, url, ...(options.outDir ? [options.outDir] : [])], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         return reject(new ExtractError(`extract failed: ${stderr || err.message}`, err));
       }

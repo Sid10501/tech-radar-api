@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildSocialVideoEvidence,
+  applyStockBotCompletion,
   hydrateRunsFromInbox,
   listRuns,
+  recoverAndEnqueueRuns,
   registerPipelineRun,
   routeEnrichedExtract,
 } from "../src/runner.js";
@@ -80,14 +82,56 @@ describe("social-video runner routing", () => {
     expect(evidence.financeClaims.securities[0].claims[1].startMs).toBe(0);
   });
 
+  it("attributes multi-security claims only to matching text blocks and keeps ambiguous stocks reviewable", () => {
+    const evidence = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "$AAPL Apple shares rose", transcript: "NASDAQ: NVDA earnings beat", visual_text: "$AAPL target 250" },
+      classification: { category: "finance", confidence: 1, reasons: ["test"] }, runId: "claims", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" },
+    });
+    const aapl = evidence.financeClaims.securities.find((security) => security.symbol === "AAPL")!;
+    const nvda = evidence.financeClaims.securities.find((security) => security.symbol === "NVDA")!;
+    expect(aapl.claims).toHaveLength(2);
+    expect(nvda.claims).toHaveLength(1);
+    expect(nvda.claims[0].startMs).toBe(0);
+
+    const ambiguous = buildSocialVideoEvidence({ extract: { ...enriched, caption: "This company stock could rally", transcript: null, visual_text: null }, classification: { category: "finance", confidence: 0.5, reasons: [] }, runId: "ambiguous", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" } });
+    expect(ambiguous.financeClaims.securities[0]).toMatchObject({ assetType: "stock", confidence: 0.2 });
+    expect(ambiguous.financeClaims.securities[0].symbol).toBeUndefined();
+  });
+
   it("allows an explicit finance pass after a technology-only pass", () => {
     const id = `intent-${Date.now()}`;
     registerPipelineRun(`https://youtu.be/${id}`, { intent: "technology" });
     expect(() => registerPipelineRun(`https://www.youtube.com/watch?v=${id}`, { intent: "finance" })).not.toThrow();
   });
+
+  it("lets explicit finance follow an auto-tech result but dedupes completed auto-finance", () => {
+    const techUrl = `https://youtu.be/auto-tech-${Date.now()}`;
+    const tech = registerPipelineRun(techUrl, { intent: "auto" });
+    tech.status = "processed";
+    tech.classification = { category: "technology", confidence: 1, reasons: [] };
+    tech.processedBranches = ["technology"];
+    expect(() => registerPipelineRun(techUrl, { intent: "finance" })).not.toThrow();
+
+    const financeUrl = `https://youtu.be/auto-finance-${Date.now()}`;
+    const finance = registerPipelineRun(financeUrl, { intent: "auto" });
+    finance.status = "processed";
+    finance.classification = { category: "finance", confidence: 1, reasons: [] };
+    finance.processedBranches = ["finance"];
+    expect(() => registerPipelineRun(financeUrl, { intent: "finance" })).toThrow(/already processed/i);
+  });
 });
 
 describe("run registration and recovery", () => {
+  it("maps every StockBot terminal callback to a terminal run state", () => {
+    for (const [status, expected] of [["partial", "partial"], ["canceled", "skipped"], ["failed", "failed"]] as const) {
+      const run = registerPipelineRun(`https://youtu.be/callback-${status}-${Date.now()}`, { intent: "finance" });
+      run.downstreamAnalysisId = `analysis-${status}`;
+      run.status = "downstream_pending";
+      applyStockBotCompletion({ eventId: `event-${status}`, analysisId: `analysis-${status}`, status, detailUrl: null, results: [], error: null });
+      expect(run.status).toBe(expected);
+      expect(run.finishedAt).toBeTruthy();
+    }
+  });
   it("registers and returns the actual run id before work starts and canonicalizes dedupe", () => {
     const first = registerPipelineRun("https://youtu.be/unique123?si=tracker", { intent: "finance" });
     expect(first.id).toBeTruthy();
@@ -117,5 +161,33 @@ describe("run registration and recovery", () => {
       downstreamAnalysisId: "analysis-9",
       financeHandoffCompleted: true,
     });
+  });
+
+  it("merges richer upload state and sidecar before enqueueing exactly once", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "upload-restart-"));
+    const stateDir = path.join(root, "state");
+    const mediaDir = path.join(root, "media");
+    fs.mkdirSync(stateDir); fs.mkdirSync(mediaDir);
+    const mediaPath = path.join(mediaDir, "clip.mp4"); fs.writeFileSync(mediaPath, "x");
+    const rich = { id: "restart-upload", url: "https://uploads.invalid/file", status: "running", intent: "finance", origin: { channel: "dashboard" }, mediaPath, evidenceIdempotencyKey: "idem-restart", downstreamAnalysisId: "analysis-restart", startedAt: new Date().toISOString() };
+    fs.writeFileSync(path.join(stateDir, "restart-upload.json"), JSON.stringify(rich));
+    fs.writeFileSync(`${mediaPath}.run.json`, JSON.stringify({ schemaVersion: 1, runId: rich.id, mediaPath, intent: rich.intent, origin: rich.origin, idempotencyKey: rich.evidenceIdempotencyKey, analysisId: rich.downstreamAnalysisId }));
+    const inbox = path.join(root, "INBOX.md");
+    fs.writeFileSync(inbox, `| Date | URL | Status | Finding | Error |\n|---|---|---|---|---|\n| 2026-07-20 | ${rich.url} | running | run:${rich.id} | |`);
+    process.env["RUN_STATE_DIR"] = stateDir; process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+    const enqueued: any[] = [];
+    try {
+      hydrateRunsFromInbox(inbox);
+      recoverAndEnqueueRuns({}, (run) => enqueued.push({ ...run }));
+      const recovered = enqueued.filter((run) => run.id === rich.id);
+      expect(recovered).toHaveLength(1);
+      expect(recovered[0]).toMatchObject({ status: "pending", intent: "finance", origin: { channel: "dashboard" }, mediaPath, evidenceIdempotencyKey: "idem-restart", downstreamAnalysisId: "analysis-restart" });
+    } finally {
+      delete process.env["RUN_STATE_DIR"]; delete process.env["MEDIA_UPLOAD_DIR"];
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

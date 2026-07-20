@@ -22,6 +22,7 @@ import { buildRssXml } from "./rss.js";
 import { AiMemoryRepo, setupSshKey } from "./git.js";
 import { canonicalizeSocialUrl, type SocialVideoIntent } from "./socialVideoRouting.js";
 import { StockBotEventDeduper, verifyStockBotCallback } from "./stockbotCallback.js";
+import { verifyUploadToken, type UploadClaims } from "./uploadAuthorization.js";
 
 const SECURITY_HEADERS = {
   "Content-Security-Policy":
@@ -146,12 +147,35 @@ async function ensureAiMemoryCheckout(): Promise<void> {
 export function buildServer() {
   const app = Fastify({ logger: true });
   app.register(multipart, { limits: { files: 1, fileSize: MAX_LOCAL_MEDIA_BYTES, fields: 10, parts: 11 } });
+  const callbackStatePath = process.env["RUN_STATE_DIR"]
+    ? path.join(path.resolve(process.env["RUN_STATE_DIR"]), "stockbot-callback-events.json")
+    : process.env["AI_MEMORY_LOCAL_DIR"]
+      ? path.join(process.env["AI_MEMORY_LOCAL_DIR"], "tech-radar", "stockbot-callback-events.json")
+      : undefined;
+  if (process.env["RUN_STATE_DIR"] && process.env["AI_MEMORY_LOCAL_DIR"] && callbackStatePath && !fs.existsSync(callbackStatePath)) {
+    const legacy = path.join(process.env["AI_MEMORY_LOCAL_DIR"], "tech-radar", "stockbot-callback-events.json");
+    if (fs.existsSync(legacy)) {
+      fs.mkdirSync(path.dirname(callbackStatePath), { recursive: true, mode: 0o700 });
+      fs.copyFileSync(legacy, callbackStatePath);
+    }
+  }
   const callbackEvents = new StockBotEventDeduper(
     1_000,
-    process.env["AI_MEMORY_LOCAL_DIR"]
-      ? path.join(process.env["AI_MEMORY_LOCAL_DIR"], "tech-radar", "stockbot-callback-events.json")
-      : undefined,
+    callbackStatePath,
   );
+  const consumedUploadTokens = new StockBotEventDeduper(10_000, callbackStatePath ? path.join(path.dirname(callbackStatePath), "stockbot-upload-tokens.json") : undefined);
+  const uploadAuthMiddleware = (request: any, reply: any, done: () => void): void => {
+    if (process.env["AUTH_TOKEN"] && isAuthorized(request)) return done();
+    const token = request.headers["x-stockbot-upload-token"];
+    if (typeof token !== "string") return reply.code(401).send({ error: "Upload authorization required" });
+    try {
+      request.uploadClaims = verifyUploadToken(token, process.env["STOCKBOT_UPLOAD_SECRET"] ?? "");
+      request.uploadToken = token;
+      done();
+    } catch (error) {
+      reply.code(401).send({ error: error instanceof Error ? error.message : "Invalid upload authorization" });
+    }
+  };
 
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
@@ -169,6 +193,22 @@ export function buildServer() {
       reply.header(name, value);
     }
     reply.header("Cache-Control", NO_STORE_CACHE_CONTROL);
+  });
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (!request.url.startsWith("/runs/upload")) return;
+    const origin = request.headers.origin;
+    const allowed = new Set((process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] ?? "").split(",").map((value) => value.trim()).filter(Boolean));
+    if (typeof origin === "string" && allowed.has(origin)) {
+      reply.header("Access-Control-Allow-Origin", origin);
+      reply.header("Vary", "Origin");
+    }
+    if (request.method === "OPTIONS") {
+      if (typeof origin !== "string" || !allowed.has(origin)) return reply.code(403).send();
+      reply.header("Access-Control-Allow-Methods", "POST");
+      reply.header("Access-Control-Allow-Headers", "Content-Type, X-StockBot-Upload-Token");
+      return reply.code(204).send();
+    }
   });
 
   // CORS is scoped to the public feed: exact origins from PUBLIC_FEED_ALLOWED_ORIGINS, never a wildcard
@@ -247,7 +287,7 @@ export function buildServer() {
     },
   );
 
-  app.post("/runs/upload", { preHandler: authMiddleware }, async (request, reply) => {
+  app.post("/runs/upload", { preHandler: uploadAuthMiddleware }, async (request, reply) => {
     const mediaDir = path.resolve(process.env["MEDIA_UPLOAD_DIR"] ?? "/tmp/tech-radar-media");
     await fs.promises.mkdir(mediaDir, { recursive: true, mode: 0o700 });
     let mediaPath: string | undefined;
@@ -261,11 +301,15 @@ export function buildServer() {
       for await (const part of request.parts()) {
         if (part.type === "field") {
           if (part.fieldname === "intent") intent = String(part.value) as SocialVideoIntent;
-          if (part.fieldname === "origin" && ["shortcut", "dashboard", "api"].includes(String(part.value))) originChannel = String(part.value) as typeof originChannel;
+          if (part.fieldname === "origin") {
+            if (!["shortcut", "dashboard", "api"].includes(String(part.value))) throw new Error("origin must be shortcut, dashboard, or api");
+            originChannel = String(part.value) as typeof originChannel;
+          }
           if (part.fieldname === "idempotencyKey") idempotencyKey = String(part.value);
           if (part.fieldname === "analysisId") analysisId = String(part.value);
           continue;
         }
+        if (part.fieldname !== "file") throw new Error("multipart file field must be named file");
         if (mediaPath) throw new Error("exactly one file is allowed");
         if (!/^(?:video\/|audio\/)/i.test(part.mimetype)) throw new Error("unsupported media MIME type");
         const extension = safeUploadExtension(part.filename, part.mimetype);
@@ -280,8 +324,19 @@ export function buildServer() {
       }
       if (!mediaPath) return reply.code(400).send({ error: "file is required" });
       if (!["auto", "technology", "finance"].includes(intent)) throw new Error("intent must be auto, technology, or finance");
+      if (idempotencyKey !== undefined && !idempotencyKey.trim()) throw new Error("idempotencyKey must not be empty");
       if (idempotencyKey && idempotencyKey.length > 300) throw new Error("idempotencyKey exceeds 300 characters");
+      if (analysisId !== undefined && !analysisId.trim()) throw new Error("analysisId must not be empty");
       if (analysisId && analysisId.length > 200) throw new Error("analysisId exceeds 200 characters");
+      const uploadClaims = (request as typeof request & { uploadClaims?: UploadClaims; uploadToken?: string }).uploadClaims;
+      if (uploadClaims) {
+        const size = (await fs.promises.stat(mediaPath)).size;
+        if (intent !== uploadClaims.intent || String(originChannel) !== uploadClaims.origin || idempotencyKey !== uploadClaims.idempotencyKey || analysisId !== uploadClaims.analysisId || size !== uploadClaims.size) throw new Error("multipart fields or size do not match upload token");
+        if (!consumedUploadTokens.accept(`${uploadClaims.analysisId}:${uploadClaims.idempotencyKey}`)) {
+          await fs.promises.unlink(mediaPath).catch(() => {});
+          return reply.code(409).send({ error: "upload token already consumed" });
+        }
+      }
       const completion = runMediaPipeline({ fileUniqueId: randomUUID(), mediaPath, intent, origin: { channel: originChannel }, mimeType, originalName: filename, idempotencyKey, analysisId });
       completion.catch(() => {});
       return reply.code(202).send({ runId: completion.runId, status: "pending" });
