@@ -7,18 +7,32 @@ export const StockBotCompletionEventSchema = z.object({
   eventId: z.string().min(1).max(200),
   analysisId: z.string().min(1).max(200),
   status: z.string().min(1).max(100),
-  detailUrl: z.string().url().max(2_048).optional(),
+  detailUrl: z.string().url().max(2_048).nullable().optional(),
   results: z.array(z.object({
-    symbol: z.string().max(24).optional(),
-    companyName: z.string().max(300).optional(),
+    symbol: z.string().max(32).nullable().optional(),
+    companyName: z.string().max(300).nullable().optional(),
     claimGrade: z.string().max(100),
     opinion: z.string().max(100),
     confidence: z.number().min(0).max(1),
   }).strict()).max(10),
-  error: z.string().max(2_000).optional(),
+  error: z.union([
+    z.string().max(2_000),
+    z.object({
+      code: z.string().max(200).nullable().optional(),
+      message: z.string().max(2_000).nullable().optional(),
+      providers: z.union([z.array(z.string().max(200)).max(50), z.record(z.unknown())]).nullable().optional(),
+    }).passthrough(),
+  ]).nullable().optional(),
 }).strict();
 
 export type StockBotCompletionEvent = z.infer<typeof StockBotCompletionEventSchema>;
+
+export function stockBotErrorText(error: StockBotCompletionEvent["error"]): string | undefined {
+  if (!error) return undefined;
+  if (typeof error === "string") return error.slice(0, 500);
+  const parts = [error.code, error.message].filter((value): value is string => typeof value === "string" && value.length > 0);
+  return parts.join(": ").slice(0, 500) || "StockBot analysis failed";
+}
 
 export function verifyStockBotCallback(input: {
   rawBody: string;

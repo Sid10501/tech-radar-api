@@ -1,6 +1,9 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { StockBotEventDeduper, verifyStockBotCallback } from "../src/stockbotCallback.js";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const payload = {
   eventId: "event-1",
@@ -15,6 +18,15 @@ function signed(rawBody: string, timestamp: string, secret = "callback-secret") 
 }
 
 describe("StockBot callback verification", () => {
+  it("accepts the actual StockBot serializer shape with nullable detail/security identity and structured error", () => {
+    const fixture = fs.readFileSync(path.resolve(fileURLToPath(import.meta.url), "../fixtures/stockbot_completion.json"), "utf8");
+    const nowMs = Date.now();
+    const timestamp = String(Math.floor(nowMs / 1000));
+    const parsed = verifyStockBotCallback({ rawBody: fixture, timestamp, signature: signed(fixture, timestamp), secret: "callback-secret", nowMs });
+    expect(parsed.detailUrl).toBeNull();
+    expect(parsed.results[0]).toMatchObject({ symbol: null, companyName: null });
+    expect(parsed.error).toMatchObject({ code: "provider_unavailable", providers: ["market", "news"] });
+  });
   it("verifies timestamp dot raw-body HMAC-SHA256 and parses the event", () => {
     const nowMs = Date.parse("2026-07-20T12:00:00.000Z");
     const timestamp = String(Math.floor(nowMs / 1_000));

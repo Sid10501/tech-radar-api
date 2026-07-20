@@ -75,7 +75,7 @@ describe("Telegram social-video intake", () => {
 
     expect(events).toEqual(["persisted", "ack"]);
     expect(registerAwaitingMedia).toHaveBeenCalledWith(expect.objectContaining({ mediaPath: path.join(dir, "safe.mp4"), intent: "finance" }));
-    expect(send).toHaveBeenCalledWith(100, expect.stringMatching(/saved.*awaiting secure extractor support/i));
+    expect(send).toHaveBeenCalledWith(100, expect.stringMatching(/saved securely.*processing started/i));
   });
 
   it("rejects Telegram files over 20 MB before download", async () => {

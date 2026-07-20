@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { SocialVideoEvidenceV1Schema } from "../src/schemas/socialVideoEvidence.js";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 function validEvidence(): any {
   return {
@@ -39,6 +42,10 @@ function validEvidence(): any {
 }
 
 describe("SocialVideoEvidenceV1Schema", () => {
+  it("parses the shared realistic StockBot fixture", () => {
+    const fixture = JSON.parse(fs.readFileSync(path.resolve(fileURLToPath(import.meta.url), "../fixtures/social_video_evidence_v1.json"), "utf8"));
+    expect(SocialVideoEvidenceV1Schema.parse(fixture)).toMatchObject({ schemaVersion: 1, idempotencyKey: "fixture-run:finance-v1" });
+  });
   it("parses the versioned camelCase contract and wraps external prose as untrusted data", () => {
     const parsed = SocialVideoEvidenceV1Schema.parse(validEvidence());
 
@@ -66,13 +73,37 @@ describe("SocialVideoEvidenceV1Schema", () => {
     expect(SocialVideoEvidenceV1Schema.safeParse(tooMany).success).toBe(false);
   });
 
-  it("rejects unbounded transcript timing and text", () => {
+  it("rejects unbounded transcript timing and safely truncates claim text", () => {
     const invalidTiming = validEvidence();
     invalidTiming.transcript.segments[0].endMs = 1_800_001;
     expect(SocialVideoEvidenceV1Schema.safeParse(invalidTiming).success).toBe(false);
 
     const hugeClaim = validEvidence();
-    hugeClaim.financeClaims.securities[0].claims[0].text = "x".repeat(2_001);
-    expect(SocialVideoEvidenceV1Schema.safeParse(hugeClaim).success).toBe(false);
+    hugeClaim.financeClaims.securities[0].claims[0].text = "x".repeat(4_001);
+    const parsed = SocialVideoEvidenceV1Schema.parse(hugeClaim);
+    expect(parsed.financeClaims.securities[0].claims[0].text.length).toBeLessThanOrEqual(4_000);
+  });
+
+  it("matches StockBot item and aggregate limits after untrusted wrapping", () => {
+    const evidence = validEvidence();
+    evidence.source.durationSeconds = 1.5;
+    expect(SocialVideoEvidenceV1Schema.safeParse(evidence).success).toBe(false);
+
+    evidence.source.durationSeconds = 1800;
+    evidence.transcript.segments[0].text = "x".repeat(4_000);
+    const parsed = SocialVideoEvidenceV1Schema.parse(evidence);
+    expect(parsed.transcript.segments[0].text.length).toBeLessThanOrEqual(4_000);
+
+    const tooManySegments = validEvidence();
+    tooManySegments.transcript.segments = Array.from({ length: 3_601 }, () => ({ startMs: 0, endMs: 0, text: "x" }));
+    expect(SocialVideoEvidenceV1Schema.safeParse(tooManySegments).success).toBe(false);
+
+    const aggregate = validEvidence();
+    aggregate.visualTexts = Array.from({ length: 20 }, () => ({ text: "x".repeat(3_000) }));
+    expect(SocialVideoEvidenceV1Schema.safeParse(aggregate).success).toBe(false);
+
+    const tooManyClaims = validEvidence();
+    tooManyClaims.financeClaims.securities[0].claims = Array.from({ length: 101 }, () => ({ text: "claim", confidence: 0.5 }));
+    expect(SocialVideoEvidenceV1Schema.safeParse(tooManyClaims).success).toBe(false);
   });
 });

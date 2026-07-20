@@ -6,7 +6,7 @@ import {
   runPipeline,
   listRuns,
   DuplicateRunError,
-  registerAwaitingMediaRun,
+  runMediaPipeline,
   type PipelinePromise,
   type Run,
   type SocialVideoOrigin,
@@ -55,7 +55,7 @@ interface TelegramDependencies {
   send?: (chatId: number, text: string) => void;
   runPipeline?: (url: string, options: { intent: SocialVideoIntent; origin: SocialVideoOrigin }) => PipelinePromise | (Promise<unknown> & { runId?: string });
   persistFile?: (input: MediaInput) => Promise<string>;
-  registerAwaitingMedia?: typeof registerAwaitingMediaRun;
+  registerAwaitingMedia?: (input: Parameters<typeof runMediaPipeline>[0]) => PipelinePromise | Run;
 }
 
 function reply(chatId: number, text: string): void {
@@ -140,14 +140,17 @@ export async function handleTelegramUpdate(update: Record<string, unknown>, deps
         mediaDir: process.env["MEDIA_UPLOAD_DIR"] ?? "/tmp/tech-radar-media",
       }));
       mediaPath = await persist(media);
-      const register = deps.registerAwaitingMedia ?? registerAwaitingMediaRun;
+      const register = deps.registerAwaitingMedia ?? runMediaPipeline;
       const run = register({
         fileUniqueId: media.fileUniqueId,
         mediaPath,
         intent: intake.intent,
         origin: telegramOrigin(message, chatId),
+        mimeType: media.mimeType,
+        originalName: media.fileName,
       });
-      send(chatId, `📥 File saved securely as run ${run.id}; awaiting secure extractor support. The file will not be sent to StockBot.`);
+      if ("catch" in run) run.catch((error: unknown) => send(chatId, `❌ Pipeline error: \`${error instanceof Error ? error.message.slice(0, 200) : String(error)}\``));
+      send(chatId, `📥 File saved securely and queued as run ${"runId" in run ? run.runId : run.id}; secure local extractor processing started.`);
     } catch (error) {
       if (mediaPath) {
         try { fs.unlinkSync(mediaPath); } catch { /* already absent */ }
@@ -232,13 +235,13 @@ export async function persistTelegramMedia(
 }
 
 async function downloadTelegramFile(fileId: string, token: string, maxBytes: number): Promise<Buffer> {
-  const metadata = await fetch(`https://api.telegram.org/bot${encodeURIComponent(token)}/getFile?file_id=${encodeURIComponent(fileId)}`, { redirect: "error" });
+  const metadata = await timedFetch(`https://api.telegram.org/bot${encodeURIComponent(token)}/getFile?file_id=${encodeURIComponent(fileId)}`, 10_000);
   if (!metadata.ok) throw new Error(`Telegram getFile failed with HTTP ${metadata.status}`);
   const body = await metadata.json() as { ok?: boolean; result?: { file_path?: string; file_size?: number } };
   const filePath = body.result?.file_path;
   if (!body.ok || !filePath || !/^[A-Za-z0-9_./-]+$/.test(filePath) || filePath.includes("..")) throw new Error("Telegram returned an unsafe file path");
   if ((body.result?.file_size ?? 0) > maxBytes) throw new Error("Telegram upload exceeds the 20 MB limit");
-  const response = await fetch(`https://api.telegram.org/file/bot${encodeURIComponent(token)}/${filePath}`, { redirect: "error" });
+  const response = await timedFetch(`https://api.telegram.org/file/bot${encodeURIComponent(token)}/${filePath}`, 30_000);
   if (!response.ok || !response.body) throw new Error(`Telegram file download failed with HTTP ${response.status}`);
   const declared = Number(response.headers.get("content-length") ?? 0);
   if (declared > maxBytes) throw new Error("Telegram upload exceeds the 20 MB limit");
@@ -256,6 +259,13 @@ async function downloadTelegramFile(fileId: string, token: string, maxBytes: num
     chunks.push(Buffer.from(value));
   }
   return Buffer.concat(chunks);
+}
+
+async function timedFetch(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try { return await fetch(url, { redirect: "error", signal: controller.signal }); }
+  finally { clearTimeout(timer); }
 }
 
 function safeMediaExtension(fileName?: string, mimeType?: string): string {

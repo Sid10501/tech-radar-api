@@ -16,6 +16,10 @@ vi.mock("../src/runner.js", () => ({
     Promise.resolve({ runId: "mock-run-id", findingPath: "tech-radar/findings/test.md" }),
     { runId: "mock-run-id" },
   )),
+  runMediaPipeline: vi.fn(() => Object.assign(
+    Promise.resolve({ runId: "mock-upload-run", findingPath: "" }),
+    { runId: "mock-upload-run" },
+  )),
   getRun: vi.fn((id: string) => id === "existing" ? { id, url: "https://x.com", status: "processed", startedAt: new Date().toISOString() } : undefined),
   listRuns: vi.fn(() => [{ id: "existing", url: "https://x.com", status: "processed", startedAt: new Date().toISOString() }]),
   applyStockBotCompletion: vi.fn(() => ({ id: "finance-run", status: "processed" })),
@@ -585,6 +589,29 @@ describe("server routes", () => {
       expect(res.statusCode).toBe(202);
       expect(res.json()).toEqual({ runId: "mock-run-id" });
       expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.youtube.com/watch?v=abc123", expect.objectContaining({ intent: "finance" }));
+    });
+
+    it("POST /runs/upload streams a bounded authenticated file and returns its run id", async () => {
+      const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-upload-"));
+      process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+      const boundary = "----tech-radar-boundary";
+      const payload = Buffer.from([
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nvideo-bytes\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\nstockbot-key\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\nanalysis-upload\r\n`,
+        `--${boundary}--\r\n`,
+      ].join(""));
+      try {
+        const res = await app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: `Bearer ${TOKEN}`, "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
+        expect(res.statusCode).toBe(202);
+        expect(res.json()).toEqual({ runId: "mock-upload-run", status: "pending" });
+        expect(runnerMock.runMediaPipeline).toHaveBeenCalledWith(expect.objectContaining({ intent: "finance", origin: { channel: "dashboard" }, mimeType: "video/mp4", idempotencyKey: "stockbot-key", analysisId: "analysis-upload" }));
+      } finally {
+        delete process.env["MEDIA_UPLOAD_DIR"];
+        fs.rmSync(mediaDir, { recursive: true, force: true });
+      }
     });
 
     it("POST /runs rejects an unknown intent", async () => {

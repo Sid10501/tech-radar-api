@@ -12,7 +12,7 @@ export interface AiMemoryRepoOptions {
 
 export interface InboxRow {
   url: string;
-  status: "pending" | "running" | "awaiting_media" | "downstream_pending" | "processed" | "failed" | "skipped";
+  status: "pending" | "running" | "awaiting_media" | "downstream_pending" | "processed" | "partial" | "needs_review" | "failed" | "skipped";
   finding: string | null;
   date: string;
   error?: string;

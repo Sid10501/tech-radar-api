@@ -966,6 +966,37 @@ def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, st
 
 # --- Main --------------------------------------------------------------------
 
+def extract_local_file(file_path: Path, out_dir: Path, source_id: str, do_transcribe: bool, do_ocr: bool) -> dict:
+    """Extract only from a previously validated local file; this path performs no network access."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    result = {
+        "url": f"https://uploads.invalid/{source_id}", "platform": "other", "status": "failed", "error": None,
+        "title": file_path.name, "creator": None, "caption": None, "hashtags": [], "duration_sec": None,
+        "transcript": None, "transcript_source": None, "visual_text": None, "visual_text_source": None,
+        "upload_date": None, "raw_metadata_keys": [], "media_assets": [], "extraction_warnings": [],
+        "source_links": [], "linked_artifacts": [], "extraction_methods": ["local-upload"], "chapters": [], "top_comments": [],
+    }
+    errors = []
+    if do_transcribe:
+        transcript, error = transcribe(file_path)
+        if transcript:
+            result["transcript"], result["transcript_source"] = transcript, "whisper"
+            result["extraction_methods"].append("faster-whisper")
+        elif error:
+            errors.append(error)
+    if do_ocr and file_path.suffix.lower() in {".mp4", ".mov", ".m4v", ".webm"}:
+        visual, error = extract_visual_text(file_path, out_dir)
+        if visual:
+            result["visual_text"], result["visual_text_source"] = visual, "ocr"
+            result["extraction_methods"].append("tesseract:ocr")
+        elif error:
+            errors.append(error)
+    result["status"] = "ok" if result["transcript"] or result["visual_text"] else "partial"
+    if errors:
+        result["error"] = " | ".join(errors)
+        result["extraction_warnings"] = errors
+    return result
+
 def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     platform = detect_platform(url)
@@ -1222,14 +1253,23 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("url")
+    ap.add_argument("url", nargs="?")
+    ap.add_argument("--local-file", default=None)
+    ap.add_argument("--source-id", default=None)
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--no-transcribe", action="store_true")
     ap.add_argument("--no-ocr", action="store_true")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else Path(tempfile.mkdtemp(prefix="tech-radar-"))
-    result = extract(args.url, out_dir, do_transcribe=not args.no_transcribe, do_ocr=not args.no_ocr)
+    if args.local_file:
+        if not args.source_id:
+            ap.error("--source-id is required with --local-file")
+        result = extract_local_file(Path(args.local_file), out_dir, args.source_id, not args.no_transcribe, not args.no_ocr)
+    elif args.url:
+        result = extract(args.url, out_dir, do_transcribe=not args.no_transcribe, do_ocr=not args.no_ocr)
+    else:
+        ap.error("url or --local-file is required")
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0 if result["status"] != "failed" else 2

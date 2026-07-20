@@ -51,6 +51,15 @@ describe("social-video runner routing", () => {
     expect(finance).toHaveBeenCalledOnce();
   });
 
+  it("settles mixed branches independently and reports partial errors", async () => {
+    const technology = vi.fn(async () => { throw new Error("tech unavailable"); });
+    const finance = vi.fn(async () => ({ analysisId: "analysis-3", status: "pending", deduplicated: false }));
+    const result = await routeEnrichedExtract(enriched, "auto", { technology, finance });
+    expect(finance).toHaveBeenCalledOnce();
+    expect(result.finance?.analysisId).toBe("analysis-3");
+    expect(result.branchErrors).toEqual({ technology: "tech unavailable" });
+  });
+
   it("builds enriched bounded evidence with a stable idempotency key", () => {
     const evidence = buildSocialVideoEvidence({
       extract: enriched,
@@ -58,13 +67,23 @@ describe("social-video runner routing", () => {
       runId: "run-abc",
       canonicalUrl: "https://www.youtube.com/watch?v=abc",
       origin: { channel: "telegram", chatId: "42", messageId: "7" },
+      idempotencyKey: "stockbot-upload-key",
     });
-    expect(evidence.idempotencyKey).toBe("run-abc:finance-v1");
+    expect(evidence.idempotencyKey).toBe("stockbot-upload-key");
     expect(evidence.source.canonicalUrl).toBe("https://www.youtube.com/watch?v=abc");
     expect(evidence.transcript.segments[0].text).toContain("UNTRUSTED transcript segment");
     expect(evidence.visualTexts[0].text).toContain("UNTRUSTED visual text");
     expect(evidence.extraction.methods).toEqual(expect.arrayContaining(["yt-dlp", "whisper", "vision_ocr", "link_enrichment"]));
     expect(evidence.financeClaims.securities[0].symbol).toBe("NVDA");
+    expect(evidence.financeClaims.securities[0].claims).toHaveLength(3);
+    expect(evidence.financeClaims.securities[0].claims[0].startMs).toBeUndefined();
+    expect(evidence.financeClaims.securities[0].claims[1].startMs).toBe(0);
+  });
+
+  it("allows an explicit finance pass after a technology-only pass", () => {
+    const id = `intent-${Date.now()}`;
+    registerPipelineRun(`https://youtu.be/${id}`, { intent: "technology" });
+    expect(() => registerPipelineRun(`https://www.youtube.com/watch?v=${id}`, { intent: "finance" })).not.toThrow();
   });
 });
 
@@ -74,7 +93,7 @@ describe("run registration and recovery", () => {
     expect(first.id).toBeTruthy();
     expect(first.url).toBe("https://www.youtube.com/watch?v=unique123");
     expect(first.intent).toBe("finance");
-    expect(() => registerPipelineRun("https://www.youtube.com/watch?v=unique123&utm_source=x"))
+    expect(() => registerPipelineRun("https://www.youtube.com/watch?v=unique123&utm_source=x", { intent: "finance" }))
       .toThrow(/already pending/i);
   });
 

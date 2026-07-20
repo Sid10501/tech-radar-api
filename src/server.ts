@@ -1,6 +1,11 @@
 import Fastify from "fastify";
+import multipart from "@fastify/multipart";
+import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
-import { runPipeline, getRun, listRuns, hydrateRunsFromInbox, DuplicateRunError, applyStockBotCompletion } from "./runner.js";
+import { runPipeline, runMediaPipeline, getRun, listRuns, hydrateRunsFromInbox, recoverAndEnqueueRuns, DuplicateRunError, applyStockBotCompletion } from "./runner.js";
+import { MAX_LOCAL_MEDIA_BYTES } from "./localMedia.js";
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 import {
@@ -89,6 +94,14 @@ function authMiddleware(request: any, reply: any, done: () => void): void {
   reply.code(401).send({ error: "Unauthorized" });
 }
 
+function safeUploadExtension(filename: string, mimeType: string): string | null {
+  const extension = path.extname(path.basename(filename)).toLowerCase();
+  const allowed = new Set([".mp4", ".mov", ".m4v", ".webm", ".mp3", ".m4a", ".wav", ".ogg"]);
+  if (allowed.has(extension)) return extension;
+  const byMime: Record<string, string> = { "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/wav": ".wav", "audio/ogg": ".ogg" };
+  return byMime[mimeType.toLowerCase()] ?? null;
+}
+
 function publicFeedAllowedOrigins(): Set<string> {
   return new Set(
     (process.env["PUBLIC_FEED_ALLOWED_ORIGINS"] ?? "")
@@ -132,6 +145,7 @@ async function ensureAiMemoryCheckout(): Promise<void> {
 
 export function buildServer() {
   const app = Fastify({ logger: true });
+  app.register(multipart, { limits: { files: 1, fileSize: MAX_LOCAL_MEDIA_BYTES, fields: 10, parts: 11 } });
   const callbackEvents = new StockBotEventDeduper(
     1_000,
     process.env["AI_MEMORY_LOCAL_DIR"]
@@ -232,6 +246,50 @@ export function buildServer() {
       }
     },
   );
+
+  app.post("/runs/upload", { preHandler: authMiddleware }, async (request, reply) => {
+    const mediaDir = path.resolve(process.env["MEDIA_UPLOAD_DIR"] ?? "/tmp/tech-radar-media");
+    await fs.promises.mkdir(mediaDir, { recursive: true, mode: 0o700 });
+    let mediaPath: string | undefined;
+    let filename = "";
+    let mimeType = "";
+    let intent: SocialVideoIntent = "auto";
+    let originChannel: "shortcut" | "dashboard" | "api" = "api";
+    let idempotencyKey: string | undefined;
+    let analysisId: string | undefined;
+    try {
+      for await (const part of request.parts()) {
+        if (part.type === "field") {
+          if (part.fieldname === "intent") intent = String(part.value) as SocialVideoIntent;
+          if (part.fieldname === "origin" && ["shortcut", "dashboard", "api"].includes(String(part.value))) originChannel = String(part.value) as typeof originChannel;
+          if (part.fieldname === "idempotencyKey") idempotencyKey = String(part.value);
+          if (part.fieldname === "analysisId") analysisId = String(part.value);
+          continue;
+        }
+        if (mediaPath) throw new Error("exactly one file is allowed");
+        if (!/^(?:video\/|audio\/)/i.test(part.mimetype)) throw new Error("unsupported media MIME type");
+        const extension = safeUploadExtension(part.filename, part.mimetype);
+        if (!extension) throw new Error("unsupported media extension");
+        filename = part.filename;
+        mimeType = part.mimetype;
+        mediaPath = path.join(mediaDir, `${randomUUID()}${extension}`);
+        const handle = await fs.promises.open(mediaPath, "wx", 0o600);
+        await pipeline(part.file, handle.createWriteStream());
+        await handle.close().catch(() => {});
+        if (part.file.truncated) throw new Error("upload exceeds the 20 MB limit");
+      }
+      if (!mediaPath) return reply.code(400).send({ error: "file is required" });
+      if (!["auto", "technology", "finance"].includes(intent)) throw new Error("intent must be auto, technology, or finance");
+      if (idempotencyKey && idempotencyKey.length > 300) throw new Error("idempotencyKey exceeds 300 characters");
+      if (analysisId && analysisId.length > 200) throw new Error("analysisId exceeds 200 characters");
+      const completion = runMediaPipeline({ fileUniqueId: randomUUID(), mediaPath, intent, origin: { channel: originChannel }, mimeType, originalName: filename, idempotencyKey, analysisId });
+      completion.catch(() => {});
+      return reply.code(202).send({ runId: completion.runId, status: "pending" });
+    } catch (error) {
+      if (mediaPath) await fs.promises.unlink(mediaPath).catch(() => {});
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
 
   // Telegram webhook — Telegram POSTs updates here
   app.post<{ Body: Record<string, unknown> }>(
@@ -400,6 +458,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   if (aiMemoryDir) {
     hydrateRunsFromInbox(path.join(aiMemoryDir, "tech-radar", "INBOX.md"));
   }
+  recoverAndEnqueueRuns();
 
   if (!process.env["AI_MEMORY_REPO_URL"]) {
     console.warn("[warn] AI_MEMORY_REPO_URL not set — Telegram finding links will be bare paths");
