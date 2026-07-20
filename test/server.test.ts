@@ -111,6 +111,8 @@ describe("server routes", () => {
       expect(allowed.headers["access-control-allow-headers"]).toContain("X-StockBot-Upload-Token");
       const denied = await app.inject({ method: "OPTIONS", url: "/runs/upload", headers: { origin: "https://evil.example" } });
       expect(denied.statusCode).toBe(403);
+      const prefix = await app.inject({ method: "OPTIONS", url: "/runs/upload/extra", headers: { origin: "https://stocks.example" } });
+      expect(prefix.headers["access-control-allow-origin"]).toBeUndefined();
     } finally { delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; }
   });
 
@@ -630,6 +632,16 @@ describe("server routes", () => {
         delete process.env["MEDIA_UPLOAD_DIR"];
         fs.rmSync(mediaDir, { recursive: true, force: true });
       }
+    });
+
+    it("POST /runs/upload rejects unknown and repeated singleton multipart fields", async () => {
+      const boundary = "----invalid-fields";
+      const request = async (fields: Array<[string, string]>) => app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: `Bearer ${TOKEN}`, "content-type": `multipart/form-data; boundary=${boundary}` }, payload: Buffer.from([
+        ...fields.map(([name, value]) => `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`),
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}--\r\n`,
+      ].join("")) });
+      expect((await request([["mystery", "x"]])).statusCode).toBe(400);
+      expect((await request([["intent", "finance"], ["intent", "finance"]])).statusCode).toBe(400);
     });
 
     it("accepts one matching signed dashboard upload and rejects replay and mismatch", async () => {

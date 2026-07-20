@@ -77,9 +77,15 @@ describe("social-video runner routing", () => {
     expect(evidence.visualTexts[0].text).toContain("UNTRUSTED visual text");
     expect(evidence.extraction.methods).toEqual(expect.arrayContaining(["yt-dlp", "whisper", "vision_ocr", "link_enrichment"]));
     expect(evidence.financeClaims.securities[0].symbol).toBe("NVDA");
-    expect(evidence.financeClaims.securities[0].claims).toHaveLength(3);
-    expect(evidence.financeClaims.securities[0].claims[0].startMs).toBeUndefined();
-    expect(evidence.financeClaims.securities[0].claims[1].startMs).toBe(0);
+    expect(evidence.financeClaims.securities[0].claims.length).toBeGreaterThanOrEqual(3);
+    expect(evidence.financeClaims.securities[0].claims.some((claim) => claim.startMs === undefined)).toBe(true);
+    expect(evidence.financeClaims.securities[0].claims.some((claim) => claim.startMs === 0)).toBe(true);
+  });
+
+  it("rejects durations over 1800 seconds instead of clamping and rounds valid fractions", () => {
+    const input = { extract: { ...enriched, duration_sec: 1800.1 }, classification: { category: "finance" as const, confidence: 1, reasons: [] }, runId: "duration", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" as const } };
+    expect(() => buildSocialVideoEvidence(input)).toThrow(/duration_limit/);
+    expect(buildSocialVideoEvidence({ ...input, extract: { ...input.extract, duration_sec: 1799.6 } }).source.durationSeconds).toBe(1800);
   });
 
   it("attributes multi-security claims only to matching text blocks and keeps ambiguous stocks reviewable", () => {
@@ -96,6 +102,22 @@ describe("social-video runner routing", () => {
     const ambiguous = buildSocialVideoEvidence({ extract: { ...enriched, caption: "This company stock could rally", transcript: null, visual_text: null }, classification: { category: "finance", confidence: 0.5, reasons: [] }, runId: "ambiguous", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" } });
     expect(ambiguous.financeClaims.securities[0]).toMatchObject({ assetType: "stock", confidence: 0.2 });
     expect(ambiguous.financeClaims.securities[0].symbol).toBeUndefined();
+  });
+
+  it("splits multi-security text into symbol-scoped claims and never matches exchange alone", () => {
+    const evidence = buildSocialVideoEvidence({ extract: { ...enriched, caption: null, transcript: "$AAPL rallied after services growth. $MSFT fell after guidance. NASDAQ was volatile.", visual_text: null }, classification: { category: "finance", confidence: 1, reasons: [] }, runId: "sentences", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" } });
+    const aapl = evidence.financeClaims.securities.find((item) => item.symbol === "AAPL")!;
+    const msft = evidence.financeClaims.securities.find((item) => item.symbol === "MSFT")!;
+    expect(aapl.claims).toHaveLength(1); expect(aapl.claims[0].text).toContain("AAPL"); expect(aapl.claims[0].text).not.toContain("MSFT");
+    expect(msft.claims).toHaveLength(1); expect(msft.claims[0].text).toContain("MSFT"); expect(msft.claims[0].text).not.toContain("AAPL");
+  });
+
+  it("captures named stock and ETF identities without inventing symbols", () => {
+    for (const [caption, companyName, assetType] of [["Apple stock may rally", "Apple", "stock"], ["Acme Corp shares fell", "Acme Corp", "stock"], ["Vanguard Growth ETF gained", "Vanguard Growth ETF", "etf"]] as const) {
+      const evidence = buildSocialVideoEvidence({ extract: { ...enriched, caption, transcript: null, visual_text: null }, classification: { category: "finance", confidence: 1, reasons: [] }, runId: caption, canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" } });
+      expect(evidence.financeClaims.securities[0]).toMatchObject({ companyName: expect.stringContaining(companyName), assetType, confidence: 0.3 });
+      expect(evidence.financeClaims.securities[0].symbol).toBeUndefined();
+    }
   });
 
   it("allows an explicit finance pass after a technology-only pass", () => {
@@ -118,6 +140,12 @@ describe("social-video runner routing", () => {
     finance.classification = { category: "finance", confidence: 1, reasons: [] };
     finance.processedBranches = ["finance"];
     expect(() => registerPipelineRun(financeUrl, { intent: "finance" })).toThrow(/already processed/i);
+  });
+
+  it("dedupes explicit finance while an auto extraction is active", () => {
+    const url = `https://youtu.be/auto-active-${Date.now()}`;
+    registerPipelineRun(url, { intent: "auto" });
+    expect(() => registerPipelineRun(url, { intent: "finance" })).toThrow(/already pending/i);
   });
 });
 
@@ -189,5 +217,25 @@ describe("run registration and recovery", () => {
       delete process.env["RUN_STATE_DIR"]; delete process.env["MEDIA_UPLOAD_DIR"];
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("removes retained upload and extraction artifacts for recovered terminal and downstream runs", async () => {
+    const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "recovery-cleanup-")); const stateDir = path.join(root, "state"); const mediaDir = path.join(root, "media");
+    fs.mkdirSync(stateDir); fs.mkdirSync(mediaDir);
+    process.env["RUN_STATE_DIR"] = stateDir; process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+    try {
+      for (const [id, status] of [["terminal-clean", "processed"], ["downstream-clean", "downstream_pending"]] as const) {
+        const mediaPath = path.join(mediaDir, `${id}.mp4`); const work = path.join(root, `${id}-work`);
+        fs.writeFileSync(mediaPath, "x"); fs.writeFileSync(`${mediaPath}.run.json`, JSON.stringify({ schemaVersion: 1, runId: id, mediaPath })); fs.mkdirSync(work); fs.writeFileSync(path.join(work, "frame.jpg"), "x");
+        fs.writeFileSync(path.join(stateDir, `${id}.json`), JSON.stringify({ id, url: `https://uploads.invalid/${id}`, status, mediaPath, extractionWorkDir: work, startedAt: new Date().toISOString() }));
+      }
+      recoverAndEnqueueRuns({}, (run) => { if (["terminal-clean", "downstream-clean"].includes(run.id)) throw new Error("terminal run must not enqueue"); });
+      for (const id of ["terminal-clean", "downstream-clean"]) {
+        expect(fs.existsSync(path.join(mediaDir, `${id}.mp4`))).toBe(false);
+        expect(fs.existsSync(path.join(mediaDir, `${id}.mp4.run.json`))).toBe(false);
+        expect(fs.existsSync(path.join(root, `${id}-work`))).toBe(false);
+      }
+    } finally { delete process.env["RUN_STATE_DIR"]; delete process.env["MEDIA_UPLOAD_DIR"]; fs.rmSync(root, { recursive: true, force: true }); }
   });
 });

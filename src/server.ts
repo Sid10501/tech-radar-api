@@ -196,7 +196,7 @@ export function buildServer() {
   });
 
   app.addHook("onRequest", async (request, reply) => {
-    if (!request.url.startsWith("/runs/upload")) return;
+    if (new URL(request.url, "http://local").pathname !== "/runs/upload") return;
     const origin = request.headers.origin;
     const allowed = new Set((process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] ?? "").split(",").map((value) => value.trim()).filter(Boolean));
     if (typeof origin === "string" && allowed.has(origin)) {
@@ -297,9 +297,14 @@ export function buildServer() {
     let originChannel: "shortcut" | "dashboard" | "api" = "api";
     let idempotencyKey: string | undefined;
     let analysisId: string | undefined;
+    const seenFields = new Set<string>();
+    const allowedFields = new Set(["intent", "origin", "idempotencyKey", "analysisId"]);
     try {
       for await (const part of request.parts()) {
         if (part.type === "field") {
+          if (!allowedFields.has(part.fieldname)) throw new Error(`unknown multipart field: ${part.fieldname}`);
+          if (seenFields.has(part.fieldname)) throw new Error(`repeated multipart field: ${part.fieldname}`);
+          seenFields.add(part.fieldname);
           if (part.fieldname === "intent") intent = String(part.value) as SocialVideoIntent;
           if (part.fieldname === "origin") {
             if (!["shortcut", "dashboard", "api"].includes(String(part.value))) throw new Error("origin must be shortcut, dashboard, or api");
@@ -310,6 +315,8 @@ export function buildServer() {
           continue;
         }
         if (part.fieldname !== "file") throw new Error("multipart file field must be named file");
+        if (seenFields.has("file")) throw new Error("repeated multipart file field");
+        seenFields.add("file");
         if (mediaPath) throw new Error("exactly one file is allowed");
         if (!/^(?:video\/|audio\/)/i.test(part.mimetype)) throw new Error("unsupported media MIME type");
         const extension = safeUploadExtension(part.filename, part.mimetype);

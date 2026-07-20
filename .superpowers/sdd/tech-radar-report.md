@@ -2,7 +2,7 @@
 
 Date: 2026-07-20  
 Branch: `codex/social-video-stock-analysis`  
-Status: `DONE_WITH_CONCERNS`
+Status: `DONE`
 
 ## Scope delivered
 
@@ -97,9 +97,9 @@ Results:
 - Verified Telegram downloads use fixed `api.telegram.org` endpoints, reject redirects, bound declared and streamed bytes, validate returned path, generate filenames, and use private file modes.
 - Verified existing bearer/cookie auth, webhook secret auth, CORS, security headers, SSRF/DNS restrictions, and full legacy suite remain green.
 
-## Concern
+## Historical concern (resolved)
 
-`DONE_WITH_CONCERNS`: the current extraction shell accepts public URLs, not validated local file descriptors/paths. Owner uploads therefore stop at authenticated, bounded, durable `awaiting_media` storage and are never passed to the URL extractor or StockBot. The remaining adapter must preserve duration/byte/time/filename controls and delete media+sidecar after extraction. No cookie/browser/proxy/private-content bypass was added.
+The original implementation was `DONE_WITH_CONCERNS` because uploads stopped at `awaiting_media`. This is resolved by the validated local-file adapter, bounded duration probing, local Whisper/OCR path, durable recovery, and terminal cleanup described in the correction history below. No cookie/browser/proxy/private-content bypass was added.
 
 ## Commit
 
@@ -138,5 +138,24 @@ Dashboard adjudication: the requested owner upload dashboard is StockBot. Tech R
 - `git diff --check` → clean.
 - `npx tsc --noEmit` → exit 0.
 - `npm test` → 33 files, 276 tests passed, 0 failures.
+- `npm run build` → exit 0.
+- `npm audit --omit=dev` → 0 vulnerabilities.
+
+## Final review correction
+
+- Public and uploaded media over 1,800 seconds now terminate as `skipped` with typed `duration_limit`; evidence construction rejects rather than clamps, while valid fractional durations round to the integer contract. yt-dlp `match_filter` prevents downloads when oversized duration metadata is known.
+- Caption, transcript, and visual prose is split into bounded sentence/line claim blocks. Multi-security attribution matches only symbol or normalized company name—never a shared exchange—and unscoped blocks are used only for one security.
+- Named ambiguous identities such as `Apple stock`, `Acme Corp shares`, and named ETFs carry low-confidence `companyName` without an invented symbol.
+- Active auto runs block concurrent explicit finance extraction; completed auto-tech runs allow a later finance pass.
+- Startup removes retained media, sidecars, and extraction work directories for terminal/downstream runs and clears stale work directories before retrying active runs.
+- Upload CORS now matches the exact `/runs/upload` pathname. Unknown and repeated multipart fields/files are rejected.
+
+RED: focused runner/extractor/server suites produced eight expected failures covering each review item. GREEN: the same suites passed after the corrections. Final suite/build/audit results are recorded below after the last verification run.
+
+### Final verification after final review
+
+- `git diff --check` → clean.
+- `npx tsc --noEmit` → exit 0.
+- `npm test` → 33 files, 283 tests passed, 0 failures.
 - `npm run build` → exit 0.
 - `npm audit --omit=dev` → 0 vulnerabilities.

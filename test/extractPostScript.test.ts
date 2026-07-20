@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 
 function runPythonSnippet(code: string): string {
   return execFileSync("python3", ["-c", code], {
@@ -10,6 +11,11 @@ function runPythonSnippet(code: string): string {
 }
 
 describe("extract_post.py media helpers", () => {
+  it("configures yt-dlp to reject known media over 30 minutes before download", () => {
+    const source = fs.readFileSync("scripts/extract_post.py", "utf8");
+    expect(source).toContain("match_filter");
+    expect(source).toMatch(/duration[^\n]+1800|1800[^\n]+duration/);
+  });
   it("blocks localhost and private-network fetch URLs", () => {
     const output = runPythonSnippet(`
 import json

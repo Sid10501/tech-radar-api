@@ -44,6 +44,7 @@ export interface Run {
   evidenceIdempotencyKey?: string;
   classification?: SocialVideoClassification;
   processedBranches?: Array<"technology" | "finance">;
+  extractionWorkDir?: string;
 }
 
 export interface SocialVideoOrigin {
@@ -170,6 +171,18 @@ export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}, enqueue: (r
   }
   let enqueued = 0;
   for (const run of runs.values()) {
+    if (run.extractionWorkDir) {
+      fs.rmSync(run.extractionWorkDir, { recursive: true, force: true });
+      run.extractionWorkDir = undefined;
+      storeRun(run);
+    }
+    if (["processed", "partial", "failed", "skipped", "needs_review", "downstream_pending"].includes(run.status)) {
+      if (run.mediaPath) {
+        try { fs.unlinkSync(run.mediaPath); } catch { /* already removed */ }
+        try { fs.unlinkSync(`${run.mediaPath}.run.json`); } catch { /* already removed */ }
+      }
+      continue;
+    }
     if (!["pending", "awaiting_media"].includes(run.status) || executingRuns.has(run.id)) continue;
     enqueued++;
     enqueue(run, opts);
@@ -280,6 +293,7 @@ function runCoversIntent(run: Run, requested: SocialVideoIntent): boolean {
   if (requested === "auto") return existing === "auto";
   if (existing === requested) return true;
   if (existing !== "auto") return false;
+  if (["pending", "running", "awaiting_media"].includes(run.status)) return true;
   return run.processedBranches?.includes(requested) ?? false;
 }
 
@@ -372,6 +386,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
 
   const repo = new AiMemoryRepo(repoOpts);
   const extractionWorkDir = fs.mkdtempSync(path.join(process.env["TMPDIR"] ?? "/tmp", `tech-radar-extract-${runId}-`));
+  run.extractionWorkDir = extractionWorkDir;
+  storeRun(run);
 
   try {
     await repo.init();
@@ -392,8 +408,11 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const hasContent = (extractResult.caption && extractResult.caption.trim()) ||
                        (extractResult.transcript && extractResult.transcript.trim()) ||
                        (extractResult.visual_text && extractResult.visual_text.trim());
-    if (extractResult.status === "failed" || !hasContent) {
-      const skipReason = extractResult.status === "failed"
+    const durationExceeded = typeof extractResult.duration_sec === "number" && extractResult.duration_sec > 1_800;
+    if (durationExceeded || extractResult.status === "failed" || !hasContent) {
+      const skipReason = durationExceeded
+        ? "duration_limit: media exceeds 1800 seconds"
+        : extractResult.status === "failed"
         ? (extractResult.error ?? "extract failed")
         : "no caption, transcript, or visual text";
       await repo.updateInbox({ url, status: "skipped", finding: null, date: today, error: skipReason });
@@ -558,18 +577,20 @@ export function buildSocialVideoEvidence(input: {
   origin: SocialVideoOrigin;
   idempotencyKey?: string;
 }): SocialVideoEvidenceV1 {
-  const durationSeconds = input.extract.duration_sec == null ? undefined : Math.min(1_800, Math.max(0, Math.round(input.extract.duration_sec)));
+  if (typeof input.extract.duration_sec === "number" && input.extract.duration_sec > 1_800) throw new Error("duration_limit: media exceeds 1800 seconds");
+  const durationSeconds = input.extract.duration_sec == null ? undefined : Math.max(0, Math.round(input.extract.duration_sec));
   const durationMs = Math.round((durationSeconds ?? 0) * 1_000);
   const transcriptText = input.extract.transcript?.trim();
   const methods = new Set(input.extract.extraction_methods ?? []);
   if (input.extract.transcript_source) methods.add(input.extract.transcript_source);
   if (input.extract.visual_text_source) methods.add(input.extract.visual_text_source);
   if (input.extract.enriched_links) methods.add("link_enrichment");
-  const sources = [
+  const sourceTexts = [
     { text: input.extract.caption?.trim(), timed: false },
     { text: transcriptText, timed: true },
     { text: input.extract.visual_text?.trim(), timed: false },
   ].filter((source): source is { text: string; timed: boolean } => Boolean(source.text));
+  const sources = sourceTexts.flatMap((source) => splitClaimBlocks(source.text).map((text) => ({ text, timed: source.timed }))).slice(0, 100);
   const securities = extractSecurityMentions(sources).slice(0, 10);
   const publishedAt = normalizePublishedAt(input.extract.upload_date);
   return SocialVideoEvidenceV1Schema.parse({
@@ -634,6 +655,12 @@ function extractSecurityMentions(sources: Array<{ text: string }>): Array<{
     const current = bySymbol.get(symbol);
     bySymbol.set(symbol, { symbol, companyName: company[1].trim(), assetType: current?.assetType ?? "stock", exchange: current?.exchange, confidence: 0.9 });
   }
+  if (bySymbol.size === 0) {
+    const etf = text.match(/\b([A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,5}\s+ETF)\b/);
+    const namedStock = text.match(/\b([A-Z][A-Za-z&.'-]*(?:\s+(?:[A-Z][A-Za-z&.'-]*|Corp\.?|Corporation|Inc\.?|Ltd\.?)){0,4})\s+(?:stock|shares?)\b/);
+    const name = etf?.[1] ?? namedStock?.[1];
+    if (name && !/^(?:This|The|A|An|Company)\b/i.test(name)) return [{ companyName: name.trim(), assetType: etf ? "etf" : "stock", confidence: 0.3 }];
+  }
   if (bySymbol.size === 0 && /\b(?:stock|shares?|security|company|investment)\b/i.test(text)) {
     return [{ assetType: /\bETF\b/i.test(text) ? "etf" : "stock", confidence: 0.2 }];
   }
@@ -641,9 +668,14 @@ function extractSecurityMentions(sources: Array<{ text: string }>): Array<{
 }
 
 function sourceMatchesSecurity(text: string, security: { symbol?: string; exchange?: string; companyName?: string }): boolean {
-  return [security.symbol, security.exchange, security.companyName]
-    .filter((value): value is string => Boolean(value))
-    .some((value) => new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text));
+  if (security.symbol && new RegExp(`\\b${security.symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text)) return true;
+  const normalizedText = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const normalizedCompany = security.companyName?.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return Boolean(normalizedCompany && normalizedText.includes(normalizedCompany));
+}
+
+function splitClaimBlocks(text: string): string[] {
+  return text.split(/(?:\r?\n)+|(?<=[.!?])\s+/).map((value) => value.trim()).filter(Boolean).slice(0, 100);
 }
 
 function normalizePublishedAt(value: string | null): string | undefined {

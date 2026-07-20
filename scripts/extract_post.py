@@ -353,6 +353,9 @@ def run_ytdlp(
     want_comments = max_comments > 0
     max_download_bytes = _int_env("YTDLP_MAX_DOWNLOAD_BYTES", 50 * 1024 * 1024, 1024 * 1024, 500 * 1024 * 1024)
     socket_timeout = _float_env("YTDLP_SOCKET_TIMEOUT_SEC", 20.0, 1.0, 120.0)
+    def duration_filter(info, *, incomplete=False):
+        duration = info.get("duration") if isinstance(info, dict) else None
+        return "duration_limit: media exceeds 1800 seconds" if isinstance(duration, (int, float)) and duration > 1800 else None
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
@@ -361,6 +364,7 @@ def run_ytdlp(
         "retries": 1,
         "fragment_retries": 1,
         "max_filesize": max_download_bytes,
+        "match_filter": duration_filter,
         "skip_download": not (want_audio or want_video),
         "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
         "format": "best[height<=720]/best" if want_video else "bestaudio/best",
@@ -1105,6 +1109,11 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         result["source_links"] = pull_links(caption)
         result["linked_artifacts"] = classify_linked_artifacts(result["source_links"])
         result["duration_sec"] = info.get("duration")
+        if isinstance(result["duration_sec"], (int, float)) and result["duration_sec"] > 1800:
+            result["status"] = "failed"
+            result["error"] = "duration_limit: media exceeds 1800 seconds"
+            result["extraction_warnings"] = [result["error"]]
+            return result
         result["upload_date"] = info.get("upload_date")
         result["chapters"] = collect_chapters(info)
 
