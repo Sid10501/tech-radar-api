@@ -1006,6 +1006,22 @@ def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, st
     return text or None, None
 
 
+def ocr_frame_assets(out_dir: Path) -> list[dict]:
+    """Expose sampled video frames so a later vision pass sees the video, not only its thumbnail."""
+    return [
+        {
+            "type": "screenshot",
+            "source": "video-frame",
+            "path": str(frame),
+            "url": None,
+            "ocr_text": None,
+            "confidence": "medium",
+        }
+        for frame in sorted((out_dir / "ocr-frames").glob("frame-*.png"))
+        if frame.is_file()
+    ]
+
+
 # --- Main --------------------------------------------------------------------
 
 def extract_local_file(file_path: Path, out_dir: Path, source_id: str, do_transcribe: bool, do_ocr: bool) -> dict:
@@ -1029,6 +1045,7 @@ def extract_local_file(file_path: Path, out_dir: Path, source_id: str, do_transc
             errors.append(error)
     if do_ocr and file_path.suffix.lower() in {".mp4", ".mov", ".m4v", ".webm"}:
         visual, error = extract_visual_text(file_path, out_dir)
+        result["media_assets"].extend(ocr_frame_assets(out_dir))
         if visual:
             result["visual_text"], result["visual_text_source"] = visual, "ocr"
             result["extraction_methods"].append("tesseract:ocr")
@@ -1256,6 +1273,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
     visual_blocks: list[str] = []
     if do_ocr and video_path and video_path.exists():
         visual_text, ocr_err = extract_visual_text(video_path, out_dir)
+        frame_assets = ocr_frame_assets(out_dir)
         if visual_text:
             visual_blocks.append(visual_text)
             result["media_assets"].append({
@@ -1266,9 +1284,12 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 "ocr_text": visual_text,
                 "confidence": "medium",
             })
+            result["media_assets"].extend(frame_assets)
             result["extraction_methods"].append("tesseract:ocr")
         elif ocr_err:
             errors.append(ocr_err)
+        else:
+            result["media_assets"].extend(frame_assets)
 
     if do_ocr:
         image_urls = collect_image_urls(info, html_meta)

@@ -82,6 +82,36 @@ describe("social-video runner routing", () => {
     expect(partialVision).toHaveBeenCalledWith(["/tmp/partial.jpg"]);
     expect(partial.visual_text).toContain("5. FMTM");
 
+    const sampledFrames = Array.from({ length: 10 }, (_, index) => ({
+      type: "screenshot" as const,
+      source: "video-frame",
+      path: `/tmp/frame-${index + 1}.png`,
+      url: null,
+      ocr_text: null,
+      confidence: "medium" as const,
+    }));
+    const cappedVision = vi.fn(async () => ({ text: "1. VOO\n2. QQQM", warning: null }));
+    await withVisionFallback({
+      ...enriched,
+      visual_text: "ETFs\n1. VOO\n2. o@@m",
+      visual_text_source: "ocr",
+      media_assets: [
+        { type: "image", source: "metadata", path: "/tmp/thumbnail.jpg", url: null, ocr_text: null, confidence: "medium" },
+        ...sampledFrames,
+        sampledFrames[0]!,
+      ],
+    }, cappedVision);
+    expect(cappedVision).toHaveBeenCalledWith(sampledFrames.slice(0, 8).map(({ path }) => path));
+
+    const genericVision = vi.fn(async () => ({ text: "generic OCR", warning: null }));
+    await withVisionFallback({
+      ...enriched,
+      visual_text: null,
+      visual_text_source: null,
+      media_assets: sampledFrames,
+    }, genericVision);
+    expect(genericVision).toHaveBeenCalledWith(sampledFrames.slice(0, 4).map(({ path }) => path));
+
     const nonfinanceVision = vi.fn(async () => ({ text: "should not be used", warning: null }));
     await withVisionFallback({
       ...enriched,

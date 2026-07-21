@@ -133,6 +133,6 @@ function extractOutputText(response: unknown): string {
 }
 
 function maxImages(): number {
-  const raw = Number.parseInt(process.env["OPENAI_VISION_MAX_IMAGES"] ?? "4", 10);
-  return Number.isFinite(raw) ? Math.max(1, Math.min(8, raw)) : 4;
+  const raw = Number.parseInt(process.env["OPENAI_VISION_MAX_IMAGES"] ?? "8", 10);
+  return Number.isFinite(raw) ? Math.max(1, Math.min(8, raw)) : 8;
 }

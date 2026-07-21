@@ -242,10 +242,13 @@ export async function withVisionFallback(
   const existingVisualText = extractResult.visual_text?.trim();
   const shouldRunVision = !existingVisualText || isNoisyFinanceListOcr(existingVisualText);
   if (!shouldRunVision) return extractResult;
-  const imagePaths = (extractResult.media_assets ?? [])
-    .filter((asset) => (asset.type === "image" || asset.type === "screenshot") && asset.path)
-    .map((asset) => asset.path!)
-    .slice(0, 4);
+  const mediaAssets = extractResult.media_assets ?? [];
+  const prioritizedAssets = [
+    ...mediaAssets.filter((asset) => asset.type === "screenshot"),
+    ...mediaAssets.filter((asset) => asset.type === "image"),
+  ];
+  const imageLimit = existingVisualText ? 8 : 4;
+  const imagePaths = [...new Set(prioritizedAssets.flatMap((asset) => asset.path ? [asset.path] : []))].slice(0, imageLimit);
   if (imagePaths.length === 0) return extractResult;
 
   const vision = await visionExtractor(imagePaths);
