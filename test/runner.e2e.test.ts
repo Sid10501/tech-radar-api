@@ -47,8 +47,13 @@ describe("runPipeline()", () => {
       fs.readFileSync(path.join(FIXTURE_DIR, "extract_youtube.json"), "utf8"),
     );
 
+    let extractionOutDir = "";
     vi.doMock("../src/extract.js", () => ({
-      extract: vi.fn(async () => extractFixture),
+      extract: vi.fn(async (_url: string, options: { outDir?: string }) => {
+        extractionOutDir = options.outDir!;
+        fs.writeFileSync(path.join(extractionOutDir, "frame.jpg"), "temporary frame");
+        return extractFixture;
+      }),
       ExtractError: class ExtractError extends Error {},
     }));
 
@@ -151,6 +156,8 @@ describe("runPipeline()", () => {
       expect(inbox).toContain("| https://github.com/colinhacks/zod | pending |");
       expect(inbox).toContain("| https://zod.dev/ | pending |");
       expect(inbox).toContain(`child of ${path.basename(findingPath)}: github_repo`);
+      expect(extractionOutDir).toBeTruthy();
+      expect(fs.existsSync(extractionOutDir)).toBe(false);
 
     } finally {
       fs.rmSync(localDir, { recursive: true, force: true });
@@ -158,8 +165,13 @@ describe("runPipeline()", () => {
   });
 
   it("marks run as failed when extract throws", async () => {
+    let failedOutDir = "";
     vi.doMock("../src/extract.js", () => ({
-      extract: vi.fn(async () => { throw new Error("extract failed"); }),
+      extract: vi.fn(async (_url: string, options: { outDir?: string }) => {
+        failedOutDir = options.outDir!;
+        fs.writeFileSync(path.join(failedOutDir, "partial-frame.jpg"), "temporary frame");
+        throw new Error("extract failed");
+      }),
       ExtractError: class ExtractError extends Error {},
     }));
 
@@ -177,6 +189,7 @@ describe("runPipeline()", () => {
       await expect(
         runPipeline("https://bad.url/", { remoteUrl: bareDir, localDir }),
       ).rejects.toThrow("extract failed");
+      expect(fs.existsSync(failedOutDir)).toBe(false);
 
       const runs = listRuns();
       const failed = runs.find((r) => r.status === "failed");

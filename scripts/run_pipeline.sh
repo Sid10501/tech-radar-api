@@ -10,6 +10,7 @@
 set -euo pipefail
 
 URL="${1:-}"
+OUT_DIR="${2:-}"
 if [[ -z "$URL" ]]; then
   echo "usage: $0 <url>" >&2
   exit 64
@@ -78,4 +79,8 @@ if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v tesseract >/dev/null 2>&1
   OCR_FLAG="--no-ocr"
 fi
 
-exec python3 "$SCRIPT_DIR/extract_post.py" "$URL" ${TRANSCRIBE_FLAG:+$TRANSCRIBE_FLAG} ${OCR_FLAG:+$OCR_FLAG}
+OUT_DIR_ARGS=()
+if [[ -n "$OUT_DIR" ]]; then
+  OUT_DIR_ARGS=(--out-dir "$OUT_DIR")
+fi
+exec python3 "$SCRIPT_DIR/extract_post.py" "$URL" "${OUT_DIR_ARGS[@]}" ${TRANSCRIBE_FLAG:+$TRANSCRIBE_FLAG} ${OCR_FLAG:+$OCR_FLAG}

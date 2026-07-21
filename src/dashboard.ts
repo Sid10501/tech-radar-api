@@ -853,6 +853,18 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       updateStats();
     }
 
+    async function loadRuns() {
+      window.__RUNS__ = [];
+      if (!state.privateUnlocked) return;
+      const res = await fetch("/runs", { headers: requestHeaders(), credentials: "same-origin" });
+      if (!res.ok) return;
+      const body = await res.json();
+      window.__RUNS__ = Array.isArray(body) ? body : [];
+      if (window.__RUNS__.some((run) => run.status === "running" || run.status === "pending")) {
+        setTimeout(loadFindings, 8000);
+      }
+    }
+
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
@@ -1502,6 +1514,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       state.privateUnlocked = true;
       updateStats();
       showToast("Sid view unlocked.");
+      await loadRuns();
       await loadFindings();
       return true;
     }
@@ -1524,10 +1537,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     renderList();
     renderDetail();
-    syncSession().finally(() => loadFindings({ preserveView: true }));
-    if ((window.__RUNS__ || []).some((r) => r.status === "running" || r.status === "pending")) {
-      setTimeout(loadFindings, 8000);
-    }
+    syncSession().finally(async () => {
+      await loadRuns();
+      await loadFindings({ preserveView: true });
+    });
   </script>
 </body>
 </html>`;

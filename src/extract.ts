@@ -41,6 +41,7 @@ export interface ExtractResult {
   hashtags: string[];
   duration_sec: number | null;
   transcript: string | null;
+  transcript_segments?: Array<{ start_ms: number; end_ms: number; text: string }>;
   transcript_source: "whisper" | "subs" | "document" | null;
   visual_text: string | null;
   visual_text_source: "ocr" | "browser_ocr" | "vision_ocr" | null;
@@ -143,20 +144,24 @@ function resolveScriptPath(): string {
   );
 }
 
-export async function extract(url: string, shortlinkOptions: ResolveShortlinkOptions = {}): Promise<ExtractResult> {
+export interface ExtractOptions extends ResolveShortlinkOptions {
+  outDir?: string;
+}
+
+export async function extract(url: string, options: ExtractOptions = {}): Promise<ExtractResult> {
   if (!(await isAllowedPublicHttpUrl(url))) {
     throw new ExtractError(`blocked submitted URL: ${url}`);
   }
   const scriptPath = resolveScriptPath();
 
   return new Promise((resolve, reject) => {
-    execFile("bash", [scriptPath, url], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("bash", [scriptPath, url, ...(options.outDir ? [options.outDir] : [])], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         return reject(new ExtractError(`extract failed: ${stderr || err.message}`, err));
       }
       try {
         const result = parseExtractJson(stdout) as ExtractResult;
-        void expandShortlinksInExtract(result, shortlinkOptions).then(resolve, () => resolve(result));
+        void expandShortlinksInExtract(result, options).then(resolve, () => resolve(result));
       } catch (parseErr) {
         reject(
           new ExtractError(

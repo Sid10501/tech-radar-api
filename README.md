@@ -143,7 +143,8 @@ Copy `.env.example` to `.env`:
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
 | `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
 | `GIT_DEPLOY_KEY_B64` | Yes | Base64-encoded SSH private key with write access |
-| `AUTH_TOKEN` | Recommended | Bearer token protecting `POST /runs` |
+| `AUTH_TOKEN` | Required in production | Owner browser/admin credential; accepted by `POST /runs` as a cookie or bearer for the dashboard and iOS Shortcut |
+| `STOCKBOT_DISPATCH_TOKEN` | For StockBot dispatch | Dedicated service bearer protecting `POST /runs` and service uploads; do not expose it to browsers or Shortcuts |
 | `OWNER_NAME` | No | Your name — used in agent prompts (default: `the developer`) |
 | `TARGET_PROJECTS` | No | Comma-separated list of your projects for the implementation agent |
 | `AI_MEMORY_REPO_URL` | No | Public HTTPS URL of your ai-memory repo (for finding links in the UI) |
@@ -156,7 +157,19 @@ Copy `.env.example` to `.env`:
 | `PDF_MAX_CHARS` | No | PDF text extraction character cap (default: 20000) |
 | `TELEGRAM_BOT_TOKEN` | No | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | No | Your chat ID — enables notifications and two-way control |
+| `TELEGRAM_USER_ID` | Recommended | Owner user ID; both chat and user must match when configured |
 | `TELEGRAM_WEBHOOK_SECRET` | No | Random string to verify Telegram webhook requests |
+| `MEDIA_UPLOAD_DIR` | For Telegram files | Private media directory (default `/tmp/tech-radar-media`) |
+| `EXTRACTION_WORK_ROOT` | No | Dedicated managed root for temporary extraction artifacts (default: `$TMPDIR/tech-radar-extraction`) |
+| `RUN_STATE_DIR` | Required in production | Durable accepted-run/callback records; production rejects missing, default, or temporary paths |
+| `STOCKBOT_API_URL` | For finance | StockBot base URL |
+| `STOCKBOT_SERVICE_TOKEN` | For finance | Dedicated Radar → StockBot bearer service token |
+| `STOCKBOT_CALLBACK_SECRET` | For finance | Shared HMAC-SHA256 callback secret |
+| `STOCKBOT_DETAIL_BASE_URL` | No | StockBot result deep-link base |
+| `STOCKBOT_TIMEOUT_MS` | No | Handoff timeout (default 10000 ms; maximum 30000 ms) |
+| `STOCKBOT_UPLOAD_SECRET` | For direct browser upload | HMAC secret for StockBot-issued upload tickets |
+| `STOCKBOT_UPLOAD_ALLOWED_ORIGINS` | For direct browser upload | Exact comma-separated StockBot dashboard origins; wildcard and credentials are not allowed |
+| `ROUTER_MODEL` | No | Model used only when deterministic routing is inconclusive |
 | `PUBLIC_FEED_ALLOWED_ORIGINS` | No | Comma-separated exact origins granted CORS access to `/api/public/*` (no wildcard; empty = no CORS) |
 | `PUBLIC_SITE_RADAR_BASE` | No | Base URL for RSS item links, e.g. `https://your-site.dev/radar` (default: the request origin) |
 | `PORT` | No | HTTP port (default: `3000`) |
@@ -187,7 +200,9 @@ Key variables to set (see `.env.example` for full list):
 | `ANTHROPIC_API_KEY` | Yes | Claude API |
 | `AI_MEMORY_REPO` | Yes | SSH URL of your ai-memory repo |
 | `GIT_DEPLOY_KEY_B64` | Yes | SSH deploy key (base64) |
-| `AUTH_TOKEN` | Recommended | Protects POST /runs |
+| `AUTH_TOKEN` | Required in production | Protects browser/admin APIs; production startup fails when it is empty or unset |
+| `STOCKBOT_DISPATCH_TOKEN` | For StockBot dispatch | Protects `POST /runs` and service uploads |
+| `RUN_STATE_DIR` | Yes in production | Non-temporary persistent volume for run and callback state |
 | `GITHUB_TOKEN` | Recommended | GitHub API (5000 req/hr vs 60) |
 | `YOUTUBE_API_KEY` | Optional | Official YouTube comments fetch before yt-dlp fallback |
 | `YOUTUBE_MAX_COMMENTS` | Optional | Bounded YouTube comments captured per video |
@@ -221,7 +236,9 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
   -d '{"url":"https://YOUR-RAILWAY-URL/telegram/webhook","secret_token":"YOUR_WEBHOOK_SECRET"}'
 ```
 
-Bot commands: send any URL to queue it, `/status`, `/list`, `/help`.
+Bot commands: send or caption any public URL, `/stock <url>` for finance, `/tech <url>` for technology, `/status`, `/list`, `/help`. Owner-supplied videos are limited to 20 MB. Public URL media is limited to 30 minutes, and finance evidence contains at most ten securities.
+
+Uploaded media is owner-authorized, saved under a generated filename with mode `0600`, processed locally by Whisper/OCR without a network or `file://` bypass, and never forwarded to StockBot. Media, frames, OCR outputs, and sidecars are deleted after enrichment and handoff on success or failure. The StockBot owner dashboard is the upload UI; Tech Radar intentionally does not add a second dashboard upload surface.
 
 ---
 
@@ -240,13 +257,23 @@ Returns `{ ok: true }`.
 Web UI — submit URLs, view run history.
 
 ### `POST /runs`
-Requires `Authorization: Bearer <AUTH_TOKEN>` if `AUTH_TOKEN` is set.
+Accepts either `Authorization: Bearer <STOCKBOT_DISPATCH_TOKEN>` for StockBot service dispatch, or the owner `AUTH_TOKEN` as an HttpOnly `auth_token` cookie / bearer for the dashboard and iOS Shortcut. Query-string tokens are never accepted. Keep `STOCKBOT_DISPATCH_TOKEN` server-side. Callers should send a stable `Idempotency-Key` header.
 
 ```json
-{ "url": "https://www.instagram.com/reel/..." }
+{ "url": "https://www.instagram.com/reel/...", "intent": "auto" }
 ```
 
-Returns `202 { "runId": "..." }`.
+Returns `202 { "runId": "...", "deduplicated": false }`. Repeating the same canonical source and exact intent returns the active or successful run as `202` with `deduplicated: true`. A strict JSON boolean `force: true` creates a new run only after a failed, canceled/skipped, or needs-review terminal result. Technology and finance remain distinct explicit passes.
+
+`intent` is optional and must be `auto`, `technology`, or `finance`. The URL is canonicalized and deduplicated before queueing. Finance and mixed runs send the bounded, raw-text `SocialVideoEvidenceV1` contract to StockBot at `POST /api/internal/video-evidence`; untrusted-content wrappers are added only at LLM prompt boundaries. Tech Radar does not calculate finance verdicts.
+
+### `POST /runs/upload`
+
+Streams one multipart file field named `file` (maximum 20 MB) plus `intent`, `origin`, `idempotencyKey`, and `analysisId`. Server-to-server callers use `Authorization: Bearer <STOCKBOT_DISPATCH_TOKEN>` and may omit `Origin`. Direct StockBot dashboard uploads use `X-StockBot-Upload-Token`: base64url compact sorted JSON claims plus a hex HMAC-SHA256 over the encoded segment. Signed browser requests must include an exact `STOCKBOT_UPLOAD_ALLOWED_ORIGINS` match, and successful responses include the matching CORS origin. Tickets expire within ten minutes, bind every multipart field and the exact streamed byte count, and are consumed only after durable run registration succeeds.
+
+### `POST /api/internal/stockbot/completion`
+
+StockBot completion callback. It requires `X-StockBot-Timestamp` and `X-StockBot-Signature`; the signature is lowercase hex HMAC-SHA256 over `timestamp + "." + rawBody`. The body must identify both `runId` and `analysisId`, and terminal status may include `needs_review`. The route uses an atomic `pending`/`applied` event reservation under persistent `RUN_STATE_DIR`, returns retryable HTTP 425 for an overlapping pending delivery, rolls the reservation back when application fails, updates the exact correlated run through the durable INBOX repository, and sends the Telegram result/deep link before marking the event applied.
 
 ### `GET /runs`
 Returns last 50 runs.

@@ -1,0 +1,21 @@
+{
+  "eventId": "social-video:analysis-fixture",
+  "runId": "fixture-run",
+  "analysisId": "analysis-fixture",
+  "status": "failed",
+  "detailUrl": null,
+  "results": [
+    {
+      "symbol": null,
+      "companyName": null,
+      "claimGrade": "unverifiable",
+      "opinion": "insufficient_data",
+      "confidence": 0.0
+    }
+  ],
+  "error": {
+    "code": "provider_unavailable",
+    "message": "No public evidence provider completed",
+    "providers": ["market", "news"]
+  }
+}
