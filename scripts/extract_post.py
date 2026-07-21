@@ -949,7 +949,37 @@ def extract_image_text(image_paths: list[Path]) -> tuple[str | None, str | None]
     return text or None, None
 
 
-def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, str | None]:
+def probe_video_duration(video_path: Path) -> float | None:
+    if not shutil.which("ffprobe"):
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(video_path),
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+        )
+        duration = float(result.stdout.strip())
+        return duration if duration > 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def frame_sample_interval(duration_sec: float | None, max_frames: int) -> float:
+    configured_interval = os.getenv("OCR_FRAME_INTERVAL_SEC")
+    if configured_interval and configured_interval.strip():
+        return _float_env("OCR_FRAME_INTERVAL_SEC", 2.0, 0.5, 10.0)
+    if isinstance(duration_sec, (int, float)) and duration_sec > 0:
+        return max(0.5, min(10.0, duration_sec / max_frames))
+    return 2.0
+
+
+def extract_visual_text(video_path: Path, out_dir: Path, duration_sec: float | None = None) -> tuple[str | None, str | None]:
     """Sample a few video frames and OCR visible text with tesseract."""
     if not shutil.which("ffmpeg"):
         return None, "ocr skipped: ffmpeg not installed"
@@ -958,8 +988,8 @@ def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, st
     if not video_path.exists():
         return None, "ocr skipped: video file missing"
 
-    max_frames = _int_env("OCR_MAX_FRAMES", 6, 1, 20)
-    interval = _float_env("OCR_FRAME_INTERVAL_SEC", 2.0, 0.5, 10.0)
+    max_frames = _int_env("OCR_MAX_FRAMES", 8, 1, 20)
+    interval = frame_sample_interval(duration_sec or probe_video_duration(video_path), max_frames)
     frames_dir = out_dir / "ocr-frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1272,7 +1302,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
 
     visual_blocks: list[str] = []
     if do_ocr and video_path and video_path.exists():
-        visual_text, ocr_err = extract_visual_text(video_path, out_dir)
+        visual_text, ocr_err = extract_visual_text(video_path, out_dir, result.get("duration_sec"))
         frame_assets = ocr_frame_assets(out_dir)
         if visual_text:
             visual_blocks.append(visual_text)

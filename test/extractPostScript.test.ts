@@ -138,13 +138,33 @@ with tempfile.TemporaryDirectory() as directory:
     ]);
   });
 
+  it("samples frames uniformly across short-form video duration by default", () => {
+    const output = runPythonSnippet(`
+import json, os
+from scripts.extract_post import frame_sample_interval
+
+os.environ.pop("OCR_FRAME_INTERVAL_SEC", None)
+values = {
+  "reel": frame_sample_interval(24.0, 8),
+  "short": frame_sample_interval(2.0, 8),
+  "bounded": frame_sample_interval(300.0, 8),
+  "unknown": frame_sample_interval(None, 8),
+}
+os.environ["OCR_FRAME_INTERVAL_SEC"] = ""
+values["blank"] = frame_sample_interval(24.0, 8)
+print(json.dumps(values))
+`);
+
+    expect(JSON.parse(output)).toEqual({ reel: 3, short: 0.5, bounded: 10, unknown: 2, blank: 3 });
+  });
+
   it("attaches sampled frame assets to local video extraction", () => {
     const output = runPythonSnippet(`
 import json, tempfile
 from pathlib import Path
 import scripts.extract_post as extractor
 
-def fake_visual_text(_video_path, out_dir):
+def fake_visual_text(_video_path, out_dir, _duration_sec=None):
     frames = out_dir / "ocr-frames"
     frames.mkdir(parents=True)
     (frames / "frame-001.png").write_bytes(b"frame")
