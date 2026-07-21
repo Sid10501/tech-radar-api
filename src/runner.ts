@@ -235,26 +235,44 @@ export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}, enqueue: (r
   return enqueued;
 }
 
-async function withVisionFallback(extractResult: ExtractResult): Promise<ExtractResult> {
-  if (extractResult.visual_text?.trim()) return extractResult;
+export async function withVisionFallback(
+  extractResult: ExtractResult,
+  visionExtractor: typeof extractTextWithVision = extractTextWithVision,
+): Promise<ExtractResult> {
+  const existingVisualText = extractResult.visual_text?.trim();
+  const shouldRunVision = !existingVisualText || isNoisyFinanceListOcr(existingVisualText);
+  if (!shouldRunVision) return extractResult;
   const imagePaths = (extractResult.media_assets ?? [])
     .filter((asset) => (asset.type === "image" || asset.type === "screenshot") && asset.path)
     .map((asset) => asset.path!)
     .slice(0, 4);
   if (imagePaths.length === 0) return extractResult;
 
-  const vision = await extractTextWithVision(imagePaths);
+  const vision = await visionExtractor(imagePaths);
   const warnings = [...(extractResult.extraction_warnings ?? [])];
   if (vision.warning) warnings.push(vision.warning);
   if (!vision.text) {
     return warnings.length ? { ...extractResult, extraction_warnings: warnings } : extractResult;
   }
+  const boundedVisionText = vision.text.trim().slice(0, 4_000);
+  if (vision.text.trim().length > boundedVisionText.length) warnings.push("vision OCR truncated to 4000 characters");
   return {
     ...extractResult,
-    visual_text: vision.text,
+    visual_text: boundedVisionText,
     visual_text_source: "vision_ocr",
     extraction_warnings: warnings,
   };
+}
+
+function isNoisyFinanceListOcr(text: string): boolean {
+  if (!/\b(?:ETFs?|tickers?)\b/i.test(text)) return false;
+  const listMarkers = text.match(/(?:^|\n)\s*(?:[-–—]\s*)?\d{1,2}\s*[.)]/g) ?? [];
+  if (listMarkers.length < 2) return false;
+  const cleanSymbols = new Set(text.split(/\r?\n/).flatMap((line) => {
+    const match = line.match(/^\s*(?:[-–—]\s*)?\d{1,2}\s*[.)]\s*([A-Z][A-Z0-9.-]{1,5})\s*$/);
+    return match ? [match[1]] : [];
+  }));
+  return cleanSymbols.size < listMarkers.length;
 }
 
 export function getRun(runId: string): Run | undefined {

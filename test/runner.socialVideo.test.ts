@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildSocialVideoEvidence,
+  withVisionFallback,
   applyStockBotCompletion,
   hydrateRunsFromInbox,
   findMediaRunBySubmission,
@@ -37,6 +38,63 @@ const enriched = {
 };
 
 describe("social-video runner routing", () => {
+  it("uses vision to repair noisy finance-list OCR instead of treating nonempty text as sufficient", async () => {
+    const vision = vi.fn(async () => ({ text: "10/10 ETFs\n1. VOO\n2. QQQM\n3. DRAM\n4. VXUS\n5. FMTM", warning: null }));
+    const repaired = await withVisionFallback({
+      ...enriched,
+      caption: "10/10 ETFs (Increasingly get more niche)",
+      transcript: "VOO tracks the top 500 companies. QQM owns the Nasdaq 100. Graham covers memory. VXUS is an international fund. FMTM is a momentum ETF.",
+      visual_text: "10/10 ETFs\n1. VOO\n2. o@@m\n3. ae\n4.\n5.",
+      visual_text_source: "ocr",
+      media_assets: [{ type: "screenshot", source: "video", path: "/tmp/frame.jpg", url: null, ocr_text: null, confidence: "medium" }],
+    }, vision);
+
+    expect(vision).toHaveBeenCalledWith(["/tmp/frame.jpg"]);
+    expect(repaired.visual_text).toContain("2. QQQM");
+    expect(repaired.visual_text).toContain("3. DRAM");
+    expect(repaired.visual_text_source).toBe("vision_ocr");
+    const evidence = buildSocialVideoEvidence({
+      extract: repaired,
+      classification: { category: "finance", confidence: 1, reasons: ["explicit finance intent"] },
+      runId: "vision-repaired-list",
+      canonicalUrl: "https://www.instagram.com/reel/Da3foNRgAfL/",
+      origin: { channel: "telegram" },
+    });
+    expect(evidence.financeClaims.securities.map(({ symbol }) => symbol)).toEqual(["VOO", "QQQM", "DRAM", "VXUS", "FMTM"]);
+
+    const cleanVision = vi.fn(async () => ({ text: "should not be used", warning: null }));
+    const clean = await withVisionFallback({
+      ...enriched,
+      visual_text: "10/10 ETFs\n1. VOO\n2. QQQM\n3. DRAM\n4. VXUS\n5. FMTM",
+      visual_text_source: "ocr",
+      media_assets: [{ type: "screenshot", source: "video", path: "/tmp/clean.jpg", url: null, ocr_text: null, confidence: "high" }],
+    }, cleanVision);
+    expect(cleanVision).not.toHaveBeenCalled();
+    expect(clean.visual_text_source).toBe("ocr");
+
+    const partialVision = vi.fn(async () => ({ text: "10/10 ETFs\n1. VOO\n2. QQQM\n3. DRAM\n4. VXUS\n5. FMTM", warning: null }));
+    const partial = await withVisionFallback({
+      ...enriched,
+      visual_text: "10/10 ETFs\n1. VOO\n2. QQQM\n3. o@@m\n4.\n5.",
+      visual_text_source: "ocr",
+      media_assets: [{ type: "screenshot", source: "video", path: "/tmp/partial.jpg", url: null, ocr_text: null, confidence: "medium" }],
+    }, partialVision);
+    expect(partialVision).toHaveBeenCalledWith(["/tmp/partial.jpg"]);
+    expect(partial.visual_text).toContain("5. FMTM");
+
+    const nonfinanceVision = vi.fn(async () => ({ text: "should not be used", warning: null }));
+    await withVisionFallback({
+      ...enriched,
+      title: "Developer portfolio and stock images",
+      caption: "A fundraising portfolio site",
+      transcript: null,
+      visual_text: "Portfolio projects\nStock images",
+      visual_text_source: "ocr",
+      media_assets: [{ type: "image", source: "metadata", path: "/tmp/portfolio.jpg", url: null, ocr_text: null, confidence: "high" }],
+    }, nonfinanceVision);
+    expect(nonfinanceVision).not.toHaveBeenCalled();
+  });
+
   it("maps terminal dedupe responses and skips a shadow run when an active original run is reused", () => {
     expect(stockBotTerminalRunStatus({ status: "completed", deduplicated: true })).toBe("processed");
     expect(stockBotTerminalRunStatus({ status: "needs_review", deduplicated: true })).toBe("needs_review");
