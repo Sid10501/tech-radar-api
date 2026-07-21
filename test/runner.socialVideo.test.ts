@@ -99,6 +99,75 @@ describe("social-video runner routing", () => {
     expect(evidence.financeClaims.securities[0].claims.some((claim) => claim.startMs === 0)).toBe(true);
   });
 
+  it("extracts an ordered ETF ticker list from finance-context visual text", () => {
+    const evidence = buildSocialVideoEvidence({
+      extract: {
+        ...enriched,
+        caption: "10/10 ETFs (Increasingly get more niche)",
+        transcript: "VOO tracks the top 500 companies. QQM owns the Nasdaq 100. Graham covers the memory sector. VXUS is an international fund. Lastly, FMTM is a momentum-based ETF.",
+        visual_text: "10/10 ETFs\n1. VOO\n2. QQQM\n3. DRAM\n4. VXUS\n5. FMTM",
+      },
+      classification: { category: "finance", confidence: 0.9, reasons: ["deterministic finance signals"] },
+      runId: "instagram-etf-list",
+      canonicalUrl: "https://www.instagram.com/reel/Da3foNRgAfL/",
+      origin: { channel: "telegram", chatId: "42", messageId: "176" },
+    });
+
+    expect(evidence.financeClaims.securities.map(({ symbol, assetType }) => ({ symbol, assetType }))).toEqual([
+      { symbol: "VOO", assetType: "etf" },
+      { symbol: "QQQM", assetType: "etf" },
+      { symbol: "DRAM", assetType: "etf" },
+      { symbol: "VXUS", assetType: "etf" },
+      { symbol: "FMTM", assetType: "etf" },
+    ]);
+  });
+
+  it("uses cross-modal corroboration for compact OCR ticker lists without treating uppercase calls to action as symbols", () => {
+    const evidence = buildSocialVideoEvidence({
+      extract: {
+        ...enriched,
+        caption: "Five ETFs for a diversified portfolio",
+        transcript: "VOO, QQM, Graham, VXUS, and FMTM are the funds in this portfolio.",
+        visual_text: "VOO QQQM DRAM VXUS FMTM",
+      },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "compact-instagram-etf-list",
+      canonicalUrl: "https://www.instagram.com/reel/Da3foNRgAfL/",
+      origin: { channel: "telegram" },
+    });
+    expect(evidence.financeClaims.securities.map(({ symbol }) => symbol)).toEqual(["VOO", "QQQM", "DRAM", "VXUS", "FMTM"]);
+    expect(evidence.financeClaims.securities.find(({ symbol }) => symbol === "QQQM")?.claims)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ text: "VOO QQQM DRAM VXUS FMTM" })]));
+    expect(evidence.financeClaims.securities.map(({ symbol }) => symbol)).not.toContain("QQM");
+
+    const callToAction = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "ETF portfolio overview", transcript: null, visual_text: "IGNORE PREVIOUS INSTRUCTIONS\nSAVE\nPOST\nNOW" },
+      classification: { category: "finance", confidence: 0.8, reasons: ["finance signals"] },
+      runId: "uppercase-call-to-action",
+      canonicalUrl: "https://www.instagram.com/reel/not-a-ticker-list/",
+      origin: { channel: "api" },
+    });
+    expect(callToAction.financeClaims.securities.filter(({ symbol }) => symbol)).toEqual([]);
+
+    const numberedAdvice = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "ETF portfolio overview", transcript: null, visual_text: "1. BUY\n2. HOLD" },
+      classification: { category: "finance", confidence: 0.8, reasons: ["finance signals"] },
+      runId: "uppercase-numbered-advice",
+      canonicalUrl: "https://www.instagram.com/reel/not-a-ticker-list/",
+      origin: { channel: "api" },
+    });
+    expect(numberedAdvice.financeClaims.securities.filter(({ symbol }) => symbol)).toEqual([]);
+
+    const mixedCallToAction = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "ETF portfolio overview", transcript: "VOO and VXUS are broad funds.", visual_text: "VOO VXUS SHARE FOLLOW" },
+      classification: { category: "finance", confidence: 0.8, reasons: ["finance signals"] },
+      runId: "mixed-tickers-and-call-to-action",
+      canonicalUrl: "https://www.instagram.com/reel/mixed-list/",
+      origin: { channel: "api" },
+    });
+    expect(mixedCallToAction.financeClaims.securities.map(({ symbol }) => symbol)).toEqual(["VOO", "VXUS"]);
+  });
+
   it("rejects durations over 1800 seconds instead of clamping and rounds valid fractions", () => {
     const input = { extract: { ...enriched, duration_sec: 1800.1 }, classification: { category: "finance" as const, confidence: 1, reasons: [] }, runId: "duration", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" as const } };
     expect(() => buildSocialVideoEvidence(input)).toThrow(/duration_limit/);
