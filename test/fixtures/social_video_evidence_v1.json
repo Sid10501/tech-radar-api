@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "idempotencyKey": "fixture-evidence-001",
+  "origin": {"channel": "telegram", "runId": "fixture-run-001", "chatId": "100", "messageId": "200"},
+  "source": {
+    "url": "https://www.youtube.com/watch?v=fixture001",
+    "canonicalUrl": "https://youtube.com/watch?v=fixture001",
+    "platform": "youtube",
+    "externalId": "fixture001",
+    "title": "Two stock claims",
+    "creator": "Fixture Creator",
+    "publishedAt": "2026-07-20T12:00:00Z",
+    "durationSeconds": 90
+  },
+  "classification": {"category": "finance", "confidence": 0.97, "reasons": ["Two listed securities and price claims"]},
+  "transcript": {
+    "language": "en",
+    "method": "whisper",
+    "hash": "sha256:fixture",
+    "segments": [
+      {"startMs": 1000, "endMs": 5000, "text": "Apple revenue rose last quarter."},
+      {"startMs": 6000, "endMs": 10000, "text": "Microsoft shares are above 400 dollars."}
+    ]
+  },
+  "visualTexts": [{"text": "AAPL MSFT", "timestampMs": 2500, "method": "ocr"}],
+  "extraction": {"methods": ["whisper", "ocr"], "warnings": []},
+  "financeClaims": {
+    "securities": [
+      {
+        "symbol": "AAPL", "exchange": "NASDAQ", "companyName": "Apple Inc.", "assetType": "stock", "confidence": 0.99,
+        "claims": [{"text": "Apple revenue rose last quarter.", "stance": "bullish", "confidence": 0.9, "startMs": 1000, "endMs": 5000}]
+      },
+      {
+        "symbol": "MSFT", "exchange": "NASDAQ", "companyName": null, "assetType": "stock", "confidence": 0.98,
+        "claims": [{"text": "Microsoft shares are above 400 dollars.", "stance": "bullish", "confidence": 0.85, "startMs": 6000, "endMs": 10000}]
+      }
+    ]
+  }
+}

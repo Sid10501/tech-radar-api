@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { AiMemoryRepo } from "../src/git.js";
+import { AiMemoryRepo, withAiMemoryRepoMutation } from "../src/git.js";
 
 let bareRepoDir: string;
 let workDir: string;
@@ -36,6 +36,22 @@ afterAll(() => {
 });
 
 describe("AiMemoryRepo", () => {
+  it("serializes checkout mutations through one shared async queue", async () => {
+    const events: string[] = [];
+    let release!: () => void;
+    const first = withAiMemoryRepoMutation(async () => {
+      events.push("first:start");
+      await new Promise<void>((resolve) => { release = resolve; });
+      events.push("first:end");
+    });
+    await vi.waitFor(() => expect(events).toEqual(["first:start"]));
+    const second = withAiMemoryRepoMutation(async () => { events.push("second"); });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(events).toEqual(["first:start"]);
+    release();
+    await Promise.all([first, second]);
+    expect(events).toEqual(["first:start", "first:end", "second"]);
+  });
   let repo: AiMemoryRepo;
 
   it("clones the bare repo on init()", async () => {

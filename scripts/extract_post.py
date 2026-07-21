@@ -353,6 +353,9 @@ def run_ytdlp(
     want_comments = max_comments > 0
     max_download_bytes = _int_env("YTDLP_MAX_DOWNLOAD_BYTES", 50 * 1024 * 1024, 1024 * 1024, 500 * 1024 * 1024)
     socket_timeout = _float_env("YTDLP_SOCKET_TIMEOUT_SEC", 20.0, 1.0, 120.0)
+    def duration_filter(info, *, incomplete=False):
+        duration = info.get("duration") if isinstance(info, dict) else None
+        return "duration_limit: media exceeds 1800 seconds" if isinstance(duration, (int, float)) and duration > 1800 else None
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
@@ -361,6 +364,7 @@ def run_ytdlp(
         "retries": 1,
         "fragment_retries": 1,
         "max_filesize": max_download_bytes,
+        "match_filter": duration_filter,
         "skip_download": not (want_audio or want_video),
         "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
         "format": "best[height<=720]/best" if want_video else "bestaudio/best",
@@ -450,14 +454,37 @@ def parse_vtt_text(path: Path) -> str | None:
     return text or None
 
 
-def find_subtitle_text(out_dir: Path, video_id: str | None) -> str | None:
+def parse_vtt_segments(path: Path) -> list[dict]:
+    try:
+        body = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    def millis(value: str) -> int:
+        parts = value.replace(",", ".").split(":")
+        seconds = float(parts[-1]) + (int(parts[-2]) * 60 if len(parts) > 1 else 0) + (int(parts[-3]) * 3600 if len(parts) > 2 else 0)
+        return round(seconds * 1000)
+    out: list[dict] = []
+    for block in re.split(r"\n\s*\n", body):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        timing = next((line for line in lines if "-->" in line), None)
+        if not timing:
+            continue
+        start, end = [part.strip().split()[0] for part in timing.split("-->", 1)]
+        text = " ".join(re.sub(r"<[^>]+>", "", line) for line in lines[lines.index(timing) + 1:]).strip()
+        text = re.sub(r"\s+", " ", html.unescape(text))
+        if text:
+            out.append({"start_ms": millis(start), "end_ms": millis(end), "text": text})
+    return out
+
+
+def find_subtitle_text(out_dir: Path, video_id: str | None) -> tuple[str | None, list[dict]]:
     patterns = [f"{video_id}*.vtt"] if video_id else ["*.vtt"]
     for pattern in patterns:
         for path in sorted(out_dir.glob(pattern), key=lambda p: p.stat().st_size):
             text = parse_vtt_text(path)
             if text:
-                return text
-    return None
+                return text, parse_vtt_segments(path)
+    return None, []
 
 
 def download_subtitles_cli(url: str, out_dir: Path) -> str | None:
@@ -552,19 +579,33 @@ def transcript_snippets_to_text(snippets) -> str | None:
     return text or None
 
 
-def fetch_youtube_transcript_api(video_id: str | None) -> tuple[str | None, str | None]:
+def transcript_snippets_to_segments(snippets) -> list[dict]:
+    out: list[dict] = []
+    for snippet in snippets or []:
+        value = snippet if isinstance(snippet, dict) else {
+            "text": getattr(snippet, "text", None), "start": getattr(snippet, "start", None), "duration": getattr(snippet, "duration", None),
+        }
+        text = re.sub(r"\s+", " ", html.unescape(str(value.get("text") or ""))).strip()
+        start = value.get("start")
+        duration = value.get("duration")
+        if text and isinstance(start, (int, float)):
+            out.append({"start_ms": round(start * 1000), "end_ms": round((start + (duration if isinstance(duration, (int, float)) else 0)) * 1000), "text": text})
+    return out
+
+
+def fetch_youtube_transcript_api(video_id: str | None) -> tuple[str | None, list[dict], str | None]:
     if not video_id:
-        return None, "youtube-transcript-api skipped: missing video id"
+        return None, [], "youtube-transcript-api skipped: missing video id"
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
     except ImportError as e:
-        return None, f"youtube-transcript-api not installed: {e}"
+        return None, [], f"youtube-transcript-api not installed: {e}"
     try:
         fetched = YouTubeTranscriptApi().fetch(video_id, languages=["en", "en-US", "en-GB"])
         raw = fetched.to_raw_data() if hasattr(fetched, "to_raw_data") else fetched
-        return transcript_snippets_to_text(raw), None
+        return transcript_snippets_to_text(raw), transcript_snippets_to_segments(raw), None
     except Exception as e:
-        return None, f"youtube-transcript-api error: {e.__class__.__name__}: {e}"
+        return None, [], f"youtube-transcript-api error: {e.__class__.__name__}: {e}"
 
 
 def collect_chapters(info: dict | None) -> list[dict]:
@@ -725,20 +766,21 @@ def extract_pdf_text(path: Path) -> tuple[str | None, str | None]:
 
 # --- Whisper transcription ---------------------------------------------------
 
-def transcribe(audio_path: Path) -> tuple[str | None, str | None]:
-    """Return (transcript, error). Uses faster-whisper with the model from WHISPER_MODEL env var (default: 'tiny')."""
+def transcribe(audio_path: Path) -> tuple[str | None, list[dict], str | None]:
     try:
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError as e:
-        return None, f"faster-whisper not installed: {e}"
+        return None, [], f"faster-whisper not installed: {e}"
     try:
         whisper_model = os.environ.get("WHISPER_MODEL", "tiny")
         model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
         segments, _info = model.transcribe(str(audio_path), language=None, vad_filter=True)
-        text = " ".join(seg.text.strip() for seg in segments).strip()
-        return text or None, None
+        items = list(segments)
+        text = " ".join(seg.text.strip() for seg in items).strip()
+        timed = [{"start_ms": round(seg.start * 1000), "end_ms": round(seg.end * 1000), "text": seg.text.strip()} for seg in items if seg.text.strip()]
+        return text or None, timed, None
     except Exception as e:
-        return None, f"whisper error: {e.__class__.__name__}: {e}"
+        return None, [], f"whisper error: {e.__class__.__name__}: {e}"
 
 
 # --- On-screen text OCR ------------------------------------------------------
@@ -966,6 +1008,38 @@ def extract_visual_text(video_path: Path, out_dir: Path) -> tuple[str | None, st
 
 # --- Main --------------------------------------------------------------------
 
+def extract_local_file(file_path: Path, out_dir: Path, source_id: str, do_transcribe: bool, do_ocr: bool) -> dict:
+    """Extract only from a previously validated local file; this path performs no network access."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    result = {
+        "url": f"https://uploads.invalid/{source_id}", "platform": "other", "status": "failed", "error": None,
+        "title": file_path.name, "creator": None, "caption": None, "hashtags": [], "duration_sec": None,
+        "transcript": None, "transcript_segments": [], "transcript_source": None, "visual_text": None, "visual_text_source": None,
+        "upload_date": None, "raw_metadata_keys": [], "media_assets": [], "extraction_warnings": [],
+        "source_links": [], "linked_artifacts": [], "extraction_methods": ["local-upload"], "chapters": [], "top_comments": [],
+    }
+    errors = []
+    if do_transcribe:
+        transcript, segments, error = transcribe(file_path)
+        if transcript:
+            result["transcript"], result["transcript_source"] = transcript, "whisper"
+            result["transcript_segments"] = segments
+            result["extraction_methods"].append("faster-whisper")
+        elif error:
+            errors.append(error)
+    if do_ocr and file_path.suffix.lower() in {".mp4", ".mov", ".m4v", ".webm"}:
+        visual, error = extract_visual_text(file_path, out_dir)
+        if visual:
+            result["visual_text"], result["visual_text_source"] = visual, "ocr"
+            result["extraction_methods"].append("tesseract:ocr")
+        elif error:
+            errors.append(error)
+    result["status"] = "ok" if result["transcript"] or result["visual_text"] else "partial"
+    if errors:
+        result["error"] = " | ".join(errors)
+        result["extraction_warnings"] = errors
+    return result
+
 def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     platform = detect_platform(url)
@@ -981,6 +1055,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         "hashtags": [],
         "duration_sec": None,
         "transcript": None,
+        "transcript_segments": [],
         "transcript_source": None,
         "visual_text": None,
         "visual_text_source": None,
@@ -1074,6 +1149,11 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         result["source_links"] = pull_links(caption)
         result["linked_artifacts"] = classify_linked_artifacts(result["source_links"])
         result["duration_sec"] = info.get("duration")
+        if isinstance(result["duration_sec"], (int, float)) and result["duration_sec"] > 1800:
+            result["status"] = "failed"
+            result["error"] = "duration_limit: media exceeds 1800 seconds"
+            result["extraction_warnings"] = [result["error"]]
+            return result
         result["upload_date"] = info.get("upload_date")
         result["chapters"] = collect_chapters(info)
 
@@ -1100,26 +1180,29 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                     errors.append(cli_err)
 
         if prefer_subtitles and not result["transcript"]:
-            transcript_api_text, transcript_api_err = fetch_youtube_transcript_api(video_id or info.get("id"))
+            transcript_api_text, transcript_api_segments, transcript_api_err = fetch_youtube_transcript_api(video_id or info.get("id"))
             if transcript_api_text:
                 result["transcript"] = transcript_api_text
                 result["transcript_source"] = "subs"
+                result["transcript_segments"] = transcript_api_segments
                 result["extraction_methods"].append("youtube-transcript-api")
             elif transcript_api_err:
                 errors.append(transcript_api_err)
 
         if prefer_subtitles and not result["transcript"]:
-            subtitle_text = find_subtitle_text(out_dir, info.get("id"))
+            subtitle_text, subtitle_segments = find_subtitle_text(out_dir, info.get("id"))
             if subtitle_text:
                 result["transcript"] = subtitle_text
+                result["transcript_segments"] = subtitle_segments
                 result["transcript_source"] = "subs"
                 result["extraction_methods"].append("yt-dlp:subtitles")
 
     if prefer_subtitles and not result["transcript"]:
         sub_err = download_subtitles_cli(url, out_dir)
-        subtitle_text = find_subtitle_text(out_dir, info.get("id") if info else video_id)
+        subtitle_text, subtitle_segments = find_subtitle_text(out_dir, info.get("id") if info else video_id)
         if subtitle_text:
             result["transcript"] = subtitle_text
+            result["transcript_segments"] = subtitle_segments
             result["transcript_source"] = "subs"
             result["extraction_methods"].append("yt-dlp-cli:subtitles")
         elif sub_err:
@@ -1161,10 +1244,11 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 result["extraction_methods"].append("html-meta")
 
     if do_transcribe and not result["transcript"] and audio_path and audio_path.exists():
-        transcript, w_err = transcribe(audio_path)
+        transcript, segments, w_err = transcribe(audio_path)
         if transcript:
             result["transcript"] = transcript
             result["transcript_source"] = "whisper"
+            result["transcript_segments"] = segments
             result["extraction_methods"].append("faster-whisper")
         elif w_err:
             errors.append(w_err)
@@ -1222,14 +1306,23 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("url")
+    ap.add_argument("url", nargs="?")
+    ap.add_argument("--local-file", default=None)
+    ap.add_argument("--source-id", default=None)
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--no-transcribe", action="store_true")
     ap.add_argument("--no-ocr", action="store_true")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else Path(tempfile.mkdtemp(prefix="tech-radar-"))
-    result = extract(args.url, out_dir, do_transcribe=not args.no_transcribe, do_ocr=not args.no_ocr)
+    if args.local_file:
+        if not args.source_id:
+            ap.error("--source-id is required with --local-file")
+        result = extract_local_file(Path(args.local_file), out_dir, args.source_id, not args.no_transcribe, not args.no_ocr)
+    elif args.url:
+        result = extract(args.url, out_dir, do_transcribe=not args.no_transcribe, do_ocr=not args.no_ocr)
+    else:
+        ap.error("url or --local-file is required")
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0 if result["status"] != "failed" else 2

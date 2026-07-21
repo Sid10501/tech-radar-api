@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vites
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHmac } from "node:crypto";
+import { StockBotEventDeduper } from "../src/stockbotCallback.js";
 
 const gitMocks = vi.hoisted(() => ({
   init: vi.fn(async () => {}),
@@ -11,13 +13,26 @@ const gitMocks = vi.hoisted(() => ({
 
 // Mock runner before importing server so the routes work without a real pipeline
 vi.mock("../src/runner.js", () => ({
-  runPipeline: vi.fn(async () => ({ runId: "mock-run-id", findingPath: "tech-radar/findings/test.md" })),
+  runPipeline: vi.fn(() => Object.assign(
+    Promise.resolve({ runId: "mock-run-id", findingPath: "tech-radar/findings/test.md" }),
+    { runId: "mock-run-id" },
+  )),
+  runMediaPipeline: vi.fn(() => Object.assign(
+    Promise.resolve({ runId: "mock-upload-run", findingPath: "" }),
+    { runId: "mock-upload-run" },
+  )),
   getRun: vi.fn((id: string) => id === "existing" ? { id, url: "https://x.com", status: "processed", startedAt: new Date().toISOString() } : undefined),
   listRuns: vi.fn(() => [{ id: "existing", url: "https://x.com", status: "processed", startedAt: new Date().toISOString() }]),
+  applyStockBotCompletion: vi.fn(() => ({ id: "finance-run", status: "processed" })),
+  findMediaRunBySubmission: vi.fn(() => undefined),
+  DuplicateRunError: class DuplicateRunError extends Error {
+    constructor(public existingRun: any, public idempotent = false) { super("duplicate"); }
+  },
 }));
 
 vi.mock("../src/git.js", () => ({
   setupSshKey: gitMocks.setupSshKey,
+  withAiMemoryRepoMutation: vi.fn(async (operation: () => Promise<unknown>) => operation()),
   AiMemoryRepo: vi.fn().mockImplementation(() => ({
     init: gitMocks.init,
     pullLatest: gitMocks.pullLatest,
@@ -53,6 +68,12 @@ function expectNoPrivateFindingFields(value: unknown) {
   Object.values(value).forEach(expectNoPrivateFindingFields);
 }
 
+function uploadToken(claims: Record<string, unknown>, secret: string): string {
+  const sorted = Object.fromEntries(Object.entries(claims).sort(([a], [b]) => a.localeCompare(b)));
+  const segment = Buffer.from(JSON.stringify(sorted)).toString("base64url");
+  return `${segment}.${createHmac("sha256", secret).update(segment).digest("hex")}`;
+}
+
 describe("server routes", () => {
   const app = buildServer();
 
@@ -67,6 +88,21 @@ describe("server routes", () => {
     expect(res.statusCode).toBe(200);
     expectSecurityHeaders(res.headers);
     expect(res.json()).toEqual({ ok: true });
+  });
+
+  it("refuses production startup without a persistent RUN_STATE_DIR", () => {
+    const previousNodeEnv = process.env["NODE_ENV"]; const previousStateDir = process.env["RUN_STATE_DIR"];
+    process.env["NODE_ENV"] = "production"; process.env["RUN_STATE_DIR"] = "/tmp/tech-radar-runs";
+    try { expect(() => buildServer()).toThrow(/persistent storage/i); }
+    finally { if (previousNodeEnv === undefined) delete process.env["NODE_ENV"]; else process.env["NODE_ENV"] = previousNodeEnv; if (previousStateDir === undefined) delete process.env["RUN_STATE_DIR"]; else process.env["RUN_STATE_DIR"] = previousStateDir; }
+  });
+
+  it("refuses production startup without an owner AUTH_TOKEN", () => {
+    const previousNodeEnv = process.env["NODE_ENV"]; const previousStateDir = process.env["RUN_STATE_DIR"]; const previousAuth = process.env["AUTH_TOKEN"];
+    const stateDir = fs.mkdtempSync(path.join(process.cwd(), ".production-auth-"));
+    process.env["NODE_ENV"] = "production"; process.env["RUN_STATE_DIR"] = stateDir; delete process.env["AUTH_TOKEN"];
+    try { expect(() => buildServer()).toThrow(/AUTH_TOKEN/); }
+    finally { if (previousNodeEnv === undefined) delete process.env["NODE_ENV"]; else process.env["NODE_ENV"] = previousNodeEnv; if (previousStateDir === undefined) delete process.env["RUN_STATE_DIR"]; else process.env["RUN_STATE_DIR"] = previousStateDir; if (previousAuth === undefined) delete process.env["AUTH_TOKEN"]; else process.env["AUTH_TOKEN"] = previousAuth; fs.rmSync(stateDir, { recursive: true, force: true }); }
   });
 
   it("GET / returns HTML page", async () => {
@@ -85,13 +121,62 @@ describe("server routes", () => {
     expect(res.body).toContain("data-filter=\"ocr\"");
     expect(res.body).not.toContain("class=\"tabs\"");
     expect(res.body).not.toContain("evidence-tab");
+    expect(res.body).not.toContain("https://x.com");
+    expect(res.body).toContain("window.__RUNS__ = [];");
   });
 
-  it("keeps token-query HTML responses no-store", async () => {
+  it("scopes direct-upload preflight to exact configured origins", async () => {
+    process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+    try {
+      const allowed = await app.inject({ method: "OPTIONS", url: "/runs/upload", headers: { origin: "https://stocks.example", "access-control-request-method": "POST" } });
+      expect(allowed.statusCode).toBe(204);
+      expect(allowed.headers["access-control-allow-origin"]).toBe("https://stocks.example");
+      expect(allowed.headers["access-control-allow-headers"]).toContain("X-StockBot-Upload-Token");
+      const denied = await app.inject({ method: "OPTIONS", url: "/runs/upload", headers: { origin: "https://evil.example" } });
+      expect(denied.statusCode).toBe(403);
+      const prefix = await app.inject({ method: "OPTIONS", url: "/runs/upload/extra", headers: { origin: "https://stocks.example" } });
+      expect(prefix.headers["access-control-allow-origin"]).toBeUndefined();
+    } finally { delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; }
+  });
+
+  it("does not turn query tokens into authentication cookies", async () => {
     const res = await app.inject({ method: "GET", url: "/?token=preview" });
 
     expect(res.statusCode).toBe(200);
     expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("does not treat an unconfigured owner token as authorization for POST /runs", async () => {
+    const res = await app.inject({ method: "POST", url: "/runs", payload: { url: "https://youtu.be/no-owner-token", intent: "finance" } });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rolls back a signed upload reservation and media when run registration fails", async () => {
+    const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "upload-register-fail-"));
+    const reservation = { begin: vi.fn(() => true), markApplied: vi.fn(), forget: vi.fn(), state: vi.fn() };
+    process.env["MEDIA_UPLOAD_DIR"] = mediaDir; process.env["STOCKBOT_UPLOAD_SECRET"] = "upload-fail-secret"; process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+    vi.mocked(runnerMock.runMediaPipeline).mockImplementationOnce(() => { throw new Error("registration failed"); });
+    const isolated = buildServer({ consumedUploadTokens: reservation as any }); await isolated.ready();
+    const boundary = "----register-fail"; const claims = { analysisId: "fail-analysis", idempotencyKey: "fail-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 1 };
+    const payload = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="x.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\nfail-key\r\n--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\nfail-analysis\r\n--${boundary}--\r\n`);
+    try {
+      const res = await isolated.inject({ method: "POST", url: "/runs/upload", headers: { origin: "https://stocks.example", "x-stockbot-upload-token": uploadToken(claims, "upload-fail-secret"), "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
+      expect(res.statusCode).toBe(400); expect(reservation.forget).toHaveBeenCalledWith("fail-analysis:fail-key"); expect(fs.readdirSync(mediaDir)).toEqual([]);
+    } finally { await isolated.close(); delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; fs.rmSync(mediaDir, { recursive: true, force: true }); }
+  });
+
+  it("keeps a durably registered signed upload accepted when markApplied persistence fails", async () => {
+    const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "upload-apply-fail-"));
+    const reservation = { begin: vi.fn(() => true), markApplied: vi.fn(() => { throw new Error("reservation disk failed"); }), forget: vi.fn(), state: vi.fn() };
+    process.env["MEDIA_UPLOAD_DIR"] = mediaDir; process.env["STOCKBOT_UPLOAD_SECRET"] = "upload-apply-secret"; process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+    const isolated = buildServer({ consumedUploadTokens: reservation as any }); await isolated.ready();
+    const boundary = "----apply-fail"; const claims = { analysisId: "apply-analysis", idempotencyKey: "apply-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 1 };
+    const payload = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="x.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\napply-key\r\n--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\napply-analysis\r\n--${boundary}--\r\n`);
+    try {
+      const res = await isolated.inject({ method: "POST", url: "/runs/upload", headers: { origin: "https://stocks.example", "x-stockbot-upload-token": uploadToken(claims, "upload-apply-secret"), "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
+      expect(res.statusCode).toBe(202); expect(res.json().runId).toBe("mock-upload-run"); expect(reservation.markApplied).toHaveBeenCalledWith("apply-analysis:apply-key"); expect(reservation.forget).not.toHaveBeenCalled(); expect(fs.readdirSync(mediaDir)).toHaveLength(1);
+    } finally { await isolated.close(); delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; fs.rmSync(mediaDir, { recursive: true, force: true }); }
   });
 
   it("GET /api/public/findings returns public findings without auth", async () => {
@@ -409,7 +494,117 @@ describe("server routes", () => {
       expect(unauthorized.statusCode).toBe(401);
       expect(authorized.statusCode).toBe(200);
       expect(runnerMock.runPipeline).toHaveBeenCalledTimes(1);
-      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://example.com/accepted");
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://example.com/accepted", {
+        intent: "auto",
+        origin: { channel: "telegram", chatId: "123", messageId: undefined },
+      });
+    });
+  });
+
+  describe("StockBot completion callback", () => {
+    const secret = "stockbot-callback-secret";
+    const event = {
+      eventId: "callback-event-1",
+      runId: "finance-run",
+      analysisId: "analysis-1",
+      status: "completed",
+      detailUrl: "https://stockbot.test/analyses/analysis-1",
+      results: [{ symbol: "NVDA", claimGrade: "supported", opinion: "watch", confidence: 0.8 }],
+    };
+
+    beforeEach(() => {
+      process.env["STOCKBOT_CALLBACK_SECRET"] = secret;
+      vi.mocked(runnerMock.applyStockBotCompletion).mockClear();
+    });
+
+    afterAll(() => {
+      delete process.env["STOCKBOT_CALLBACK_SECRET"];
+    });
+
+    function headers(raw: string, timestamp = String(Math.floor(Date.now() / 1_000))) {
+      return {
+        "content-type": "application/json",
+        "x-stockbot-timestamp": timestamp,
+        "x-stockbot-signature": createHmac("sha256", secret).update(`${timestamp}.${raw}`).digest("hex"),
+      };
+    }
+
+    it("accepts a signed callback and applies it once", async () => {
+      const raw = JSON.stringify(event);
+      const res = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, deduplicated: false });
+      expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledWith(event);
+    });
+
+    it("rejects invalid signatures and stale callbacks", async () => {
+      const raw = JSON.stringify({ ...event, eventId: "invalid-event" });
+      const invalid = await app.inject({
+        method: "POST",
+        url: "/api/internal/stockbot/completion",
+        headers: { ...headers(raw), "x-stockbot-signature": "00" },
+        payload: raw,
+      });
+      const staleTimestamp = String(Math.floor((Date.now() - 301_000) / 1_000));
+      const stale = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw, staleTimestamp), payload: raw });
+      expect(invalid.statusCode).toBe(401);
+      expect(stale.statusCode).toBe(401);
+      expect(runnerMock.applyStockBotCompletion).not.toHaveBeenCalled();
+    });
+
+    it("deduplicates callback event IDs before side effects", async () => {
+      const duplicateEvent = { ...event, eventId: `dedupe-${Date.now()}` };
+      const raw = JSON.stringify(duplicateEvent);
+      const first = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      const second = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      expect(first.json()).toEqual({ ok: true, deduplicated: false });
+      expect(second.json()).toEqual({ ok: true, deduplicated: true });
+      expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns retryable non-2xx while the same callback event is still pending", async () => {
+      const pendingEvent = { ...event, eventId: `pending-${Date.now()}` };
+      const raw = JSON.stringify(pendingEvent);
+      let release!: () => void;
+      vi.mocked(runnerMock.applyStockBotCompletion).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ id: "finance-run", status: "processed" } as never); }));
+      const firstPromise = app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      await vi.waitFor(() => expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(1));
+      const overlap = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      expect(overlap.statusCode).toBe(425);
+      release();
+      expect((await firstPromise).statusCode).toBe(200);
+    });
+
+    it("keeps a slow callback pending beyond the reservation TTL", async () => {
+      const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "callback-slow-http-"));
+      const isolated = buildServer({ callbackEvents: new StockBotEventDeduper(100, path.join(stateDir, "events.json"), 50) });
+      const slowEvent = { ...event, eventId: `slow-${Date.now()}` };
+      const raw = JSON.stringify(slowEvent);
+      let release!: () => void;
+      vi.mocked(runnerMock.applyStockBotCompletion).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ id: "finance-run", status: "processed" } as never); }));
+      try {
+        const firstPromise = isolated.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+        await vi.waitFor(() => expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(1));
+        await new Promise((resolve) => setTimeout(resolve, 140));
+        const overlap = await isolated.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+        expect(overlap.statusCode).toBe(425);
+        release();
+        expect((await firstPromise).statusCode).toBe(200);
+      } finally {
+        await isolated.close();
+        fs.rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it("retries the same callback event when applying it fails", async () => {
+      const retryEvent = { ...event, eventId: `retry-${Date.now()}` };
+      const raw = JSON.stringify(retryEvent);
+      vi.mocked(runnerMock.applyStockBotCompletion).mockRejectedValueOnce(new Error("durable write failed") as never).mockResolvedValueOnce({ id: "finance-run", status: "processed" } as never);
+      const first = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      const second = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
+      expect(first.statusCode).toBe(500);
+      expect(second.json()).toEqual({ ok: true, deduplicated: false });
+      expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -418,10 +613,12 @@ describe("server routes", () => {
 
     beforeAll(() => {
       process.env["AUTH_TOKEN"] = TOKEN;
+      process.env["STOCKBOT_DISPATCH_TOKEN"] = "dispatch-secret";
     });
 
     afterAll(() => {
       delete process.env["AUTH_TOKEN"];
+      delete process.env["STOCKBOT_DISPATCH_TOKEN"];
     });
 
     it("GET /runs returns 401 without token", async () => {
@@ -481,7 +678,7 @@ describe("server routes", () => {
         headers: { cookie: `theme=light; auth_token=${TOKEN}; other=value` },
       });
       expect(res.statusCode).toBe(200);
-      expect(Array.isArray(res.json())).toBe(true);
+      expect(res.json()).toEqual(expect.arrayContaining([expect.objectContaining({ url: "https://x.com" })]));
     });
 
     it("GET /runs/:id returns 404 for unknown id", async () => {
@@ -503,18 +700,182 @@ describe("server routes", () => {
       expect(res.json().id).toBe("existing");
     });
 
-    it("POST /runs accepts a URL and returns 202 with runId", async () => {
+    it("POST /runs validates intent and returns the actual registered runId", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/runs",
         headers: {
-          authorization: `Bearer ${TOKEN}`,
+          authorization: "Bearer dispatch-secret",
           "content-type": "application/json",
+          "idempotency-key": "dispatch-key",
         },
-        body: JSON.stringify({ url: "https://www.youtube.com/shorts/abc123" }),
+        body: JSON.stringify({ url: "https://www.youtube.com/shorts/abc123", intent: "finance" }),
       });
       expect(res.statusCode).toBe(202);
-      expect(res.json()).toHaveProperty("runId");
+      expect(res.json()).toEqual({ runId: "mock-run-id", status: "pending", deduplicated: false });
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.youtube.com/watch?v=abc123", expect.objectContaining({ intent: "finance", idempotencyKey: "dispatch-key" }));
+    });
+
+    it("POST /runs returns an idempotent canonical duplicate as accepted", async () => {
+      const ExistingDuplicate = runnerMock.DuplicateRunError as any;
+      vi.mocked(runnerMock.runPipeline).mockImplementationOnce(() => { throw new ExistingDuplicate({ id: "existing-id", status: "processed" }, true); });
+      const res = await app.inject({ method: "POST", url: "/runs", headers: { authorization: "Bearer dispatch-secret", "idempotency-key": "same-key" }, payload: { url: "https://youtu.be/abc123?si=x", intent: "finance" } });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ runId: "existing-id", status: "processed", deduplicated: true });
+    });
+
+    it("POST /runs accepts the owner bearer for iOS Shortcut submissions", async () => {
+      const res = await app.inject({ method: "POST", url: "/runs", headers: { authorization: `Bearer ${TOKEN}` }, payload: { url: "https://youtu.be/auth-boundary", intent: "finance" } });
+      expect(res.statusCode).toBe(202);
+    });
+
+    it("POST /runs accepts the owner dashboard cookie but not a query token", async () => {
+      const cookie = await app.inject({ method: "POST", url: "/runs", headers: { cookie: `auth_token=${TOKEN}` }, payload: { url: "https://youtu.be/dashboard-cookie", intent: "finance" } });
+      const query = await app.inject({ method: "POST", url: `/runs?token=${TOKEN}`, payload: { url: "https://youtu.be/query-token", intent: "finance" } });
+      expect(cookie.statusCode).toBe(202);
+      expect(query.statusCode).toBe(401);
+    });
+
+    it("POST /runs accepts a strict force boolean and forwards it", async () => {
+      const accepted = await app.inject({ method: "POST", url: "/runs", headers: { authorization: `Bearer ${TOKEN}` }, payload: { url: "https://youtu.be/force-retry", intent: "finance", force: true } });
+      const rejected = await app.inject({ method: "POST", url: "/runs", headers: { authorization: `Bearer ${TOKEN}` }, payload: { url: "https://youtu.be/force-bad", intent: "finance", force: "yes" } });
+      expect(accepted.statusCode).toBe(202);
+      expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://www.youtube.com/watch?v=force-retry", expect.objectContaining({ force: true }));
+      expect(rejected.statusCode).toBe(400);
+    });
+
+    it("POST /runs/upload streams a bounded authenticated file and returns its run id", async () => {
+      const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-upload-"));
+      process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+      const boundary = "----tech-radar-boundary";
+      const payload = Buffer.from([
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nvideo-bytes\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\nstockbot-key\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\nanalysis-upload\r\n`,
+        `--${boundary}--\r\n`,
+      ].join(""));
+      try {
+        const res = await app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
+        expect(res.statusCode).toBe(202);
+        expect(res.json()).toEqual({ runId: "mock-upload-run", status: "pending" });
+        expect(runnerMock.runMediaPipeline).toHaveBeenCalledWith(expect.objectContaining({ intent: "finance", origin: { channel: "dashboard" }, mimeType: "video/mp4", idempotencyKey: "stockbot-key", analysisId: "analysis-upload" }));
+      } finally {
+        delete process.env["MEDIA_UPLOAD_DIR"];
+        fs.rmSync(mediaDir, { recursive: true, force: true });
+      }
+    });
+
+    it("POST /runs/upload rejects unknown and repeated singleton multipart fields", async () => {
+      const boundary = "----invalid-fields";
+      const request = async (fields: Array<[string, string]>) => app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` }, payload: Buffer.from([
+        ...fields.map(([name, value]) => `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`),
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}--\r\n`,
+      ].join("")) });
+      expect((await request([["mystery", "x"]])).statusCode).toBe(400);
+      expect((await request([["intent", "finance"], ["intent", "finance"]])).statusCode).toBe(400);
+    });
+
+    it("accepts one matching signed dashboard upload and rejects replay and mismatch", async () => {
+      const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "signed-upload-"));
+      process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+      process.env["STOCKBOT_UPLOAD_SECRET"] = "upload-secret";
+      const boundary = "----signed-upload";
+      const claims = { analysisId: "signed-analysis", idempotencyKey: "signed-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 11 };
+      const body = Buffer.from([
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nvideo-bytes\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\nsigned-key\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\nsigned-analysis\r\n`,
+        `--${boundary}--\r\n`,
+      ].join(""));
+      const headers = { "content-type": `multipart/form-data; boundary=${boundary}`, "x-stockbot-upload-token": uploadToken(claims, "upload-secret"), origin: "https://stocks.example" };
+      process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+      try {
+        vi.mocked(runnerMock.runMediaPipeline).mockImplementationOnce(() => { throw new Error("durable registration failed"); });
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body })).statusCode).toBe(400);
+        const allowed = await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body });
+        expect(allowed.statusCode).toBe(202);
+        expect(allowed.headers["access-control-allow-origin"]).toBe("https://stocks.example");
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers, payload: body })).statusCode).toBe(409);
+        const mismatchHeaders = { ...headers, "x-stockbot-upload-token": uploadToken({ ...claims, analysisId: "mismatch", idempotencyKey: "mismatch", size: 12 }, "upload-secret") };
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers: mismatchHeaders, payload: body })).statusCode).toBe(400);
+      } finally {
+        delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"];
+        fs.rmSync(mediaDir, { recursive: true, force: true });
+      }
+    });
+
+    it("deduplicates a signed upload from durable run identity before reserving its token", async () => {
+      const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "durable-upload-replay-"));
+      process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+      process.env["STOCKBOT_UPLOAD_SECRET"] = "replay-secret";
+      process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+      const reservation = { begin: vi.fn(() => { throw new Error("stale reservation was consulted"); }), state: vi.fn(), markApplied: vi.fn(), forget: vi.fn() };
+      const isolated = buildServer({ consumedUploadTokens: reservation });
+      const boundary = "----durable-replay";
+      const claims = { analysisId: "durable-analysis", idempotencyKey: "durable-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 1 };
+      const body = Buffer.from([
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\ndurable-key\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\ndurable-analysis\r\n`,
+        `--${boundary}--\r\n`,
+      ].join(""));
+      vi.mocked(runnerMock.findMediaRunBySubmission).mockReturnValueOnce({ id: "existing-upload", status: "partial" } as never);
+      vi.mocked(runnerMock.runMediaPipeline).mockClear();
+      try {
+        const response = await isolated.inject({ method: "POST", url: "/runs/upload", headers: { origin: "https://stocks.example", "content-type": `multipart/form-data; boundary=${boundary}`, "x-stockbot-upload-token": uploadToken(claims, "replay-secret") }, payload: body });
+        expect(response.statusCode).toBe(202);
+        expect(response.json()).toEqual({ runId: "existing-upload", status: "partial", deduplicated: true });
+        expect(reservation.begin).not.toHaveBeenCalled();
+        expect(runnerMock.runMediaPipeline).not.toHaveBeenCalled();
+        expect(fs.readdirSync(mediaDir)).toEqual([]);
+      } finally {
+        await isolated.close();
+        delete process.env["MEDIA_UPLOAD_DIR"]; delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"];
+        fs.rmSync(mediaDir, { recursive: true, force: true });
+      }
+    });
+
+    it("requires an exact Origin for signed uploads but not service-Bearer uploads", async () => {
+      process.env["STOCKBOT_UPLOAD_SECRET"] = "origin-secret"; process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"] = "https://stocks.example";
+      const claims = { analysisId: "origin-analysis", idempotencyKey: "origin-key", origin: "dashboard", intent: "finance", exp: Math.floor(Date.now() / 1000) + 300, size: 1 };
+      const boundary = "----origin-upload";
+      const payload = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="x.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\ndashboard\r\n--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\norigin-key\r\n--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\norigin-analysis\r\n--${boundary}--\r\n`);
+      const base = { "content-type": `multipart/form-data; boundary=${boundary}`, "x-stockbot-upload-token": uploadToken(claims, "origin-secret") };
+      try {
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers: base, payload })).statusCode).toBe(403);
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers: { ...base, origin: "https://evil.example" }, payload })).statusCode).toBe(403);
+        expect((await app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` }, payload })).statusCode).toBe(202);
+      } finally { delete process.env["STOCKBOT_UPLOAD_SECRET"]; delete process.env["STOCKBOT_UPLOAD_ALLOWED_ORIGINS"]; }
+    });
+
+    it("POST /runs rejects an unknown intent", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/runs",
+        headers: { authorization: "Bearer dispatch-secret" },
+        payload: { url: "https://example.com/video", intent: "verdict" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(runnerMock.runPipeline).not.toHaveBeenCalled();
+    });
+
+    it("POST /runs rejects malformed and non-http URLs", async () => {
+      for (const url of ["not-a-url", "file:///etc/passwd"]) {
+        const res = await app.inject({
+          method: "POST",
+          url: "/runs",
+          headers: { authorization: "Bearer dispatch-secret" },
+          payload: { url, intent: "auto" },
+        });
+        expect(res.statusCode).toBe(400);
+      }
+      expect(runnerMock.runPipeline).not.toHaveBeenCalled();
     });
 
     it("POST /runs returns 400 without url", async () => {
@@ -522,7 +883,7 @@ describe("server routes", () => {
         method: "POST",
         url: "/runs",
         headers: {
-          authorization: `Bearer ${TOKEN}`,
+          authorization: "Bearer dispatch-secret",
           "content-type": "application/json",
         },
         body: JSON.stringify({}),

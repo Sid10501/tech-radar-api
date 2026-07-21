@@ -2,6 +2,26 @@ import { simpleGit, SimpleGit } from "simple-git";
 import fs from "node:fs";
 import path from "node:path";
 
+let mutationTail = Promise.resolve();
+
+export async function acquireAiMemoryRepoMutation(): Promise<() => void> {
+  const previous = mutationTail;
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  mutationTail = previous.then(() => current, () => current);
+  await previous;
+  return release;
+}
+
+export async function withAiMemoryRepoMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const release = await acquireAiMemoryRepoMutation();
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
 export interface AiMemoryRepoOptions {
   remoteUrl: string;
   localDir: string;
@@ -12,7 +32,7 @@ export interface AiMemoryRepoOptions {
 
 export interface InboxRow {
   url: string;
-  status: "pending" | "processed" | "failed" | "skipped";
+  status: "pending" | "running" | "awaiting_media" | "downstream_pending" | "processed" | "partial" | "needs_review" | "failed" | "skipped";
   finding: string | null;
   date: string;
   error?: string;
@@ -141,10 +161,10 @@ export class AiMemoryRepo {
         content += `\n${newRow}`;
       }
     } else {
-      // Find the pending row for this URL — match regardless of spacing around "pending"
+      // Replace the active lifecycle row for this URL.
       const lines = content.split("\n");
       const pendingIdx = lines.findIndex(
-        (l) => l.includes(row.url) && /\|\s*pending\s*\|/.test(l)
+        (l) => l.includes(row.url) && /\|\s*(?:pending|running|awaiting_media|downstream_pending)\s*\|/.test(l)
       );
       if (pendingIdx >= 0) {
         lines[pendingIdx] = newRow;

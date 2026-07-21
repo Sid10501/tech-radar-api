@@ -37,6 +37,7 @@ export interface ExtractResult {
   hashtags: string[];
   duration_sec: number | null;
   transcript: string | null;
+  transcript_segments?: Array<{ start_ms: number; end_ms: number; text: string }>;
   transcript_source: "whisper" | "subs" | "document" | null;
   visual_text: string | null;
   visual_text_source: "ocr" | "browser_ocr" | "vision_ocr" | null;
@@ -138,14 +139,14 @@ function resolveScriptPath(): string {
   );
 }
 
-export async function extract(url: string): Promise<ExtractResult> {
+export async function extract(url: string, options: { outDir?: string } = {}): Promise<ExtractResult> {
   if (!(await isAllowedSubmittedUrl(url))) {
     throw new ExtractError(`blocked submitted URL: ${url}`);
   }
   const scriptPath = resolveScriptPath();
 
   return new Promise((resolve, reject) => {
-    execFile("bash", [scriptPath, url], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("bash", [scriptPath, url, ...(options.outDir ? [options.outDir] : [])], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         return reject(new ExtractError(`extract failed: ${stderr || err.message}`, err));
       }

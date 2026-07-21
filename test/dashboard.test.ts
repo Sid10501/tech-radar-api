@@ -114,7 +114,15 @@ describe("dashboard HTML", () => {
 
     expect(html).toContain("async function loadFindings(options = {})");
     expect(html).toContain('if (!options.preserveView) state.view = "findings";');
-    expect(html).toContain("syncSession().finally(() => loadFindings({ preserveView: true }));");
+    expect(html).toContain("await loadFindings({ preserveView: true });");
+  });
+
+  it("loads private run state only after the authenticated session is unlocked", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('fetch("/runs", { headers: requestHeaders(), credentials: "same-origin" })');
+    expect(html).toContain("if (!state.privateUnlocked)");
+    expect(html).toContain("await loadRuns();");
   });
 
   it("uses compact mobile action labels that cannot wrap over the brand", () => {
