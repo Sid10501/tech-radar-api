@@ -909,7 +909,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     function prioritizedQualityReasons(f) {
       const chips = [];
       if (f.diagnostics?.duplicateGroup) {
-        chips.push("duplicate");
+        chips.push(f.diagnostics.duplicateGroup.count + " duplicates");
       }
       for (const reason of f.triage?.reasons || []) chips.push("triage " + triageLabel(reason));
       const priority = [
@@ -1346,6 +1346,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
                 <div class="row"><div class="row-label">Transcript</div><div class="badge">\${evidenceBadge(f.evidence.transcript)}</div></div>
                 <div class="row"><div class="row-label">OCR</div><div class="badge">\${evidenceBadge(f.evidence.ocr, "captured", "not captured")}</div></div>
                 <div class="row"><div class="row-label">Repo or docs</div><div class="badge">\${evidenceBadge(f.evidence.repo || f.evidence.docs)}</div></div>
+                \${f.diagnostics?.duplicateGroup ? '<div class="row"><div class="row-label">Duplicate cluster</div><div class="badge">' + escapeHtml(f.diagnostics.duplicateGroup.count) + ' · ' + escapeHtml(f.diagnostics.duplicateGroup.canonicalFindingId) + '</div></div>' : ""}
               </div></div>
               <div class="panel"><div class="panel-head">Triage</div><div class="panel-body">
                 <div class="row"><div class="row-label">Kind</div><div class="badge">\${escapeHtml(f.triage?.kind || "unknown")}</div></div>
