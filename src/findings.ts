@@ -358,6 +358,7 @@ function recommendedAction(
   if ((verdict.includes("#skip") || targetProject === "none") && !(directPublicArtifact && (evidence.repo || evidence.docs))) {
     return "Skip";
   }
+  if (triage.reasons.includes("shortlink_unresolved")) return "Retry";
   if (quality.level === "weak" && !triage.retryable) return "Review";
   if (quality.level === "weak") return "Retry";
   if (verdict.includes("#skip") || targetProject === "none") return "Review";
@@ -383,21 +384,29 @@ function triageFinding(
     return { kind: "dm_gated", retryable: false, reasons: ["dm_gated_no_link"] };
   }
 
+  const unresolvedShortlink = hasUnresolvedShortlink(body, sourceUrl);
+
   if (publicArtifact) {
     const reasons: FindingTriageReason[] = [];
     if (quality.reasons.includes("repo found, source weak")) reasons.push("repo_found_source_weak");
+    if (unresolvedShortlink) reasons.push("shortlink_unresolved");
     const retryable =
-      quality.level === "weak" &&
-      (quality.reasons.includes("repo found, source weak") ||
+      unresolvedShortlink ||
+      (quality.level === "weak" &&
+        (quality.reasons.includes("repo found, source weak") ||
         quality.reasons.includes("source uncertainty") ||
         quality.reasons.includes("low repo signal") ||
         quality.reasons.includes("needs transcript") ||
-        quality.reasons.includes("needs OCR"));
+        quality.reasons.includes("needs OCR")));
     return { kind: "repo_backed", retryable, reasons };
   }
 
-  if (hasUnresolvedShortlinkOnly(body, sourceUrl, evidence)) {
+  if (unresolvedShortlink) {
     return { kind: "unresolved_shortlink", retryable: true, reasons: ["shortlink_unresolved"] };
+  }
+
+  if (hasUnsupportedLandingPage(body)) {
+    return { kind: "no_public_artifact_expected", retryable: false, reasons: ["no_artifact_expected"] };
   }
 
   const clean = stripMarkdown(body).toLowerCase();
@@ -414,15 +423,28 @@ function triageFinding(
   return { kind: "unknown_tool", retryable: quality.level === "weak", reasons: [] };
 }
 
-function hasUnresolvedShortlinkOnly(body: string, sourceUrl: string | null, evidence: FindingEvidence): boolean {
-  if (evidence.repo || evidence.docs) return false;
-  return shortlinkUrls([body, sourceUrl ?? ""].join("\n")).length > 0;
+function hasUnresolvedShortlink(body: string, sourceUrl: string | null): boolean {
+  const resolved = resolvedShortlinkSources(body);
+  return shortlinkUrls([body, sourceUrl ?? ""].join("\n")).some((url) => !resolved.has(url));
+}
+
+function resolvedShortlinkSources(body: string): Set<string> {
+  const resolved = new Set<string>();
+  for (const line of body.split("\n")) {
+    const match = line.match(/^[-*]\s+resolved\s+·\s+[^·\n]+\s+·\s+expanded(?:\s+·\s+\d+\s+redirects?)?:\s+(https?:\/\/\S+)\s+→\s+https?:\/\/\S+/i);
+    if (match) resolved.add(cleanTrailingUrl(match[1]));
+  }
+  return resolved;
 }
 
 function shortlinkUrls(value: string): string[] {
-  return [...value.matchAll(/https?:\/\/(?:t\.co|bit\.ly|bitly\.com|tinyurl\.com|linktr\.ee|lnk\.bio|bio\.link|cutt\.ly|goo\.gl)\/[^\s)\],]+/gi)].map(
+  return [...value.matchAll(/https?:\/\/(?:t\.co|bit\.ly|bitly\.com|tinyurl\.com|cutt\.ly|goo\.gl)\/[^\s)\],]+/gi)].map(
     (match) => cleanTrailingUrl(match[0]),
   );
+}
+
+function hasUnsupportedLandingPage(value: string): boolean {
+  return /https?:\/\/(?:linktr\.ee|lnk\.bio|bio\.link)\/[^\s)\],]+/i.test(value);
 }
 
 function isConceptExplainer(cleanText: string): boolean {
@@ -671,6 +693,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     "On-screen text / OCR:",
     "Extraction path:",
     "Source links found:",
+    "Shortlink expansions:",
     "Linked artifacts:",
     "Top comments:",
     "Extraction warnings:",
@@ -680,6 +703,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const ocrText = markerText(shown, "On-screen text / OCR:", [
     "Extraction path:",
     "Source links found:",
+    "Shortlink expansions:",
     "Linked artifacts:",
     "Top comments:",
     "Learning chapters:",

@@ -44,6 +44,47 @@ describe("extract()", () => {
     expect(result.hashtags).toEqual(["ai", "dev"]);
   });
 
+  it("expands extracted shortlinks before returning evidence", async () => {
+    vi.resetModules();
+    const fetcher = vi.fn(async (url: string) => {
+      if (url === "https://t.co/abc123") {
+        return new Response(null, { status: 302, headers: { location: "https://github.com/acme/tool" } });
+      }
+      return new Response(null, { status: 200 });
+    });
+    const { extract } = await import("../src/extract.js");
+    vi.mocked(childProcess.execFile).mockImplementation(
+      (_file, _args, _opts, callback: any) => {
+        callback(null, JSON.stringify({
+          url: "https://x.com/example/status/123",
+          platform: "other",
+          status: "ok",
+          error: null,
+          title: "A linked tool",
+          creator: "example",
+          caption: "Project: https://t.co/abc123",
+          hashtags: [],
+          duration_sec: null,
+          transcript: null,
+          transcript_source: null,
+          visual_text: null,
+          visual_text_source: null,
+          upload_date: "20260720",
+          raw_metadata_keys: [],
+        }), "");
+        return {} as any;
+      },
+    );
+
+    const result = await extract("https://x.com/example/status/123", { fetcher });
+    expect(result.source_links).toContain("https://github.com/acme/tool");
+    expect(result.shortlink_expansions).toContainEqual(expect.objectContaining({
+      sourceUrl: "https://t.co/abc123",
+      finalHost: "github.com",
+      status: "resolved",
+    }));
+  });
+
   it("throws an ExtractError when the script exits non-zero", async () => {
     vi.resetModules();
     const { extract } = await import("../src/extract.js");

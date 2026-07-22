@@ -21,6 +21,21 @@ const baseExtract: ExtractResult = {
 };
 
 describe("link enrichment", () => {
+  it("treats resolved source links as deterministic enrichment evidence", () => {
+    const candidates = extractLinkCandidates({
+      ...baseExtract,
+      caption: "Project link: https://t.co/abc123",
+      source_links: ["https://github.com/acme/tool"],
+    });
+
+    expect(candidates).toContainEqual({
+      kind: "github",
+      url: "https://github.com/acme/tool",
+      source: "source_url",
+      confidence: "confirmed",
+    });
+  });
+
   it("extracts GitHub, docs, and npm links from OCR/caption evidence", () => {
     const candidates = extractLinkCandidates({
       ...baseExtract,
