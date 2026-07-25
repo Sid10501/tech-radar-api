@@ -61,6 +61,42 @@ describe("extract()", () => {
     ).rejects.toThrow("extract failed");
   });
 
+  it("returns structured failed extraction JSON when the script exits non-zero with valid stdout", async () => {
+    vi.resetModules();
+    const { extract } = await import("../src/extract.js");
+
+    const failedResult = {
+      url: "https://www.youtube.com/watch?v=long-course",
+      platform: "youtube",
+      status: "failed",
+      error: "duration_limit: media exceeds 1800 seconds",
+      title: "Long course",
+      creator: "Course Maker",
+      caption: "A long course that exceeds the extraction limit.",
+      hashtags: [],
+      duration_sec: 3502,
+      transcript: null,
+      transcript_source: null,
+      upload_date: null,
+      raw_metadata_keys: ["duration", "title"],
+      extraction_warnings: ["duration_limit: media exceeds 1800 seconds"],
+    };
+
+    vi.mocked(childProcess.execFile).mockImplementation(
+      (_file, _args, _opts, callback: any) => {
+        const err = Object.assign(new Error("exit 2"), { code: 2 });
+        callback(err, JSON.stringify(failedResult), "warning text");
+        return {} as any;
+      }
+    );
+
+    await expect(extract("https://www.youtube.com/watch?v=long-course")).resolves.toMatchObject({
+      status: "failed",
+      error: "duration_limit: media exceeds 1800 seconds",
+      title: "Long course",
+    });
+  });
+
   it("throws an ExtractError when the script returns invalid JSON", async () => {
     vi.resetModules();
     const { extract } = await import("../src/extract.js");
