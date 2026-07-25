@@ -51,6 +51,7 @@ const EXPECTED_SECURITY_HEADERS = {
   "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
 };
 const EXPECTED_CACHE_CONTROL = "no-store, max-age=0";
+const EXPECTED_METADATA_CACHE_CONTROL = "public, max-age=86400";
 
 function expectSecurityHeaders(headers: Record<string, unknown>) {
   expect(headers).toMatchObject(EXPECTED_SECURITY_HEADERS);
@@ -89,6 +90,33 @@ describe("server routes", () => {
     expectSecurityHeaders(res.headers);
     expect(res.json()).toEqual({ ok: true });
   });
+
+  it("serves crawler guidance with a bounded metadata cache", async () => {
+    const res = await app.inject({ method: "GET", url: "/robots.txt" });
+
+    expect(res.statusCode).toBe(200);
+    expectSecurityHeaders(res.headers);
+    expect(res.headers["content-type"]).toBe("text/plain; charset=utf-8");
+    expect(res.headers["cache-control"]).toBe(EXPECTED_METADATA_CACHE_CONTROL);
+    expect(res.body).toBe(
+      "User-agent: *\n"
+        + "Disallow: /api/\n"
+        + "Disallow: /runs\n"
+        + "Disallow: /telegram/\n",
+    );
+  });
+
+  it.each(["/favicon.ico", "/apple-touch-icon.png"])(
+    "answers %s without a noisy 404",
+    async (url) => {
+      const res = await app.inject({ method: "GET", url });
+
+      expect(res.statusCode).toBe(204);
+      expectSecurityHeaders(res.headers);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_METADATA_CACHE_CONTROL);
+      expect(res.body).toBe("");
+    },
+  );
 
   it("refuses production startup without a persistent RUN_STATE_DIR", () => {
     const previousNodeEnv = process.env["NODE_ENV"]; const previousStateDir = process.env["RUN_STATE_DIR"];

@@ -34,6 +34,14 @@ const SECURITY_HEADERS = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
 } as const;
 const NO_STORE_CACHE_CONTROL = "no-store, max-age=0";
+const METADATA_CACHE_CONTROL = "public, max-age=86400";
+const ROBOTS_TEXT = [
+  "User-agent: *",
+  "Disallow: /api/",
+  "Disallow: /runs",
+  "Disallow: /telegram/",
+  "",
+].join("\n");
 
 interface EnrichCandidate {
   finding: FindingSummary;
@@ -257,6 +265,22 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
 
   app.get("/healthz", async () => {
     return { ok: true };
+  });
+
+  app.get("/robots.txt", async (_request, reply) => {
+    reply.header("Content-Type", "text/plain; charset=utf-8");
+    reply.header("Cache-Control", METADATA_CACHE_CONTROL);
+    return ROBOTS_TEXT;
+  });
+
+  app.get("/favicon.ico", async (_request, reply) => {
+    reply.header("Cache-Control", METADATA_CACHE_CONTROL);
+    return reply.code(204).send();
+  });
+
+  app.get("/apple-touch-icon.png", async (_request, reply) => {
+    reply.header("Cache-Control", METADATA_CACHE_CONTROL);
+    return reply.code(204).send();
   });
 
   app.post<{ Body: { password?: string } }>("/api/unlock", async (request, reply) => {
