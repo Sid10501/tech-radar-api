@@ -187,8 +187,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
     .primary-filters,
     .secondary-filters { display: contents; }
-    .more-filter,
     .mode-note-compact { display: none; }
+    .filter.more-filter { display: none; }
     .batch-health-region { min-width: 0; }
     .batch-health {
       display: grid;
@@ -729,7 +729,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         padding-inline: 5px;
       }
       .primary-filter [data-count-for] { display: none; }
-      .more-filter { display: inline-flex; }
+      .filter.more-filter { display: inline-flex; }
       .secondary-filters {
         grid-column: 1 / -1;
         display: none;

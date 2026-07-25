@@ -35,6 +35,12 @@ describe("dashboard HTML", () => {
     expect(html).toContain("secondaryFilters.has(state.filter)");
   });
 
+  it("keeps the More disclosure hidden in the desktop filter rail", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain(".filter.more-filter { display: none; }");
+  });
+
   it("provides separate desktop and compact mobile mode copy", () => {
     const html = DASHBOARD_HTML([]);
 
