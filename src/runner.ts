@@ -235,26 +235,47 @@ export function recoverAndEnqueueRuns(opts: RunPipelineOptions = {}, enqueue: (r
   return enqueued;
 }
 
-async function withVisionFallback(extractResult: ExtractResult): Promise<ExtractResult> {
-  if (extractResult.visual_text?.trim()) return extractResult;
-  const imagePaths = (extractResult.media_assets ?? [])
-    .filter((asset) => (asset.type === "image" || asset.type === "screenshot") && asset.path)
-    .map((asset) => asset.path!)
-    .slice(0, 4);
+export async function withVisionFallback(
+  extractResult: ExtractResult,
+  visionExtractor: typeof extractTextWithVision = extractTextWithVision,
+): Promise<ExtractResult> {
+  const existingVisualText = extractResult.visual_text?.trim();
+  const shouldRunVision = !existingVisualText || isNoisyFinanceListOcr(existingVisualText);
+  if (!shouldRunVision) return extractResult;
+  const mediaAssets = extractResult.media_assets ?? [];
+  const prioritizedAssets = [
+    ...mediaAssets.filter((asset) => asset.type === "screenshot"),
+    ...mediaAssets.filter((asset) => asset.type === "image"),
+  ];
+  const imageLimit = existingVisualText ? 8 : 4;
+  const imagePaths = [...new Set(prioritizedAssets.flatMap((asset) => asset.path ? [asset.path] : []))].slice(0, imageLimit);
   if (imagePaths.length === 0) return extractResult;
 
-  const vision = await extractTextWithVision(imagePaths);
+  const vision = await visionExtractor(imagePaths);
   const warnings = [...(extractResult.extraction_warnings ?? [])];
   if (vision.warning) warnings.push(vision.warning);
   if (!vision.text) {
     return warnings.length ? { ...extractResult, extraction_warnings: warnings } : extractResult;
   }
+  const boundedVisionText = vision.text.trim().slice(0, 4_000);
+  if (vision.text.trim().length > boundedVisionText.length) warnings.push("vision OCR truncated to 4000 characters");
   return {
     ...extractResult,
-    visual_text: vision.text,
+    visual_text: boundedVisionText,
     visual_text_source: "vision_ocr",
     extraction_warnings: warnings,
   };
+}
+
+function isNoisyFinanceListOcr(text: string): boolean {
+  if (!/\b(?:ETFs?|tickers?)\b/i.test(text)) return false;
+  const listMarkers = text.match(/(?:^|\n)\s*(?:[-–—]\s*)?\d{1,2}\s*[.)]/g) ?? [];
+  if (listMarkers.length < 2) return false;
+  const cleanSymbols = new Set(text.split(/\r?\n/).flatMap((line) => {
+    const match = line.match(/^\s*(?:[-–—]\s*)?\d{1,2}\s*[.)]\s*([A-Z][A-Z0-9.-]{1,5})\s*$/);
+    return match ? [match[1]] : [];
+  }));
+  return cleanSymbols.size < listMarkers.length;
 }
 
 export function getRun(runId: string): Run | undefined {
@@ -715,7 +736,10 @@ export function buildSocialVideoEvidence(input: {
     ...transcriptSegments.flatMap((segment) => splitClaimBlocks(segment.text).map((text) => ({ text, startMs: segment.startMs, endMs: segment.endMs }))),
     ...(input.extract.visual_text?.trim() ? splitClaimBlocks(input.extract.visual_text).map((text) => ({ text })) : []),
   ];
-  const securities = extractSecurityMentions(sources).slice(0, 10);
+  const securities = extractSecurityMentions(sources, {
+    visualText: input.extract.visual_text ?? undefined,
+    corroboratingText: [input.extract.caption, transcriptText].filter(Boolean).join("\n"),
+  }).slice(0, 10);
   const publishedAt = normalizePublishedAt(input.extract.upload_date);
   const uploaded = new URL(input.canonicalUrl).hostname === "uploads.invalid";
   const contractUrl = uploaded ? `https://internal.invalid/tech-radar-upload/${encodeURIComponent(input.runId)}` : input.extract.url;
@@ -784,7 +808,7 @@ function sampleEvenly<T>(values: T[], limit: number): T[] {
   return Array.from({ length: limit }, (_, index) => values[Math.round(index * (values.length - 1) / (limit - 1))]);
 }
 
-function extractSecurityMentions(sources: Array<{ text: string }>): Array<{
+function extractSecurityMentions(sources: Array<{ text: string }>, context?: { visualText?: string; corroboratingText?: string }): Array<{
   symbol?: string;
   exchange?: string;
   companyName?: string;
@@ -803,6 +827,11 @@ function extractSecurityMentions(sources: Array<{ text: string }>): Array<{
       const exchange = match[2] ? match[1].toUpperCase() : undefined;
       bySymbol.set(symbol, { symbol, exchange, assetType: /\bETF\b/i.test(source.text) ? "etf" : "stock", confidence: exchange ? 0.85 : 0.7 });
     }
+  }
+  const hasEtfContext = /\bETFs?\b/i.test(text);
+  const hasSecurityContext = hasEtfContext || /\b(?:stocks?|shares?|funds?|invest(?:ing|ment|ors?)?|portfolio|NASDAQ|NYSE)\b/i.test(text);
+  for (const symbol of extractExplicitVisualTickerList(context?.visualText, context?.corroboratingText, hasSecurityContext)) {
+    bySymbol.set(symbol, { symbol, assetType: hasEtfContext ? "etf" : "stock", confidence: 0.65 });
   }
   for (const company of text.matchAll(/\b([A-Z][A-Za-z&.' -]{1,80}(?:Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|PLC))\s*\(([A-Z][A-Z0-9.-]{0,9})\)/g)) {
     const symbol = company[2];
@@ -832,6 +861,32 @@ function extractSecurityMentions(sources: Array<{ text: string }>): Array<{
     return [{ assetType: /\bETF\b/i.test(text) ? "etf" : "stock", confidence: 0.2 }];
   }
   return [...bySymbol.values(), ...named.values()];
+}
+
+function extractExplicitVisualTickerList(visualText: string | undefined, corroboratingText: string | undefined, hasSecurityContext: boolean): string[] {
+  if (!visualText || !hasSecurityContext) return [];
+  const stopWords = new Set([
+    "ETF", "ETFS", "FUND", "FUNDS", "NASDAQ", "NYSE", "TSX", "ASX", "LSE", "USA", "US",
+    "BUY", "SELL", "HOLD", "SHARE", "FOLLOW", "LIKE", "SAVE", "POST", "NOW", "WATCH", "COMMENT", "LINK", "BIO",
+    "TOP", "BEST", "THIS", "THAT", "NEXT", "LAST",
+  ]);
+  const valid = (value: string): boolean => /^[A-Z][A-Z0-9.-]{1,5}$/.test(value) && !stopWords.has(value);
+  const isCorroborated = (symbol: string): boolean => new RegExp(`\\b${symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(corroboratingText ?? "");
+  const lines = visualText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const numbered = lines.flatMap((line) => {
+    const match = line.match(/^\d{1,2}\s*[.)-]\s*\$?([A-Z][A-Z0-9.-]{1,5})$/);
+    return match && valid(match[1]) ? [match[1]] : [];
+  });
+  if (numbered.length >= 2 && numbered.filter(isCorroborated).length >= 2) return [...new Set(numbered)];
+
+  const compact = lines.flatMap((line) => {
+    const tokens = line.split(/[\s,|/]+/).map((token) => token.replace(/^\$/, "")).filter(Boolean);
+    const candidates = tokens.filter(valid);
+    return candidates.length >= 2 && tokens.length <= 10 ? [candidates] : [];
+  }).find((tokens) => {
+    return tokens.filter(isCorroborated).length >= 2;
+  });
+  return compact ? [...new Set(compact)] : [];
 }
 
 function normalizeSecurityName(value: string): string {
@@ -907,7 +962,9 @@ async function persistCallbackState(run: Run): Promise<void> {
   const finding = [run.findingPath?.split("/").pop(), `stockbot:${run.downstreamAnalysisId}`, `run:${run.id}`].filter(Boolean).join(";");
   const remoteUrl = process.env["AI_MEMORY_REPO"];
   if (!remoteUrl) return;
-  const repo = new AiMemoryRepo({ remoteUrl, localDir: baseDir, gitAuthor: { name: "Tech Radar Bot", email: "bot@tech-radar.local" } });
+  const deployKeyB64 = process.env["GIT_DEPLOY_KEY_B64"];
+  const sshKeyPath = deployKeyB64 ? setupSshKey(deployKeyB64) : undefined;
+  const repo = new AiMemoryRepo({ remoteUrl, localDir: baseDir, sshKeyPath, gitAuthor: { name: "Tech Radar Bot", email: "bot@tech-radar.local" } });
   await repo.init();
   await repo.pullLatest();
   await repo.updateInbox({ url: run.url, status: run.status, finding, date, error: run.error });
