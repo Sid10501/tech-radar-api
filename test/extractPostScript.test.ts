@@ -111,4 +111,78 @@ print(merge_text_blocks(["Repo: github.com/a/b\\nAI Editor", "repo: github.com/a
 
     expect(output).toBe("Repo: github.com/a/b\nAI Editor\nDocs: example.dev");
   });
+
+  it("exposes sampled video frames as ordered screenshot assets for vision OCR", () => {
+    const output = runPythonSnippet(`
+import json, tempfile
+from pathlib import Path
+from scripts.extract_post import ocr_frame_assets
+
+with tempfile.TemporaryDirectory() as directory:
+    frames = Path(directory) / "ocr-frames"
+    frames.mkdir()
+    (frames / "frame-002.png").write_bytes(b"second")
+    (frames / "frame-001.png").write_bytes(b"first")
+    (frames / "ignore.txt").write_text("ignored")
+    print(json.dumps(ocr_frame_assets(Path(directory))))
+`);
+
+    const assets = JSON.parse(output);
+    expect(assets.map((asset: { type: string; source: string; path: string }) => ({
+      type: asset.type,
+      source: asset.source,
+      name: asset.path.split("/").at(-1),
+    }))).toEqual([
+      { type: "screenshot", source: "video-frame", name: "frame-001.png" },
+      { type: "screenshot", source: "video-frame", name: "frame-002.png" },
+    ]);
+  });
+
+  it("samples frames uniformly across short-form video duration by default", () => {
+    const output = runPythonSnippet(`
+import json, os
+from scripts.extract_post import frame_sample_interval
+
+os.environ.pop("OCR_FRAME_INTERVAL_SEC", None)
+values = {
+  "reel": frame_sample_interval(24.0, 8),
+  "short": frame_sample_interval(2.0, 8),
+  "bounded": frame_sample_interval(300.0, 8),
+  "unknown": frame_sample_interval(None, 8),
+}
+os.environ["OCR_FRAME_INTERVAL_SEC"] = ""
+values["blank"] = frame_sample_interval(24.0, 8)
+print(json.dumps(values))
+`);
+
+    expect(JSON.parse(output)).toEqual({ reel: 3, short: 0.5, bounded: 10, unknown: 2, blank: 3 });
+  });
+
+  it("attaches sampled frame assets to local video extraction", () => {
+    const output = runPythonSnippet(`
+import json, tempfile
+from pathlib import Path
+import scripts.extract_post as extractor
+
+def fake_visual_text(_video_path, out_dir, _duration_sec=None):
+    frames = out_dir / "ocr-frames"
+    frames.mkdir(parents=True)
+    (frames / "frame-001.png").write_bytes(b"frame")
+    return "ETFs\\n1. VOO", None
+
+extractor.extract_visual_text = fake_visual_text
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory)
+    video = root / "upload.mp4"
+    video.write_bytes(b"video")
+    result = extractor.extract_local_file(video, root / "work", "source", False, True)
+    print(json.dumps(result["media_assets"]))
+`);
+
+    expect(JSON.parse(output)).toEqual([expect.objectContaining({
+      type: "screenshot",
+      source: "video-frame",
+      confidence: "medium",
+    })]);
+  });
 });
