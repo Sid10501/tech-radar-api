@@ -551,6 +551,41 @@ describe("dashboard HTML", () => {
     });
   });
 
+  it("restores the visible mobile list after desktop release notes, resize, and finding drill-in", async () => {
+    const harness = createDashboardHarness({ mobile: false });
+    await harness.settle();
+    await harness.evaluate(`loadReleaseNotes({ historyMode: "push" })`);
+
+    harness.setMobile(true);
+    await harness.evaluate(`selectFinding("parent.md", { openDetail: true, historyMode: "push" })`);
+    harness.history.back();
+    await harness.settle();
+
+    expect(await harness.evaluate(`({ view: state.view, mobileDetailOpen: state.mobileDetailOpen })`)).toEqual({
+      view: "findings",
+      mobileDetailOpen: false,
+    });
+    expect(harness.elements.get("detail")?.innerHTML).not.toContain("Release notes");
+  });
+
+  it("restores the visible list after search closes mobile notes and a finding opens", async () => {
+    const harness = createDashboardHarness();
+    await harness.settle();
+    await harness.evaluate(`loadReleaseNotes({ historyMode: "push" })`);
+
+    harness.elements.get("search")?.handlers.input?.({ target: { value: "Parent" } });
+    expect(await harness.evaluate(`state.mobileDetailOpen`)).toBe(false);
+    await harness.evaluate(`selectFinding("parent.md", { openDetail: true, historyMode: "push" })`);
+    harness.history.back();
+    await harness.settle();
+
+    expect(await harness.evaluate(`({ view: state.view, mobileDetailOpen: state.mobileDetailOpen })`)).toEqual({
+      view: "findings",
+      mobileDetailOpen: false,
+    });
+    expect(harness.elements.get("detail")?.innerHTML).not.toContain("Release notes");
+  });
+
   it("keeps release notes open when the deferred initial findings load completes", async () => {
     const findingsResponse = deferred<unknown>();
     const harness = createDashboardHarness({ findingsResponse: findingsResponse.promise });
@@ -581,6 +616,13 @@ describe("dashboard HTML", () => {
         },
       }),
     ],
+    [
+      "non-2xx response",
+      () => Promise.resolve({
+        ok: false,
+        json: async () => ({}),
+      }),
+    ],
   ])("falls back to the findings list when restored detail has %s", async (_caseName, failingResponse) => {
     let parentRequests = 0;
     const harness = createDashboardHarness({
@@ -609,6 +651,25 @@ describe("dashboard HTML", () => {
       mobileDetailOpen: false,
     });
     expect(harness.elements.get("toast")?.textContent).toBe("Could not restore finding.");
+  });
+
+  it("shows a load error when the current non-restored finding receives a non-2xx response", async () => {
+    let parentRequests = 0;
+    const harness = createDashboardHarness({
+      detailResponse: async (id) => {
+        const finding = id === "parent.md" ? parentFinding : childFinding;
+        if (id === "parent.md" && ++parentRequests > 1) {
+          return { ok: false, json: async () => ({}) };
+        }
+        return { ok: true, json: async () => detailFixture(finding) };
+      },
+    });
+    await harness.settle();
+    await harness.evaluate(`state.detailCache.delete(detailCacheKey("parent.md"))`);
+
+    await harness.evaluate(`selectFinding("parent.md")`);
+
+    expect(harness.elements.get("toast")?.textContent).toBe("Could not load finding.");
   });
 
   it("ignores a restored-detail failure after a newer finding selection wins", async () => {
@@ -644,6 +705,43 @@ describe("dashboard HTML", () => {
       selectedId: "child.md",
       mobileDetailOpen: true,
     });
+  });
+
+  it("ignores a restored-detail non-2xx response after history returns to the list", async () => {
+    const restoredResponse = deferred<unknown>();
+    let parentRequests = 0;
+    const harness = createDashboardHarness({
+      detailResponse: async (id) => {
+        const finding = id === "parent.md" ? parentFinding : childFinding;
+        if (id === "parent.md" && ++parentRequests > 1) return restoredResponse.promise;
+        return { ok: true, json: async () => detailFixture(finding) };
+      },
+    });
+    await harness.settle();
+    await harness.evaluate(`state.detailCache.delete(detailCacheKey("parent.md"))`);
+    const restoredEntry = {
+      marker: "tech-radar-dashboard",
+      view: "finding",
+      findingId: "parent.md",
+      selectedId: "parent.md",
+      filter: "all",
+      query: "",
+      scrollTop: 0,
+    };
+    harness.history.replaceState(restoredEntry, "", "http://dashboard.test/");
+    const restorePromise = harness.evaluate(`restoreMobileHistory(history.state)`);
+    await harness.settle();
+
+    harness.history.replaceState({ ...restoredEntry, view: "findings", findingId: null }, "", "http://dashboard.test/");
+    await harness.evaluate(`restoreMobileHistory(history.state)`);
+    restoredResponse.resolve({ ok: false, json: async () => ({}) });
+
+    await expect(restorePromise).resolves.toBeUndefined();
+    expect(await harness.evaluate(`({ view: state.view, mobileDetailOpen: state.mobileDetailOpen })`)).toEqual({
+      view: "findings",
+      mobileDetailOpen: false,
+    });
+    expect(harness.elements.get("toast")?.textContent).toBe("");
   });
 
   it.each([

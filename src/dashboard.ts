@@ -922,8 +922,9 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     const mobileHistoryMarker = "tech-radar-dashboard";
 
     function mobileCurrentView() {
+      if (!state.mobileDetailOpen) return "findings";
       if (state.view === "release-notes") return "release-notes";
-      if (state.mobileDetailOpen && state.selectedId) return "finding";
+      if (state.selectedId) return "finding";
       return "findings";
     }
 
@@ -1612,10 +1613,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       const path = state.privateUnlocked ? "/api/findings/" : "/api/public/findings/";
       const res = await fetch(path + encodeURIComponent(id), { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
       if (requestId !== state.requestSeq || state.selectedId !== id) return null;
-      if (!res.ok) {
-        showToast("Could not load finding.");
-        return null;
-      }
+      if (!res.ok) return null;
       const detail = await res.json();
       state.detailCache.set(cacheKey, detail);
       return detail;
@@ -1694,6 +1692,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       if (historyMode === "restore") {
         restoreMobileListFallback("Could not restore finding.");
+      } else {
+        showToast("Could not load finding.");
       }
       return false;
     }
