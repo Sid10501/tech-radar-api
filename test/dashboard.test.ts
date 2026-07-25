@@ -1,6 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { DASHBOARD_HTML } from "../src/dashboard.js";
+import {
+  DASHBOARD_HTML,
+  dashboardReasonKey,
+  dedupeDashboardReasons,
+} from "../src/dashboard.js";
+
+describe("dashboard reason presentation", () => {
+  it("treats triage prefixes and case as presentation-only", () => {
+    expect(dashboardReasonKey("triage Shortlink unresolved")).toBe("shortlink unresolved");
+    expect(dashboardReasonKey("  SOURCE UNCERTAINTY ")).toBe("source uncertainty");
+  });
+
+  it("keeps the first highest-priority label for equivalent reasons", () => {
+    expect(dedupeDashboardReasons([
+      "triage Shortlink unresolved",
+      "shortlink unresolved",
+      "Source uncertainty",
+      "source uncertainty",
+    ])).toEqual(["triage Shortlink unresolved", "Source uncertainty"]);
+  });
+});
 
 describe("dashboard HTML", () => {
   it("renders audit count hooks without tabs", () => {

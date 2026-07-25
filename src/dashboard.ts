@@ -1,5 +1,19 @@
 import type { Run } from "./runner.js";
 
+export function dashboardReasonKey(reason: string): string {
+  return reason.trim().replace(/^triage\s+/i, "").toLowerCase();
+}
+
+export function dedupeDashboardReasons(reasons: string[]): string[] {
+  const seen = new Set<string>();
+  return reasons.filter((reason) => {
+    const key = dashboardReasonKey(reason);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -826,6 +840,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
+    const dashboardReasonKey = ${dashboardReasonKey.toString()};
+    const dedupeDashboardReasons = ${dedupeDashboardReasons.toString()};
     const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
@@ -927,7 +943,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       for (const reason of f.quality.reasons || []) {
         if (!chips.includes(reason)) chips.push(reason);
       }
-      return chips.filter(Boolean).slice(0, 3);
+      return dedupeDashboardReasons(chips.filter(Boolean)).slice(0, 3);
     }
 
     function qualityReasonChips(f) {
