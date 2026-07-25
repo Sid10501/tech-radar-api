@@ -185,6 +185,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       font-size: 12px;
       line-height: 1.4;
     }
+    .primary-filters,
+    .secondary-filters { display: contents; }
+    .more-filter,
+    .mode-note-compact { display: none; }
     .batch-health {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -671,9 +675,14 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         margin-bottom: 2px;
       }
       .mode-note {
-        padding: 8px 12px;
-        font-size: 11px;
+        padding: 6px 12px;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
+      .mode-note-wide { display: none; }
+      .mode-note-compact { display: inline; }
       .batch-health {
         grid-template-columns: repeat(4, max-content);
         overflow-x: auto;
@@ -684,14 +693,36 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         padding: 6px 7px;
       }
       .filters {
-        flex-wrap: nowrap;
-        overflow-x: auto;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px;
         min-height: 44px;
         padding: 8px 12px;
-        scrollbar-width: none;
       }
-      .filters::-webkit-scrollbar {
+      .primary-filters {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 4px;
+        min-width: 0;
+      }
+      .primary-filter {
+        width: 100%;
+        min-width: 0;
+        padding-inline: 5px;
+      }
+      .primary-filter [data-count-for] { display: none; }
+      .more-filter { display: inline-flex; }
+      .secondary-filters {
+        grid-column: 1 / -1;
         display: none;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        padding-top: 2px;
+      }
+      .secondary-filters.open { display: grid; }
+      .secondary-filter { width: 100%; }
+      .filters {
+        overflow: visible;
       }
       .filter {
         min-height: 28px;
@@ -819,18 +850,26 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
             <div class="stat"><div id="weak-count" class="stat-value">0</div><div class="stat-label">Weak</div></div>
           </div>
         </div>
-        <div id="mode-note" class="mode-note">Public research is open. Unlock Sid view only when you want project fit and next actions.</div>
+        <div id="mode-note" class="mode-note">
+          <span id="mode-note-wide" class="mode-note-wide">Public research is open. Unlock Sid view only when you want project fit and next actions.</span>
+          <span id="mode-note-compact" class="mode-note-compact">Public view · Unlock for project fit</span>
+        </div>
         <div id="batch-health" class="batch-health" aria-label="Latest batch health"></div>
         <div class="filters" aria-label="Filter findings">
-          <button class="filter active" data-filter="all">All <span data-count-for="all">0</span></button>
-          <button class="filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
-          <button class="filter" data-filter="review">Review <span data-count-for="review">0</span></button>
-          <button class="filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
-          <button class="filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
-          <button class="filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
-          <button class="filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
-          <button class="filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
-          <button class="filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
+          <div class="primary-filters">
+            <button class="filter primary-filter active" data-filter="all">All <span data-count-for="all">0</span></button>
+            <button class="filter primary-filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
+            <button class="filter primary-filter" data-filter="review">Review <span data-count-for="review">0</span></button>
+            <button class="filter primary-filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
+          </div>
+          <button id="more-filters" class="filter more-filter" type="button" aria-expanded="false" aria-controls="secondary-filters">More</button>
+          <div id="secondary-filters" class="secondary-filters" aria-hidden="false">
+            <button class="filter secondary-filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
+            <button class="filter secondary-filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
+            <button class="filter secondary-filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
+            <button class="filter secondary-filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
+            <button class="filter secondary-filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
+          </div>
         </div>
         <div id="finding-list" class="list"></div>
       </aside>
@@ -842,7 +881,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     window.__RUNS__ = ${JSON.stringify(runs)};
     const dashboardReasonKey = ${dashboardReasonKey.toString()};
     const dedupeDashboardReasons = ${dedupeDashboardReasons.toString()};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false };
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false, secondaryFiltersOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -859,6 +898,29 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     function setMobileDetailOpen(open) {
       state.mobileDetailOpen = Boolean(open);
       $("dashboard-root").classList.toggle("mobile-detail-open", state.mobileDetailOpen);
+    }
+
+    const secondaryFilters = new Set(["repo", "enrich", "ocr", "project", "skip"]);
+
+    function setSecondaryFiltersOpen(open) {
+      state.secondaryFiltersOpen = Boolean(open);
+      const tray = $("secondary-filters");
+      const button = $("more-filters");
+      const mobile = isMobileViewport();
+      tray.classList.toggle("open", mobile && state.secondaryFiltersOpen);
+      tray.setAttribute("aria-hidden", String(mobile && !state.secondaryFiltersOpen));
+      button.setAttribute("aria-expanded", String(state.secondaryFiltersOpen));
+      syncFilterControls();
+    }
+
+    function syncFilterControls() {
+      document.querySelectorAll(".filter[data-filter]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.filter === state.filter);
+      });
+      const secondaryActive = secondaryFilters.has(state.filter);
+      const more = $("more-filters");
+      more.classList.toggle("active", secondaryActive);
+      more.setAttribute("aria-label", secondaryActive ? "More filters, " + filterLabel() + " active" : "More filters");
     }
 
     async function syncSession() {
@@ -1015,8 +1077,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     function resetFilterToAll() {
       state.filter = "all";
-      document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
-      document.querySelector('[data-filter="all"]')?.classList.add("active");
+      syncFilterControls();
     }
 
     function filterLabel() {
@@ -1089,9 +1150,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         const count = state.filterCounts[key] ?? 0;
         button.disabled = key !== "all" && count === 0;
         if (button.disabled && button.classList.contains("active")) {
-          button.classList.remove("active");
           state.filter = "all";
-          document.querySelector('[data-filter="all"]')?.classList.add("active");
         }
       });
       const audit = state.audit;
@@ -1106,12 +1165,16 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           ].map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ': ' + escapeHtml(value) + '</div>').join("")
         : "";
       $("count").textContent = state.loading ? "Loading" : visibleFindings().length + " of " + state.findings.length;
-      $("mode-note").textContent = state.privateUnlocked
+      $("mode-note-wide").textContent = state.privateUnlocked
         ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
         : "Public research is open. Unlock Sid view only when you want project fit and next actions.";
+      $("mode-note-compact").textContent = state.privateUnlocked
+        ? "Sid view · Project fit visible"
+        : "Public view · Unlock for project fit";
       $("unlock").querySelector(".wide-label").textContent = state.privateUnlocked ? "Unlocked" : "Unlock";
       $("unlock").querySelector(".short-label").textContent = state.privateUnlocked ? "Sid" : "Unlock";
       $("dashboard-root").classList.toggle("sid-unlocked", state.privateUnlocked);
+      syncFilterControls();
     }
 
     async function loadAudit() {
@@ -1500,11 +1563,13 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       renderList();
       if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
     });
-    document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => {
+    $("more-filters").addEventListener("click", () => setSecondaryFiltersOpen(!state.secondaryFiltersOpen));
+    setSecondaryFiltersOpen(false);
+
+    document.querySelectorAll(".filter[data-filter]").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled) return;
-      document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
       state.filter = button.dataset.filter || "all";
+      setSecondaryFiltersOpen(false);
       const previousId = state.selectedId;
       setMobileDetailOpen(false);
       renderList();
@@ -1549,6 +1614,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     window.addEventListener("resize", () => {
       if (!isMobileViewport()) setMobileDetailOpen(false);
+      setSecondaryFiltersOpen(isMobileViewport() ? state.secondaryFiltersOpen : false);
     });
 
     renderList();

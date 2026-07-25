@@ -23,6 +23,28 @@ describe("dashboard reason presentation", () => {
 });
 
 describe("dashboard HTML", () => {
+  it("keeps primary mobile filters visible and secondary filters behind More", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('class="primary-filters"');
+    expect(html).toContain('id="more-filters"');
+    expect(html).toContain('aria-controls="secondary-filters"');
+    expect(html).toContain('id="secondary-filters" class="secondary-filters" aria-hidden="false"');
+    expect(html).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
+    expect(html).toContain("function setSecondaryFiltersOpen(open)");
+    expect(html).toContain("secondaryFilters.has(state.filter)");
+  });
+
+  it("provides separate desktop and compact mobile mode copy", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('id="mode-note-wide"');
+    expect(html).toContain('id="mode-note-compact"');
+    expect(html).toContain(".mode-note-compact { display: none; }");
+    expect(html).toContain("Public view · Unlock for project fit");
+    expect(html).toContain("Sid view · Project fit visible");
+  });
+
   it("renders audit count hooks without tabs", () => {
     const html = DASHBOARD_HTML([]);
 
