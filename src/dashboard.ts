@@ -919,6 +919,88 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return window.matchMedia("(max-width: 980px)").matches;
     }
 
+    const mobileHistoryMarker = "tech-radar-dashboard";
+
+    function mobileHistorySnapshot(overrides = {}) {
+      return {
+        marker: mobileHistoryMarker,
+        view: state.view,
+        findingId: state.selectedId,
+        selectedId: state.selectedId,
+        filter: state.filter,
+        query: state.query,
+        scrollTop: $("finding-list").scrollTop,
+        ...overrides,
+      };
+    }
+
+    function ensureMobileHistoryRoot() {
+      if (!isMobileViewport()) return;
+      if (history.state?.marker === mobileHistoryMarker) return;
+      history.replaceState(mobileHistorySnapshot({ view: "findings" }), "", location.href);
+    }
+
+    function pushMobileView(view, findingId = null) {
+      if (!isMobileViewport()) return;
+      ensureMobileHistoryRoot();
+      history.replaceState(mobileHistorySnapshot({ view: history.state?.view || "findings" }), "", location.href);
+      const nextEntry = mobileHistorySnapshot({ view, findingId, scrollTop: 0 });
+      history.pushState(nextEntry, "", location.href);
+    }
+
+    function closeMobileView() {
+      if (isMobileViewport() && history.state?.marker === mobileHistoryMarker && history.state.view !== "findings") {
+        history.back();
+        return;
+      }
+      state.view = "findings";
+      setMobileDetailOpen(false);
+      renderDetail();
+    }
+
+    function restoreMobileListFallback(message) {
+      state.view = "findings";
+      state.detail = null;
+      state.selectedId = visibleFindings()[0]?.id || null;
+      setMobileDetailOpen(false);
+      history.replaceState(mobileHistorySnapshot({ view: "findings" }), "", location.href);
+      renderList();
+      renderDetail();
+      showToast(message);
+    }
+
+    async function restoreMobileHistory(entry) {
+      if (!entry || entry.marker !== mobileHistoryMarker) return;
+      state.filter = entry.filter || "all";
+      state.query = entry.query || "";
+      state.selectedId = entry.selectedId || null;
+      $("search").value = state.query;
+      syncFilterControls();
+
+      if (entry.view === "release-notes") {
+        await loadReleaseNotes({ historyMode: "restore" });
+        return;
+      }
+      if (entry.view === "finding" && entry.findingId) {
+        if (!state.findings.some((finding) => finding.id === entry.findingId)) {
+          restoreMobileListFallback("Finding is no longer available.");
+          return;
+        }
+        state.view = "findings";
+        await selectFinding(entry.findingId, { openDetail: true, historyMode: "restore" });
+        return;
+      }
+
+      state.view = "findings";
+      setMobileDetailOpen(false);
+      renderList();
+      renderDetail();
+      const list = $("finding-list");
+      requestAnimationFrame(() => {
+        list.scrollTop = entry.scrollTop || 0;
+      });
+    }
+
     function setMobileDetailOpen(open) {
       state.mobileDetailOpen = Boolean(open);
       $("dashboard-root").classList.toggle("mobile-detail-open", state.mobileDetailOpen);
@@ -1263,7 +1345,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           <div class="item-meta">\${escapeHtml(f.saved || "unsaved")} · \${escapeHtml(f.source.platform)} · \${escapeHtml(f.quality.score)}/100\${state.privateUnlocked && f.targetProject ? " · " + escapeHtml(f.targetProject) : ""}</div>
           <div class="item-evidence">\${evidenceChips(f)}\${qualityReasonChips(f)}</div>
         </button>\`).join("");
-      list.querySelectorAll(".item").forEach((button) => button.addEventListener("click", () => selectFinding(button.dataset.id, { openDetail: true })));
+      list.querySelectorAll(".item").forEach((button) => button.addEventListener("click", () => selectFinding(button.dataset.id, { openDetail: true, historyMode: "push" })));
     }
 
     function markdownToHtml(markdown) {
@@ -1392,9 +1474,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           </section>
         </div>\`;
       detail.querySelector("[data-action='back-findings']")?.addEventListener("click", () => {
-        state.view = "findings";
-        setMobileDetailOpen(false);
-        renderDetail();
+        closeMobileView();
       });
     }
 
@@ -1482,7 +1562,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           </section>
         </div>\`;
       detail.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => {
-        if (button.dataset.action === "mobile-back") setMobileDetailOpen(false);
+        if (button.dataset.action === "mobile-back") closeMobileView();
         if (button.dataset.action === "unlock") unlockPrivateView();
         if (button.dataset.action === "copy-next") {
           const text = nextTaskText(f);
@@ -1491,7 +1571,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }));
       detail.querySelectorAll("[data-workflow-finding]").forEach((link) => link.addEventListener("click", (event) => {
         event.preventDefault();
-        selectFinding(link.dataset.workflowFinding, { openDetail: true });
+        selectFinding(link.dataset.workflowFinding, { openDetail: true, historyMode: "push" });
       }));
     }
 
@@ -1536,6 +1616,11 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     async function selectFinding(id, options = {}) {
+      const historyMode = options.historyMode || "none";
+      if (options.openDetail && isMobileViewport() && historyMode === "push") {
+        pushMobileView("finding", id);
+      }
+      state.view = "findings";
       state.selectedId = id;
       if (options.openDetail && isMobileViewport()) setMobileDetailOpen(true);
       const requestId = ++state.requestSeq;
@@ -1545,7 +1630,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         state.detail = cached;
         renderDetail();
         prefetchNextFindings();
-        return;
+        return true;
       }
       const current = state.findings.find((finding) => finding.id === id);
       if (current) {
@@ -1558,7 +1643,12 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         state.detail = detail;
         renderDetail();
         prefetchNextFindings();
+        return true;
       }
+      if (historyMode === "restore") {
+        restoreMobileListFallback("Could not restore finding.");
+      }
+      return false;
     }
 
     async function loadFindings(options = {}) {
@@ -1583,7 +1673,9 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       else renderDetail();
     }
 
-    async function loadReleaseNotes() {
+    async function loadReleaseNotes(options = {}) {
+      const historyMode = options.historyMode || "none";
+      if (isMobileViewport() && historyMode === "push") pushMobileView("release-notes");
       state.view = "release-notes";
       if (isMobileViewport()) setMobileDetailOpen(true);
       state.releaseNotesLoading = true;
@@ -1621,8 +1713,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       renderList();
       if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
     }));
-    $("refresh").addEventListener("click", () => state.view === "release-notes" ? loadReleaseNotes() : loadFindings());
-    $("release-notes").addEventListener("click", () => loadReleaseNotes());
+    $("refresh").addEventListener("click", () => state.view === "release-notes" ? loadReleaseNotes({ historyMode: "none" }) : loadFindings());
+    $("release-notes").addEventListener("click", () => loadReleaseNotes({ historyMode: "push" }));
 
     async function unlockPrivateView() {
       if (state.privateUnlocked) return true;
@@ -1662,6 +1754,12 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (!isMobileViewport()) setMobileDetailOpen(false);
       setSecondaryFiltersOpen(isMobileViewport() ? state.secondaryFiltersOpen : false);
     });
+
+    window.addEventListener("popstate", (event) => {
+      void restoreMobileHistory(event.state);
+    });
+
+    ensureMobileHistoryRoot();
 
     renderList();
     renderDetail();

@@ -152,16 +152,36 @@ describe("dashboard HTML", () => {
     expect(html).toContain("emptyListMessage");
   });
 
-  it("opens release notes in the visible mobile detail pane", () => {
+  it("owns mobile history entries without changing the URL", () => {
     const html = DASHBOARD_HTML([]);
 
-    expect(html).toContain('state.view = "release-notes";\n      if (isMobileViewport()) setMobileDetailOpen(true);');
+    expect(html).toContain('const mobileHistoryMarker = "tech-radar-dashboard"');
+    expect(html).toContain("function ensureMobileHistoryRoot()");
+    expect(html).toContain("history.replaceState(mobileHistorySnapshot");
+    expect(html).toContain("history.pushState(nextEntry, \"\", location.href)");
+    expect(html).toContain('window.addEventListener("popstate"');
   });
 
-  it("returns release notes users to the mobile findings list", () => {
+  it("restores mobile list controls and scroll from history", () => {
     const html = DASHBOARD_HTML([]);
 
-    expect(html).toContain('state.view = "findings";\n        setMobileDetailOpen(false);\n        renderDetail();');
+    expect(html).toContain("function mobileHistorySnapshot(overrides = {})");
+    expect(html).toContain("filter: state.filter");
+    expect(html).toContain("query: state.query");
+    expect(html).toContain('scrollTop: $("finding-list").scrollTop');
+    expect(html).toContain("requestAnimationFrame(() =>");
+    expect(html).toContain("list.scrollTop = entry.scrollTop || 0");
+  });
+
+  it("routes finding, workflow, release-note, and in-page back actions through mobile history", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('selectFinding(button.dataset.id, { openDetail: true, historyMode: "push" })');
+    expect(html).toContain('selectFinding(link.dataset.workflowFinding, { openDetail: true, historyMode: "push" })');
+    expect(html).toContain('loadReleaseNotes({ historyMode: "push" })');
+    expect(html).toContain("function closeMobileView()");
+    expect(html).toContain("function restoreMobileListFallback(message)");
+    expect(html).toContain("history.back()");
   });
 
   it("keeps startup finding reloads from stomping an open release notes view", () => {
@@ -190,12 +210,12 @@ describe("dashboard HTML", () => {
     expect(html).toContain("margin-left: 3px");
   });
 
-  it("opens release notes in the mobile detail pane and closes it when returning to findings", () => {
+  it("opens release notes in the mobile detail pane and closes them through mobile history", () => {
     const html = DASHBOARD_HTML([]);
 
-    expect(html).toContain("async function loadReleaseNotes()");
+    expect(html).toContain("async function loadReleaseNotes(options = {})");
     expect(html).toContain("if (isMobileViewport()) setMobileDetailOpen(true);");
-    expect(html).toContain("state.view = \"findings\";\n        setMobileDetailOpen(false);\n        renderDetail();");
+    expect(html).toContain("closeMobileView();");
   });
 
   it("renders duplicate and quality reason chips on finding cards", () => {
