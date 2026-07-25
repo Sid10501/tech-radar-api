@@ -55,6 +55,19 @@ describe("dashboard HTML", () => {
     expect(html).not.toContain('class="tabs"');
   });
 
+  it("renders compact expandable mobile batch health without changing desktop data", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('class="batch-health-region"');
+    expect(html).toContain('id="batch-health" class="batch-health"');
+    expect(html).toContain('id="batch-health-mobile" class="batch-health-mobile"');
+    expect(html).toContain('id="batch-health-summary"');
+    expect(html).toContain('id="batch-health-details"');
+    expect(html).toContain("function renderBatchHealth()");
+    expect(html).toContain("value > 0");
+    expect(html).toContain("No flagged reasons");
+  });
+
   it("keeps the desktop split explorer hooks", () => {
     const html = DASHBOARD_HTML([]);
 

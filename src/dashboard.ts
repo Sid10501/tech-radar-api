@@ -189,6 +189,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     .secondary-filters { display: contents; }
     .more-filter,
     .mode-note-compact { display: none; }
+    .batch-health-region { min-width: 0; }
     .batch-health {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -197,6 +198,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       border-bottom: 1px solid #edf1ec;
       background: #fbfcf8;
     }
+    .batch-health-mobile { display: none; }
     .health-chip {
       min-width: 0;
       color: #314138;
@@ -683,11 +685,27 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       .mode-note-wide { display: none; }
       .mode-note-compact { display: inline; }
-      .batch-health {
-        grid-template-columns: repeat(4, max-content);
-        overflow-x: auto;
-        padding: 8px 12px;
+      .batch-health { display: none; }
+      .batch-health-mobile {
+        display: block;
+        border-bottom: 1px solid #edf1ec;
+        background: #fbfcf8;
+        color: #314138;
+        font-size: 11px;
+      }
+      .batch-health-mobile summary {
+        min-height: 34px;
+        padding: 9px 12px;
+        font-weight: 850;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .batch-health-details {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
+        padding: 0 12px 9px;
       }
       .health-chip {
         padding: 6px 7px;
@@ -854,7 +872,13 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           <span id="mode-note-wide" class="mode-note-wide">Public research is open. Unlock Sid view only when you want project fit and next actions.</span>
           <span id="mode-note-compact" class="mode-note-compact">Public view · Unlock for project fit</span>
         </div>
-        <div id="batch-health" class="batch-health" aria-label="Latest batch health"></div>
+        <div class="batch-health-region">
+          <div id="batch-health" class="batch-health" aria-label="Latest batch health"></div>
+          <details id="batch-health-mobile" class="batch-health-mobile">
+            <summary id="batch-health-summary">Latest batch health</summary>
+            <div id="batch-health-details" class="batch-health-details"></div>
+          </details>
+        </div>
         <div class="filters" aria-label="Filter findings">
           <div class="primary-filters">
             <button class="filter primary-filter active" data-filter="all">All <span data-count-for="all">0</span></button>
@@ -1135,6 +1159,38 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       ["dm_gated_no_link", "DM gated"],
     ];
 
+    function renderBatchHealth() {
+      const audit = state.audit;
+      const enrichmentReasons = audit?.enrichmentReasons || {};
+      if (!audit) {
+        $("batch-health").innerHTML = "";
+        $("batch-health-summary").textContent = "Latest batch health unavailable";
+        $("batch-health-details").innerHTML = '<div class="health-chip">No audit data</div>';
+        return;
+      }
+
+      const repoDocs = (audit.evidence?.repo ?? 0) + (audit.evidence?.docs ?? 0);
+      const desktopEntries = [
+        ["Latest", audit.total ?? 0],
+        ["Repo/docs", repoDocs],
+        ["Transcript", audit.evidence?.transcript ?? 0],
+        ["Enrich", audit.needsEnrichment ?? 0],
+        ...reasonCountLabels.map(([key, label]) => [label, enrichmentReasons[key] ?? 0]),
+      ];
+      $("batch-health").innerHTML = desktopEntries
+        .map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ": " + escapeHtml(value) + "</div>")
+        .join("");
+      $("batch-health-summary").textContent = "Latest " + (audit.total ?? 0) + " · Repo/docs " + repoDocs + " · Enrich " + (audit.needsEnrichment ?? 0);
+
+      const mobileEntries = [
+        ["Transcript", audit.evidence?.transcript ?? 0],
+        ...reasonCountLabels.map(([key, label]) => [label, enrichmentReasons[key] ?? 0]),
+      ].filter(([, value]) => value > 0);
+      $("batch-health-details").innerHTML = mobileEntries.length
+        ? mobileEntries.map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ": " + escapeHtml(value) + "</div>").join("")
+        : '<div class="health-chip">No flagged reasons</div>';
+    }
+
     function updateStats() {
       const counts = { strong: 0, review: 0, weak: 0 };
       for (const finding of state.findings) counts[finding.quality.level] += 1;
@@ -1153,17 +1209,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           state.filter = "all";
         }
       });
-      const audit = state.audit;
-      const enrichmentReasons = audit?.enrichmentReasons || {};
-      $("batch-health").innerHTML = audit
-        ? [
-            ["Latest", audit.total ?? 0],
-            ["Repo/docs", (audit.evidence?.repo ?? 0) + (audit.evidence?.docs ?? 0)],
-            ["Transcript", audit.evidence?.transcript ?? 0],
-            ["Enrich", audit.needsEnrichment ?? 0],
-            ...reasonCountLabels.map(([key, label]) => [label, enrichmentReasons[key] ?? 0]),
-          ].map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ': ' + escapeHtml(value) + '</div>').join("")
-        : "";
+      renderBatchHealth();
       $("count").textContent = state.loading ? "Loading" : visibleFindings().length + " of " + state.findings.length;
       $("mode-note-wide").textContent = state.privateUnlocked
         ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
