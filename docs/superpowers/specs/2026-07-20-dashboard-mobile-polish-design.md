@@ -1,7 +1,7 @@
 # Dashboard mobile polish design
 
 **Date:** 2026-07-20  
-**Status:** Approved design, awaiting written-spec review  
+**Status:** Approved for implementation  
 **Scope:** Tech Radar dashboard operator ergonomics only
 
 ## Context
