@@ -440,6 +440,10 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
       callbackEvents.markApplied(event.eventId);
       return { ok: true, deduplicated: false };
     } catch {
+      request.log.error(
+        { failureClass: "callback_apply_failed", eventId: event.eventId, runId: event.runId, analysisId: event.analysisId },
+        "StockBot callback application failed",
+      );
       callbackEvents.forget(event.eventId);
       return reply.code(500).send({ error: "StockBot callback could not be applied" });
     } finally {
