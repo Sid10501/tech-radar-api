@@ -1756,6 +1756,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     });
 
     window.addEventListener("popstate", (event) => {
+      if (!isMobileViewport()) return;
       void restoreMobileHistory(event.state);
     });
 

@@ -162,6 +162,12 @@ describe("dashboard HTML", () => {
     expect(html).toContain('window.addEventListener("popstate"');
   });
 
+  it("does not restore mobile history entries while desktop layout is active", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('window.addEventListener("popstate", (event) => {\n      if (!isMobileViewport()) return;\n      void restoreMobileHistory(event.state);\n    });');
+  });
+
   it("restores mobile list controls and scroll from history", () => {
     const html = DASHBOARD_HTML([]);
 
