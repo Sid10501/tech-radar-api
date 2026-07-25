@@ -90,6 +90,7 @@ describe("server routes", () => {
     const res = await app.inject({ method: "GET", url: "/healthz" });
     expect(res.statusCode).toBe(200);
     expectSecurityHeaders(res.headers);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
     expect(res.json()).toEqual({ ok: true });
   });
 
@@ -177,9 +178,18 @@ describe("server routes", () => {
     expect(res.headers["set-cookie"]).toBeUndefined();
   });
 
+  it("keeps unknown routes uncacheable", async () => {
+    const res = await app.inject({ method: "GET", url: "/unknown-route" });
+
+    expect(res.statusCode).toBe(404);
+    expectSecurityHeaders(res.headers);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+  });
+
   it("does not treat an unconfigured owner token as authorization for POST /runs", async () => {
     const res = await app.inject({ method: "POST", url: "/runs", payload: { url: "https://youtu.be/no-owner-token", intent: "finance" } });
     expect(res.statusCode).toBe(401);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
   });
 
   it("rolls back a signed upload reservation and media when run registration fails", async () => {
@@ -253,6 +263,7 @@ describe("server routes", () => {
     expect(body.findings[0]).not.toHaveProperty("targetProject");
     expectNoPrivateFindingFields(body);
     expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
+    expect(res.headers["vary"]).toContain("Origin");
   });
 
   it("GET /api/public/audit returns latest batch health without auth", async () => {
@@ -306,6 +317,7 @@ describe("server routes", () => {
     expect(body.audit).not.toHaveProperty("actions");
     expectNoPrivateFindingFields(body);
     expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
+    expect(res.headers["vary"]).toContain("Origin");
   });
 
   it("GET /api/public/release-notes returns release notes without auth", async () => {
@@ -314,6 +326,7 @@ describe("server routes", () => {
     expect(res.statusCode).toBe(200);
     expectSecurityHeaders(res.headers);
     expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
+    expect(res.headers["vary"]).toContain("Origin");
     const body = res.json();
     expect(Array.isArray(body.releases)).toBe(true);
     expect(body.releases.length).toBeGreaterThan(0);
@@ -363,6 +376,7 @@ describe("server routes", () => {
     expect(res.statusCode).toBe(200);
     expectSecurityHeaders(res.headers);
     expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
+    expect(res.headers["vary"]).toContain("Origin");
     const body = res.json();
     expect(body.markdown).toContain("## TL;DR");
     expect(body.markdown).not.toContain("Fit for Sid");
@@ -536,6 +550,7 @@ describe("server routes", () => {
       });
 
       expect(res.statusCode).toBe(503);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(runnerMock.runPipeline).not.toHaveBeenCalled();
     });
 
@@ -567,7 +582,9 @@ describe("server routes", () => {
       });
 
       expect(unauthorized.statusCode).toBe(401);
+      expect(unauthorized.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(authorized.statusCode).toBe(200);
+      expect(authorized.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(runnerMock.runPipeline).toHaveBeenCalledTimes(1);
       expect(runnerMock.runPipeline).toHaveBeenCalledWith("https://example.com/accepted", {
         intent: "auto",
@@ -608,6 +625,7 @@ describe("server routes", () => {
       const raw = JSON.stringify(event);
       const res = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw), payload: raw });
       expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(res.json()).toEqual({ ok: true, deduplicated: false });
       expect(runnerMock.applyStockBotCompletion).toHaveBeenCalledWith(event);
     });
@@ -623,7 +641,9 @@ describe("server routes", () => {
       const staleTimestamp = String(Math.floor((Date.now() - 301_000) / 1_000));
       const stale = await app.inject({ method: "POST", url: "/api/internal/stockbot/completion", headers: headers(raw, staleTimestamp), payload: raw });
       expect(invalid.statusCode).toBe(401);
+      expect(invalid.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(stale.statusCode).toBe(401);
+      expect(stale.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(runnerMock.applyStockBotCompletion).not.toHaveBeenCalled();
     });
 
@@ -753,6 +773,7 @@ describe("server routes", () => {
         headers: { cookie: `theme=light; auth_token=${TOKEN}; other=value` },
       });
       expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(res.json()).toEqual(expect.arrayContaining([expect.objectContaining({ url: "https://x.com" })]));
     });
 
@@ -763,6 +784,7 @@ describe("server routes", () => {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       expect(res.statusCode).toBe(404);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
     });
 
     it("GET /runs/:id returns run for known id", async () => {
@@ -772,6 +794,7 @@ describe("server routes", () => {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(res.json().id).toBe("existing");
     });
 
@@ -834,6 +857,7 @@ describe("server routes", () => {
       try {
         const res = await app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` }, payload });
         expect(res.statusCode).toBe(202);
+        expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
         expect(res.json()).toEqual({ runId: "mock-upload-run", status: "pending" });
         expect(runnerMock.runMediaPipeline).toHaveBeenCalledWith(expect.objectContaining({ intent: "finance", origin: { channel: "dashboard" }, mimeType: "video/mp4", idempotencyKey: "stockbot-key", analysisId: "analysis-upload" }));
       } finally {
@@ -974,6 +998,7 @@ describe("server routes", () => {
         body: JSON.stringify({ password: TOKEN }),
       });
       expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(res.headers["set-cookie"]).toContain("auth_token=");
     });
 
@@ -1020,6 +1045,7 @@ describe("server routes", () => {
       });
 
       expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       const body = res.json();
       expect(body.findings).toHaveLength(1);
       expect(body.findings[0].title).toBe("Ponytail agent rubric");
@@ -1062,6 +1088,7 @@ describe("server routes", () => {
       });
 
       expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       const body = res.json();
       expect(body.audit.actions.Skip).toBe(1);
       expect(body.filters.skip).toBe(1);
@@ -1081,6 +1108,7 @@ describe("server routes", () => {
       });
 
       expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
       expect(res.json().markdown).toContain("# Sample");
     });
 
