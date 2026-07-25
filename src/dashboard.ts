@@ -905,7 +905,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     window.__RUNS__ = ${JSON.stringify(runs)};
     const dashboardReasonKey = ${dashboardReasonKey.toString()};
     const dedupeDashboardReasons = ${dedupeDashboardReasons.toString()};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false, secondaryFiltersOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false };
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false, secondaryFiltersOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false, releaseNotesRequestSeq: 0 };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -921,10 +921,16 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     const mobileHistoryMarker = "tech-radar-dashboard";
 
+    function mobileCurrentView() {
+      if (state.view === "release-notes") return "release-notes";
+      if (state.mobileDetailOpen && state.selectedId) return "finding";
+      return "findings";
+    }
+
     function mobileHistorySnapshot(overrides = {}) {
       return {
         marker: mobileHistoryMarker,
-        view: state.view,
+        view: mobileCurrentView(),
         findingId: state.selectedId,
         selectedId: state.selectedId,
         filter: state.filter,
@@ -934,17 +940,22 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       };
     }
 
+    function initializeMobileHistoryRoot() {
+      if (!isMobileViewport()) return;
+      history.replaceState(mobileHistorySnapshot({ view: "findings" }), "", location.href);
+    }
+
     function ensureMobileHistoryRoot() {
       if (!isMobileViewport()) return;
       if (history.state?.marker === mobileHistoryMarker) return;
-      history.replaceState(mobileHistorySnapshot({ view: "findings" }), "", location.href);
+      history.replaceState(mobileHistorySnapshot(), "", location.href);
     }
 
     function pushMobileView(view, findingId = null) {
       if (!isMobileViewport()) return;
       ensureMobileHistoryRoot();
-      history.replaceState(mobileHistorySnapshot({ view: history.state?.view || "findings" }), "", location.href);
-      const nextEntry = mobileHistorySnapshot({ view, findingId, scrollTop: 0 });
+      history.replaceState(mobileHistorySnapshot(), "", location.href);
+      const nextEntry = mobileHistorySnapshot({ view, findingId, selectedId: findingId, scrollTop: 0 });
       history.pushState(nextEntry, "", location.href);
     }
 
@@ -953,12 +964,14 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         history.back();
         return;
       }
+      invalidateReleaseNotesLoad();
       state.view = "findings";
       setMobileDetailOpen(false);
       renderDetail();
     }
 
     function restoreMobileListFallback(message) {
+      invalidateReleaseNotesLoad();
       state.view = "findings";
       state.detail = null;
       state.selectedId = visibleFindings()[0]?.id || null;
@@ -981,6 +994,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         await loadReleaseNotes({ historyMode: "restore" });
         return;
       }
+      invalidateReleaseNotesLoad();
       if (entry.view === "finding" && entry.findingId) {
         if (!state.findings.some((finding) => finding.id === entry.findingId)) {
           restoreMobileListFallback("Finding is no longer available.");
@@ -1004,6 +1018,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     function setMobileDetailOpen(open) {
       state.mobileDetailOpen = Boolean(open);
       $("dashboard-root").classList.toggle("mobile-detail-open", state.mobileDetailOpen);
+    }
+
+    function invalidateReleaseNotesLoad() {
+      state.releaseNotesRequestSeq += 1;
+      state.releaseNotesLoading = false;
+    }
+
+    function isCurrentReleaseNotesRequest(requestId) {
+      return requestId === state.releaseNotesRequestSeq && state.view === "release-notes";
     }
 
     const secondaryFilters = new Set(["repo", "enrich", "ocr", "project", "skip"]);
@@ -1264,13 +1287,17 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         .join("");
       $("batch-health-summary").textContent = "Latest " + (audit.total ?? 0) + " · Repo/docs " + repoDocs + " · Enrich " + (audit.needsEnrichment ?? 0);
 
+      const mobileReasonEntries = reasonCountLabels
+        .map(([key, label]) => [label, enrichmentReasons[key] ?? 0])
+        .filter(([, value]) => value > 0);
       const mobileEntries = [
         ["Transcript", audit.evidence?.transcript ?? 0],
-        ...reasonCountLabels.map(([key, label]) => [label, enrichmentReasons[key] ?? 0]),
-      ].filter(([, value]) => value > 0);
-      $("batch-health-details").innerHTML = mobileEntries.length
-        ? mobileEntries.map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ": " + escapeHtml(value) + "</div>").join("")
-        : '<div class="health-chip">No flagged reasons</div>';
+        ...mobileReasonEntries,
+      ];
+      $("batch-health-details").innerHTML = mobileEntries
+        .map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ": " + escapeHtml(value) + "</div>")
+        .join("")
+        + (mobileReasonEntries.length ? "" : '<div class="health-chip">No flagged reasons</div>');
     }
 
     function updateStats() {
@@ -1615,11 +1642,20 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return "Review source evidence, then decide whether this belongs in backlog or should be skipped.";
     }
 
+    function isCurrentFindingSelection(id, requestId, historyMode) {
+      if (requestId !== state.requestSeq || state.selectedId !== id) return false;
+      if (historyMode !== "restore") return true;
+      return history.state?.marker === mobileHistoryMarker
+        && history.state.view === "finding"
+        && history.state.findingId === id;
+    }
+
     async function selectFinding(id, options = {}) {
       const historyMode = options.historyMode || "none";
       if (options.openDetail && isMobileViewport() && historyMode === "push") {
         pushMobileView("finding", id);
       }
+      invalidateReleaseNotesLoad();
       state.view = "findings";
       state.selectedId = id;
       if (options.openDetail && isMobileViewport()) setMobileDetailOpen(true);
@@ -1637,8 +1673,19 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         state.detail = { finding: current, sections: { tldr: current.summary, shown: "", workflow: "", research: current.summary, links: "", kickstarter: "", fit: "", implementation: "", childArtifacts: "", followups: "", retryHistory: "", extractionWarnings: "" }, markdown: "" };
         renderDetail();
       }
-      const detail = await fetchFindingDetail(id, requestId);
-      if (requestId !== state.requestSeq || state.selectedId !== id) return;
+      let detail;
+      try {
+        detail = await fetchFindingDetail(id, requestId);
+      } catch {
+        if (!isCurrentFindingSelection(id, requestId, historyMode)) return;
+        if (historyMode === "restore") {
+          restoreMobileListFallback("Could not restore finding.");
+        } else {
+          showToast("Could not load finding.");
+        }
+        return false;
+      }
+      if (!isCurrentFindingSelection(id, requestId, historyMode)) return;
       if (detail) {
         state.detail = detail;
         renderDetail();
@@ -1652,7 +1699,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     async function loadFindings(options = {}) {
-      if (!options.preserveView) state.view = "findings";
+      if (!options.preserveView) {
+        invalidateReleaseNotesLoad();
+        state.view = "findings";
+      }
       state.loading = true;
       renderList();
       renderDetail();
@@ -1669,6 +1719,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       selectFirstVisibleIfNeeded();
       renderList();
       loadAudit().then(() => renderList());
+      if (options.preserveView && state.view === "release-notes") {
+        renderDetail();
+        return;
+      }
       if (state.selectedId) await selectFinding(state.selectedId);
       else renderDetail();
     }
@@ -1678,19 +1732,31 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       if (isMobileViewport() && historyMode === "push") pushMobileView("release-notes");
       state.view = "release-notes";
       if (isMobileViewport()) setMobileDetailOpen(true);
+      const requestId = ++state.releaseNotesRequestSeq;
       state.releaseNotesLoading = true;
       renderReleaseNotes();
-      const res = await fetch("/api/public/release-notes", { credentials: "same-origin" });
-      state.releaseNotesLoading = false;
-      if (!res.ok) {
+      try {
+        const res = await fetch("/api/public/release-notes", { credentials: "same-origin" });
+        if (!isCurrentReleaseNotesRequest(requestId)) return;
+        if (!res.ok) {
+          state.releaseNotesLoading = false;
+          state.releaseNotes = [];
+          showToast("Could not load release notes.");
+          renderReleaseNotes();
+          return;
+        }
+        const body = await res.json();
+        if (!isCurrentReleaseNotesRequest(requestId)) return;
+        state.releaseNotesLoading = false;
+        state.releaseNotes = body.releases || [];
+        renderReleaseNotes();
+      } catch {
+        if (!isCurrentReleaseNotesRequest(requestId)) return;
+        state.releaseNotesLoading = false;
         state.releaseNotes = [];
         showToast("Could not load release notes.");
         renderReleaseNotes();
-        return;
       }
-      const body = await res.json();
-      state.releaseNotes = body.releases || [];
-      renderReleaseNotes();
     }
 
     $("search").addEventListener("input", (event) => {
@@ -1760,7 +1826,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       void restoreMobileHistory(event.state);
     });
 
-    ensureMobileHistoryRoot();
+    initializeMobileHistoryRoot();
 
     renderList();
     renderDetail();
