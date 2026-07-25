@@ -52,6 +52,8 @@ const EXPECTED_SECURITY_HEADERS = {
 };
 const EXPECTED_CACHE_CONTROL = "no-store, max-age=0";
 const EXPECTED_METADATA_CACHE_CONTROL = "public, max-age=86400";
+const EXPECTED_PUBLIC_CACHE_CONTROL =
+  "public, max-age=60, s-maxage=300, stale-while-revalidate=3600";
 
 function expectSecurityHeaders(headers: Record<string, unknown>) {
   expect(headers).toMatchObject(EXPECTED_SECURITY_HEADERS);
@@ -250,7 +252,7 @@ describe("server routes", () => {
     expect(body.findings[0].applied).toEqual({ appliedAt: "2026-07-06", link: "https://github.com/Sid10501/portfolio" });
     expect(body.findings[0]).not.toHaveProperty("targetProject");
     expectNoPrivateFindingFields(body);
-    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
   });
 
   it("GET /api/public/audit returns latest batch health without auth", async () => {
@@ -303,7 +305,7 @@ describe("server routes", () => {
     expect(body.filters.repo).toBe(0);
     expect(body.audit).not.toHaveProperty("actions");
     expectNoPrivateFindingFields(body);
-    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
   });
 
   it("GET /api/public/release-notes returns release notes without auth", async () => {
@@ -311,7 +313,7 @@ describe("server routes", () => {
 
     expect(res.statusCode).toBe(200);
     expectSecurityHeaders(res.headers);
-    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
     const body = res.json();
     expect(Array.isArray(body.releases)).toBe(true);
     expect(body.releases.length).toBeGreaterThan(0);
@@ -360,7 +362,7 @@ describe("server routes", () => {
 
     expect(res.statusCode).toBe(200);
     expectSecurityHeaders(res.headers);
-    expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+    expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
     const body = res.json();
     expect(body.markdown).toContain("## TL;DR");
     expect(body.markdown).not.toContain("Fit for Sid");
@@ -371,6 +373,46 @@ describe("server routes", () => {
     expect(res.body).not.toContain("## Implementation Idea");
     expect(res.body).not.toContain("## Follow-ups");
     expectNoPrivateFindingFields(body);
+  });
+
+  it("uses the bounded public policy for RSS", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-public-rss-cache-"));
+    const previousDir = process.env["AI_MEMORY_LOCAL_DIR"];
+    fs.mkdirSync(path.join(dir, "tech-radar", "findings"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "tech-radar", "findings", "sample.md"),
+      "# RSS cache sample\n\n## TL;DR\n\nPublic feed item.",
+    );
+    process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+    try {
+      const res = await app.inject({ method: "GET", url: "/api/public/findings/rss" });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
+      expect(res.headers["vary"]).toContain("Origin");
+    } finally {
+      if (previousDir === undefined) delete process.env["AI_MEMORY_LOCAL_DIR"];
+      else process.env["AI_MEMORY_LOCAL_DIR"] = previousDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps missing public details uncacheable", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-public-missing-cache-"));
+    const previousDir = process.env["AI_MEMORY_LOCAL_DIR"];
+    fs.mkdirSync(path.join(dir, "tech-radar", "findings"), { recursive: true });
+    process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+    try {
+      const res = await app.inject({ method: "GET", url: "/api/public/findings/missing.md" });
+      expect(res.statusCode).toBe(404);
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+      expect(res.headers["vary"]).toContain("Origin");
+    } finally {
+      if (previousDir === undefined) delete process.env["AI_MEMORY_LOCAL_DIR"];
+      else process.env["AI_MEMORY_LOCAL_DIR"] = previousDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("reuses a recent ai-memory sync for repeated dashboard reads", async () => {
@@ -421,6 +463,7 @@ describe("server routes", () => {
       for (const res of [disallowed, absent]) {
         expect(res.statusCode).toBe(200);
         expect(res.headers).not.toHaveProperty("access-control-allow-origin");
+        expect(res.headers["vary"]).toContain("Origin");
       }
     });
 
@@ -452,6 +495,8 @@ describe("server routes", () => {
       expect(res.statusCode).toBe(204);
       expect(res.headers["access-control-allow-origin"]).toBe(ORIGIN);
       expect(res.headers["access-control-allow-methods"]).toBe("GET");
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+      expect(res.headers["vary"]).toContain("Origin");
       expect(res.body).toBe("");
     });
 
@@ -464,6 +509,8 @@ describe("server routes", () => {
 
       expect(res.statusCode).toBe(204);
       expect(res.headers).not.toHaveProperty("access-control-allow-origin");
+      expect(res.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+      expect(res.headers["vary"]).toContain("Origin");
     });
   });
 
