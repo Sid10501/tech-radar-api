@@ -1,8 +1,8 @@
 # Tech Radar production cache and asset polish
 
-**Status:** Approved design, pending written-spec review  
-**Date:** 2026-07-25  
-**Branch:** `codex/production-polish`  
+**Status:** Approved for implementation
+**Date:** 2026-07-25
+**Branch:** `codex/production-polish`
 **Base:** `origin/main` at `80f807a`
 
 ## Context
