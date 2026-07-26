@@ -153,6 +153,7 @@ function sourceTexts(extract: ExtractResult): Array<[TextSource, string]> {
     ["transcript", extract.transcript],
     ["visual_text", extract.visual_text],
     ["source_url", extract.url],
+    ...(extract.source_links ?? []).map((url) => ["source_url", url] as [TextSource, string]),
   ];
   return values.flatMap(([source, value]) => value?.trim() ? [[source, value]] : []);
 }

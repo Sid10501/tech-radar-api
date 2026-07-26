@@ -616,6 +616,109 @@ describe("parseFindingMarkdown()", () => {
     expect(finding.recommendedAction).toBe("Retry");
   });
 
+  it("does not classify a successfully expanded shortlink as unresolved", () => {
+    const finding = parseFindingMarkdown(
+      "20260620-expanded-workflow.md",
+      [
+        "# Agentic engineering workflow",
+        "",
+        "**Source:** x · [Post](https://x.com/example/status/123)",
+        "**Saved:** 20260620",
+        "**Tags:** x, workflow",
+        "",
+        "## TL;DR",
+        "",
+        "A workflow linked through a short URL.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: Project link: https://t.co/abc123",
+        "",
+        "Shortlink expansions:",
+        "- resolved · example.com · expanded · 1 redirect: https://t.co/abc123 → https://example.com/tool",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: tech-radar-api",
+        "- Verdict: `#try-soon`",
+      ].join("\n"),
+    );
+
+    expect(finding.triage.kind).not.toBe("unresolved_shortlink");
+    expect(finding.triage.reasons).not.toContain("shortlink_unresolved");
+  });
+
+  it("keeps a mixed resolved and unresolved shortlink finding retryable", () => {
+    const finding = parseFindingMarkdown(
+      "20260620-mixed-links.md",
+      [
+        "# Tool with a backup link",
+        "",
+        "**Source:** x · [Post](https://x.com/example/status/123)",
+        "**Saved:** 20260620",
+        "**Tags:** x, tool",
+        "",
+        "## TL;DR",
+        "",
+        "A well-supported tool with two source links.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: Repo https://t.co/repo and details https://bit.ly/pending",
+        "",
+        "Source links found:",
+        "- https://github.com/acme/tool",
+        "",
+        "Shortlink expansions:",
+        "- resolved · github.com · expanded · 1 redirect: https://t.co/repo → https://github.com/acme/tool",
+        "- unresolved · bit.ly · network_error · 0 redirects: https://bit.ly/pending",
+        "",
+        "## Links",
+        "",
+        "- Repo: https://github.com/acme/tool",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: tech-radar-api",
+        "- Verdict: `#try-soon`",
+      ].join("\n"),
+    );
+
+    expect(finding.triage).toMatchObject({ kind: "repo_backed", retryable: true });
+    expect(finding.triage.reasons).toContain("shortlink_unresolved");
+    expect(finding.recommendedAction).toBe("Retry");
+  });
+
+  it("does not put unsupported link-in-bio landing pages into a retry loop", () => {
+    const finding = parseFindingMarkdown(
+      "20260620-link-in-bio.md",
+      [
+        "# Creator resource page",
+        "",
+        "**Source:** x · [Post](https://x.com/example/status/123)",
+        "**Saved:** 20260620",
+        "**Tags:** x, resources",
+        "",
+        "## TL;DR",
+        "",
+        "The creator points to a landing page.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: Resources at https://linktr.ee/example",
+        "",
+        "## Fit for Sid",
+        "",
+        "- Target project: tech-radar-api",
+        "- Verdict: `#watch`",
+      ].join("\n"),
+    );
+
+    expect(finding.triage.kind).not.toBe("unresolved_shortlink");
+    expect(finding.triage.retryable).toBe(false);
+    expect(finding.recommendedAction).not.toBe("Retry");
+  });
+
   it("classifies personal workflow advice as no-public-artifact expected", () => {
     const finding = parseFindingMarkdown(
       "20260706-agent-workflow-advice.md",

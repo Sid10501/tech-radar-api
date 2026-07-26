@@ -55,6 +55,14 @@ export function composeFinding(input: {
   const sourceLinksBlock = (extract.source_links ?? []).length > 0
     ? `\nSource links found:\n${extract.source_links!.map((link) => `- ${link}`).join("\n")}\n`
     : "";
+  const shortlinkExpansionsBlock = (extract.shortlink_expansions ?? []).length > 0
+    ? `\nShortlink expansions:\n${extract.shortlink_expansions!.map((entry) => {
+        const host = entry.finalHost ?? "unknown host";
+        const destination = entry.expandedUrl ? ` → ${entry.expandedUrl}` : "";
+        const hops = `${entry.redirectCount} ${entry.redirectCount === 1 ? "redirect" : "redirects"}`;
+        return `- ${entry.status} · ${host} · ${entry.reason} · ${hops}: ${entry.sourceUrl}${destination}`;
+      }).join("\n")}\n`
+    : "";
   const linkedArtifacts = linkedArtifactsForExtract(extract);
   const linkedArtifactsBlock = linkedArtifacts.length > 0
     ? `\nLinked artifacts:\n${linkedArtifacts.map((artifact) => `- ${artifact.type} · ${artifact.role}: ${artifact.url}`).join("\n")}\n`
@@ -100,6 +108,7 @@ ${chaptersBlock}
 ${visualTextBlock}
 ${extractionMethodsBlock}
 ${sourceLinksBlock}
+${shortlinkExpansionsBlock}
 ${linkedArtifactsBlock}
 ${topCommentsBlock}
 ${extractionWarningsBlock}
