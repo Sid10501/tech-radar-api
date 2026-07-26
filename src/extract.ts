@@ -157,6 +157,13 @@ export async function extract(url: string, options: ExtractOptions = {}): Promis
   return new Promise((resolve, reject) => {
     execFile("bash", [scriptPath, url, ...(options.outDir ? [options.outDir] : [])], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
+        if (stdout.trim()) {
+          try {
+            return resolve(parseExtractJson(stdout) as ExtractResult);
+          } catch {
+            // Fall through to the existing shell-level error when stdout is not extractor JSON.
+          }
+        }
         return reject(new ExtractError(`extract failed: ${stderr || err.message}`, err));
       }
       try {
