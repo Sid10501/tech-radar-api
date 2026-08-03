@@ -103,6 +103,7 @@ function createDashboardHarness(options: {
     innerHTML = "";
     scrollTop = 0;
     disabled = false;
+    hidden = false;
     value = "";
     handlers: Record<string, (event: any) => void> = {};
     children = new Map<string, FakeElement>();
@@ -281,19 +282,68 @@ describe("dashboard reason presentation", () => {
 });
 
 describe("dashboard HTML", () => {
+  it("renders desktop filters in the detail toolbar instead of permanent sidebar chrome", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('class="detail-shell"');
+    expect(html).toContain('id="filter-toolbar" class="filter-toolbar" aria-label="Filter findings"');
+    expect(html).toContain('id="queue-filter-summary"');
+    expect(html).toContain('id="active-filter-label"');
+    expect(html).toContain('id="audit-toggle"');
+    expect(html).toContain('id="audit-panel"');
+    expect(html).not.toContain('class="batch-health-region"');
+  });
+
+  it("orders keyboard flow as filters, findings list, then detail body", () => {
+    const html = DASHBOARD_HTML([]);
+
+    const toolbarIndex = html.indexOf('id="filter-toolbar"');
+    const listIndex = html.indexOf('id="finding-list"');
+    const detailIndex = html.indexOf('id="detail-body"');
+
+    expect(toolbarIndex).toBeGreaterThan(-1);
+    expect(listIndex).toBeGreaterThan(-1);
+    expect(detailIndex).toBeGreaterThan(-1);
+    expect(toolbarIndex).toBeLessThan(listIndex);
+    expect(listIndex).toBeLessThan(detailIndex);
+    expect(html).toContain("grid-template-areas:");
+    expect(html).toContain('"queue toolbar"');
+  });
+
+  it("keeps the desktop queue chrome compact so the finding list starts high", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("grid-template-rows: auto minmax(0, 1fr)");
+    expect(html).toContain(".queue-filter-summary");
+    expect(html).toContain(".queue-head.compact");
+    expect(html).not.toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
+  });
+
+  it("renders audit metrics inside a hidden-by-default disclosure panel", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('button id="audit-toggle"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-controls="audit-panel"');
+    expect(html).toContain('id="audit-panel" class="audit-panel" hidden');
+    expect(html).toContain('id="audit-metrics"');
+    expect(html).toContain("function setAuditPanelOpen(open)");
+  });
+
   it("keeps primary mobile filters visible and secondary filters behind More", () => {
     const html = DASHBOARD_HTML([]);
 
-    expect(html).toContain('class="primary-filters"');
+    expect(html).toContain('class="toolbar-filter-group primary-filters"');
     expect(html).toContain('id="more-filters"');
     expect(html).toContain('aria-controls="secondary-filters"');
-    expect(html).toContain('id="secondary-filters" class="secondary-filters" aria-hidden="false"');
+    expect(html).toContain('id="secondary-filters" class="toolbar-filter-group secondary-filters" aria-hidden="false"');
     expect(html).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
+    expect(html).toContain('"toolbar"');
     expect(html).toContain("function setSecondaryFiltersOpen(open)");
     expect(html).toContain("secondaryFilters.has(state.filter)");
   });
 
-  it("keeps the More disclosure hidden in the desktop filter rail", () => {
+  it("keeps the More disclosure hidden in the desktop toolbar", () => {
     const html = DASHBOARD_HTML([]);
 
     expect(html).toContain(".filter.more-filter { display: none; }");
@@ -304,32 +354,80 @@ describe("dashboard HTML", () => {
 
     expect(html).toContain('id="mode-note-wide"');
     expect(html).toContain('id="mode-note-compact"');
-    expect(html).toContain(".mode-note-compact { display: none; }");
-    expect(html).toContain("Public view · Unlock for project fit");
-    expect(html).toContain("Sid view · Project fit visible");
+    expect(html).toContain(".mode-note-wide { display: none; }");
+    expect(html).toContain('id="active-filter-label"');
+    expect(html).toContain('state.privateUnlocked ? "Sid view" : "Public view"');
   });
 
-  it("renders audit count hooks without tabs", () => {
+  it("renders audit count hooks inside the toolbar disclosure without tabs", () => {
     const html = DASHBOARD_HTML([]);
 
     expect(html).toContain('data-filter="enrich"');
     expect(html).toContain('data-filter="skip"');
     expect(html).toContain('data-count-for="repo"');
-    expect(html).toContain("batch-health");
+    expect(html).toContain("audit-metrics");
     expect(html).not.toContain('class="tabs"');
   });
 
-  it("renders compact expandable mobile batch health without changing desktop data", () => {
+  it("renders compact expandable mobile batch health through the audit panel data", () => {
     const html = DASHBOARD_HTML([]);
 
-    expect(html).toContain('class="batch-health-region"');
-    expect(html).toContain('id="batch-health" class="batch-health"');
-    expect(html).toContain('id="batch-health-mobile" class="batch-health-mobile"');
-    expect(html).toContain('id="batch-health-summary"');
-    expect(html).toContain('id="batch-health-details"');
+    expect(html).toContain('id="audit-summary-mobile"');
+    expect(html).toContain('id="audit-mobile-details"');
     expect(html).toContain("function renderBatchHealth()");
     expect(html).toContain("value > 0");
+    expect(html).toContain("max-height: 92px");
     expect(html).toContain("No flagged reasons");
+  });
+
+  it("keeps the mobile More and Audit disclosures mutually exclusive through button handlers", async () => {
+    const harness = createDashboardHarness();
+    await harness.settle();
+
+    harness.elements.get("more-filters")?.handlers.click({});
+    expect(await harness.evaluate(`
+      ({
+        secondaryOpen: state.secondaryFiltersOpen,
+        moreExpanded: $("more-filters").attributes["aria-expanded"],
+        auditExpanded: $("audit-toggle").attributes["aria-expanded"],
+        auditHidden: $("audit-panel").hidden
+      })
+    `)).toEqual({
+      secondaryOpen: true,
+      moreExpanded: "true",
+      auditExpanded: "false",
+      auditHidden: true,
+    });
+
+    harness.elements.get("audit-toggle")?.handlers.click({});
+    expect(await harness.evaluate(`
+      ({
+        secondaryOpen: state.secondaryFiltersOpen,
+        moreExpanded: $("more-filters").attributes["aria-expanded"],
+        auditExpanded: $("audit-toggle").attributes["aria-expanded"],
+        auditHidden: $("audit-panel").hidden
+      })
+    `)).toEqual({
+      secondaryOpen: false,
+      moreExpanded: "false",
+      auditExpanded: "true",
+      auditHidden: false,
+    });
+
+    harness.elements.get("more-filters")?.handlers.click({});
+    expect(await harness.evaluate(`
+      ({
+        secondaryOpen: state.secondaryFiltersOpen,
+        moreExpanded: $("more-filters").attributes["aria-expanded"],
+        auditExpanded: $("audit-toggle").attributes["aria-expanded"],
+        auditHidden: $("audit-panel").hidden
+      })
+    `)).toEqual({
+      secondaryOpen: true,
+      moreExpanded: "true",
+      auditExpanded: "false",
+      auditHidden: true,
+    });
   });
 
   it("keeps the desktop split explorer hooks", () => {
@@ -365,7 +463,7 @@ describe("dashboard HTML", () => {
     const html = DASHBOARD_HTML([]);
 
     expect(html).toContain("height: 100dvh");
-    expect(html).toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
+    expect(html).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
     expect(html).toContain("position: sticky");
     expect(html).toContain("top: 0");
   });
@@ -567,7 +665,7 @@ describe("dashboard HTML", () => {
       view: "findings",
       mobileDetailOpen: false,
     });
-    expect(harness.elements.get("detail")?.innerHTML).not.toContain("Release notes");
+    expect(harness.elements.get("detail-body")?.innerHTML).not.toContain("Release notes");
   });
 
   it("restores the visible list after search closes mobile notes and a finding opens", async () => {
@@ -585,7 +683,7 @@ describe("dashboard HTML", () => {
       view: "findings",
       mobileDetailOpen: false,
     });
-    expect(harness.elements.get("detail")?.innerHTML).not.toContain("Release notes");
+    expect(harness.elements.get("detail-body")?.innerHTML).not.toContain("Release notes");
   });
 
   it("keeps release notes open when the deferred initial findings load completes", async () => {
@@ -601,7 +699,7 @@ describe("dashboard HTML", () => {
     await harness.settle();
 
     expect(await harness.evaluate(`state.view`)).toBe("release-notes");
-    expect(harness.elements.get("detail")?.innerHTML).toContain("Release notes");
+    expect(harness.elements.get("detail-body")?.innerHTML).toContain("Release notes");
   });
 
   it.each([
@@ -777,14 +875,14 @@ describe("dashboard HTML", () => {
     harness.history.back();
     await harness.settle();
     harness.setMobile(false);
-    const restoredDetail = harness.elements.get("detail")?.innerHTML;
+    const restoredDetail = harness.elements.get("detail-body")?.innerHTML;
     expect(restoredDetail).not.toContain("Release notes");
     releaseNotesResponse.resolve(response);
 
     await expect(releaseNotesPromise).resolves.toBeUndefined();
     expect(await harness.evaluate(`state.view`)).toBe("findings");
-    expect(harness.elements.get("detail")?.innerHTML).toBe(restoredDetail);
-    expect(harness.elements.get("detail")?.innerHTML).not.toContain("Late release");
+    expect(harness.elements.get("detail-body")?.innerHTML).toBe(restoredDetail);
+    expect(harness.elements.get("detail-body")?.innerHTML).not.toContain("Late release");
     expect(harness.elements.get("toast")?.textContent).toBe("");
   });
 
@@ -801,8 +899,8 @@ describe("dashboard HTML", () => {
       };
       renderBatchHealth();
     `);
-    expect(harness.elements.get("batch-health-details")?.innerHTML).toContain("Transcript: 0");
-    expect(harness.elements.get("batch-health-details")?.innerHTML).toContain("No flagged reasons");
+    expect(harness.elements.get("audit-mobile-details")?.innerHTML).toContain("Transcript: 0");
+    expect(harness.elements.get("audit-mobile-details")?.innerHTML).toContain("No flagged reasons");
 
     await harness.evaluate(`
       state.audit = {
@@ -813,7 +911,7 @@ describe("dashboard HTML", () => {
       };
       renderBatchHealth();
     `);
-    const flaggedDetails = harness.elements.get("batch-health-details")?.innerHTML;
+    const flaggedDetails = harness.elements.get("audit-mobile-details")?.innerHTML;
     expect(flaggedDetails).toContain("Transcript: 2");
     expect(flaggedDetails).toContain("Weak quality: 1");
     expect(flaggedDetails).not.toContain("Missing links");
