@@ -124,11 +124,17 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     .workspace {
       display: grid;
       grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr);
+      grid-template-areas:
+        "queue toolbar"
+        "queue audit"
+        "queue content";
       height: calc(100vh - 58px);
       min-height: 0;
       overflow: hidden;
     }
     .queue {
+      grid-area: queue;
       background: var(--panel);
       border-right: 1px solid var(--line);
       min-width: 0;
@@ -201,6 +207,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       white-space: nowrap;
     }
     .filter-toolbar {
+      grid-area: toolbar;
       position: sticky;
       top: 0;
       z-index: 5;
@@ -250,6 +257,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       margin-left: auto;
     }
     .audit-panel {
+      grid-area: audit;
       margin: 12px 24px 0;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -334,6 +342,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       color: var(--muted);
     }
     .content {
+      grid-area: content;
       min-width: 0;
       min-height: 0;
       overflow: auto;
@@ -658,7 +667,11 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       .workspace {
         grid-template-columns: 1fr;
-        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-areas:
+          "toolbar"
+          "audit"
+          "queue";
         height: 100%;
         min-height: 0;
         overflow: hidden;
@@ -672,16 +685,18 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         grid-template-rows: auto auto minmax(0, 1fr);
       }
       .content {
-        order: -1;
-        display: block;
-        height: auto;
+        display: none;
+        height: 100%;
         min-height: 0;
-        overflow: visible;
+        overflow: auto;
       }
       .mobile-detail-open .queue { display: none; }
-      .mobile-detail-open .workspace { grid-template-rows: minmax(0, 1fr); }
+      .mobile-detail-open .workspace {
+        grid-template-rows: minmax(0, 1fr);
+        grid-template-areas: "content";
+      }
       .mobile-detail-open .content {
-        order: 0;
+        display: block;
         height: 100%;
         overflow: auto;
       }
@@ -867,9 +882,6 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .stats {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
     }
     @media (max-width: 380px) {
       .logo > div:last-child {
@@ -894,6 +906,28 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       </div>
     </header>
     <div class="workspace">
+      <div id="filter-toolbar" class="filter-toolbar" aria-label="Filter findings">
+        <div class="toolbar-filter-group primary-filters">
+          <button class="filter primary-filter active" data-filter="all">All <span data-count-for="all">0</span></button>
+          <button class="filter primary-filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
+          <button class="filter primary-filter" data-filter="review">Review <span data-count-for="review">0</span></button>
+          <button class="filter primary-filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
+        </div>
+        <button id="more-filters" class="filter more-filter" type="button" aria-expanded="false" aria-controls="secondary-filters">More</button>
+        <div id="secondary-filters" class="toolbar-filter-group secondary-filters" aria-hidden="false">
+          <button class="filter secondary-filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
+          <button class="filter secondary-filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
+          <button class="filter secondary-filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
+          <button class="filter secondary-filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
+          <button class="filter secondary-filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
+        </div>
+        <button id="audit-toggle" class="filter audit-toggle" type="button" aria-expanded="false" aria-controls="audit-panel">Audit</button>
+      </div>
+      <section id="audit-panel" class="audit-panel" hidden>
+        <div id="audit-summary-mobile" class="audit-summary-mobile">Latest batch health unavailable</div>
+        <div id="audit-metrics" class="audit-metrics" aria-label="Latest batch health"></div>
+        <div id="audit-mobile-details" class="audit-mobile-details"></div>
+      </section>
       <aside class="queue">
         <div class="queue-head compact">
           <div class="queue-title"><span>Findings</span><span id="count" class="count">0 total</span></div>
@@ -913,28 +947,6 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       </aside>
       <main id="detail" class="content">
         <div class="detail-shell">
-          <div id="filter-toolbar" class="filter-toolbar" aria-label="Filter findings">
-            <div class="toolbar-filter-group primary-filters">
-              <button class="filter primary-filter active" data-filter="all">All <span data-count-for="all">0</span></button>
-              <button class="filter primary-filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
-              <button class="filter primary-filter" data-filter="review">Review <span data-count-for="review">0</span></button>
-              <button class="filter primary-filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
-            </div>
-            <button id="more-filters" class="filter more-filter" type="button" aria-expanded="false" aria-controls="secondary-filters">More</button>
-            <div id="secondary-filters" class="toolbar-filter-group secondary-filters" aria-hidden="false">
-              <button class="filter secondary-filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
-              <button class="filter secondary-filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
-              <button class="filter secondary-filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
-              <button class="filter secondary-filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
-              <button class="filter secondary-filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
-            </div>
-            <button id="audit-toggle" class="filter audit-toggle" type="button" aria-expanded="false" aria-controls="audit-panel">Audit</button>
-          </div>
-          <section id="audit-panel" class="audit-panel" hidden>
-            <div id="audit-summary-mobile" class="audit-summary-mobile">Latest batch health unavailable</div>
-            <div id="audit-metrics" class="audit-metrics" aria-label="Latest batch health"></div>
-            <div id="audit-mobile-details" class="audit-mobile-details"></div>
-          </section>
           <div id="detail-body"></div>
         </div>
       </main>

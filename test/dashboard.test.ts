@@ -294,6 +294,22 @@ describe("dashboard HTML", () => {
     expect(html).not.toContain('class="batch-health-region"');
   });
 
+  it("orders keyboard flow as filters, findings list, then detail body", () => {
+    const html = DASHBOARD_HTML([]);
+
+    const toolbarIndex = html.indexOf('id="filter-toolbar"');
+    const listIndex = html.indexOf('id="finding-list"');
+    const detailIndex = html.indexOf('id="detail-body"');
+
+    expect(toolbarIndex).toBeGreaterThan(-1);
+    expect(listIndex).toBeGreaterThan(-1);
+    expect(detailIndex).toBeGreaterThan(-1);
+    expect(toolbarIndex).toBeLessThan(listIndex);
+    expect(listIndex).toBeLessThan(detailIndex);
+    expect(html).toContain("grid-template-areas:");
+    expect(html).toContain('"queue toolbar"');
+  });
+
   it("keeps the desktop queue chrome compact so the finding list starts high", () => {
     const html = DASHBOARD_HTML([]);
 
@@ -322,7 +338,7 @@ describe("dashboard HTML", () => {
     expect(html).toContain('aria-controls="secondary-filters"');
     expect(html).toContain('id="secondary-filters" class="toolbar-filter-group secondary-filters" aria-hidden="false"');
     expect(html).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
-    expect(html).toContain("order: -1");
+    expect(html).toContain('"toolbar"');
     expect(html).toContain("function setSecondaryFiltersOpen(open)");
     expect(html).toContain("secondaryFilters.has(state.filter)");
   });
@@ -364,13 +380,27 @@ describe("dashboard HTML", () => {
     expect(html).toContain("No flagged reasons");
   });
 
-  it("keeps the mobile More and Audit disclosures mutually exclusive", async () => {
+  it("keeps the mobile More and Audit disclosures mutually exclusive through button handlers", async () => {
     const harness = createDashboardHarness();
     await harness.settle();
 
+    harness.elements.get("more-filters")?.handlers.click({});
     expect(await harness.evaluate(`
-      setSecondaryFiltersOpen(true);
-      setAuditPanelOpen(true);
+      ({
+        secondaryOpen: state.secondaryFiltersOpen,
+        moreExpanded: $("more-filters").attributes["aria-expanded"],
+        auditExpanded: $("audit-toggle").attributes["aria-expanded"],
+        auditHidden: $("audit-panel").hidden
+      })
+    `)).toEqual({
+      secondaryOpen: true,
+      moreExpanded: "true",
+      auditExpanded: "false",
+      auditHidden: true,
+    });
+
+    harness.elements.get("audit-toggle")?.handlers.click({});
+    expect(await harness.evaluate(`
       ({
         secondaryOpen: state.secondaryFiltersOpen,
         moreExpanded: $("more-filters").attributes["aria-expanded"],
@@ -384,8 +414,8 @@ describe("dashboard HTML", () => {
       auditHidden: false,
     });
 
+    harness.elements.get("more-filters")?.handlers.click({});
     expect(await harness.evaluate(`
-      setSecondaryFiltersOpen(true);
       ({
         secondaryOpen: state.secondaryFiltersOpen,
         moreExpanded: $("more-filters").attributes["aria-expanded"],
