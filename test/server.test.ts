@@ -951,6 +951,49 @@ describe("server routes", () => {
       expect(body.findings[0].quality.score).toBeGreaterThan(70);
     });
 
+    it("GET /api/findings clusters duplicate source posts for the dashboard", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-clustered-findings-"));
+      const findingsDir = path.join(dir, "tech-radar", "findings");
+      fs.mkdirSync(findingsDir, { recursive: true });
+      for (const [filename, route] of [
+        ["a.md", "reel"],
+        ["b.md", "p"],
+      ] as const) {
+        fs.writeFileSync(
+          path.join(findingsDir, filename),
+          [
+            `# Duplicate ${filename}`,
+            "",
+            `**Source:** instagram · [Creator](https://www.instagram.com/${route}/SameMedia/?igsh=tracking)`,
+            "**Saved:** 20260720",
+            "**Tags:** instagram",
+            "",
+            "## TL;DR",
+            "",
+            "Same source post.",
+          ].join("\n"),
+        );
+      }
+      process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/findings",
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().findings).toEqual([
+        expect.objectContaining({
+          id: "a.md",
+          diagnostics: {
+            extractionWarnings: [],
+            duplicateGroup: expect.objectContaining({ count: 2, canonicalFindingId: "a.md" }),
+          },
+        }),
+      ]);
+    });
+
     it("GET /api/audit returns private action counts with valid auth", async () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-audit-"));
       const findingsDir = path.join(dir, "tech-radar", "findings");

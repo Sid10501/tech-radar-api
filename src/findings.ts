@@ -54,6 +54,7 @@ export interface FindingDiagnostics {
 export interface FindingDuplicateGroup {
   id: string;
   count: number;
+  canonicalFindingId: string;
   reason: "same source URL" | "same title and creator";
 }
 
@@ -358,6 +359,7 @@ function recommendedAction(
   if ((verdict.includes("#skip") || targetProject === "none") && !(directPublicArtifact && (evidence.repo || evidence.docs))) {
     return "Skip";
   }
+  if (triage.reasons.includes("shortlink_unresolved")) return "Retry";
   if (quality.level === "weak" && !triage.retryable) return "Review";
   if (quality.level === "weak") return "Retry";
   if (verdict.includes("#skip") || targetProject === "none") return "Review";
@@ -383,21 +385,29 @@ function triageFinding(
     return { kind: "dm_gated", retryable: false, reasons: ["dm_gated_no_link"] };
   }
 
+  const unresolvedShortlink = hasUnresolvedShortlink(body, sourceUrl);
+
   if (publicArtifact) {
     const reasons: FindingTriageReason[] = [];
     if (quality.reasons.includes("repo found, source weak")) reasons.push("repo_found_source_weak");
+    if (unresolvedShortlink) reasons.push("shortlink_unresolved");
     const retryable =
-      quality.level === "weak" &&
-      (quality.reasons.includes("repo found, source weak") ||
+      unresolvedShortlink ||
+      (quality.level === "weak" &&
+        (quality.reasons.includes("repo found, source weak") ||
         quality.reasons.includes("source uncertainty") ||
         quality.reasons.includes("low repo signal") ||
         quality.reasons.includes("needs transcript") ||
-        quality.reasons.includes("needs OCR"));
+        quality.reasons.includes("needs OCR")));
     return { kind: "repo_backed", retryable, reasons };
   }
 
-  if (hasUnresolvedShortlinkOnly(body, sourceUrl, evidence)) {
+  if (unresolvedShortlink) {
     return { kind: "unresolved_shortlink", retryable: true, reasons: ["shortlink_unresolved"] };
+  }
+
+  if (hasUnsupportedLandingPage(body)) {
+    return { kind: "no_public_artifact_expected", retryable: false, reasons: ["no_artifact_expected"] };
   }
 
   const clean = stripMarkdown(body).toLowerCase();
@@ -414,15 +424,28 @@ function triageFinding(
   return { kind: "unknown_tool", retryable: quality.level === "weak", reasons: [] };
 }
 
-function hasUnresolvedShortlinkOnly(body: string, sourceUrl: string | null, evidence: FindingEvidence): boolean {
-  if (evidence.repo || evidence.docs) return false;
-  return shortlinkUrls([body, sourceUrl ?? ""].join("\n")).length > 0;
+function hasUnresolvedShortlink(body: string, sourceUrl: string | null): boolean {
+  const resolved = resolvedShortlinkSources(body);
+  return shortlinkUrls([body, sourceUrl ?? ""].join("\n")).some((url) => !resolved.has(url));
+}
+
+function resolvedShortlinkSources(body: string): Set<string> {
+  const resolved = new Set<string>();
+  for (const line of body.split("\n")) {
+    const match = line.match(/^[-*]\s+resolved\s+·\s+[^·\n]+\s+·\s+expanded(?:\s+·\s+\d+\s+redirects?)?:\s+(https?:\/\/\S+)\s+→\s+https?:\/\/\S+/i);
+    if (match) resolved.add(cleanTrailingUrl(match[1]));
+  }
+  return resolved;
 }
 
 function shortlinkUrls(value: string): string[] {
-  return [...value.matchAll(/https?:\/\/(?:t\.co|bit\.ly|bitly\.com|tinyurl\.com|linktr\.ee|lnk\.bio|bio\.link|cutt\.ly|goo\.gl)\/[^\s)\],]+/gi)].map(
+  return [...value.matchAll(/https?:\/\/(?:t\.co|bit\.ly|bitly\.com|tinyurl\.com|cutt\.ly|goo\.gl)\/[^\s)\],]+/gi)].map(
     (match) => cleanTrailingUrl(match[0]),
   );
+}
+
+function hasUnsupportedLandingPage(value: string): boolean {
+  return /https?:\/\/(?:linktr\.ee|lnk\.bio|bio\.link)\/[^\s)\],]+/i.test(value);
 }
 
 function isConceptExplainer(cleanText: string): boolean {
@@ -637,6 +660,7 @@ function publicDiagnostics(diagnostics: FindingDiagnostics): FindingDiagnostics 
     ? {
         id: diagnostics.duplicateGroup.id,
         count: diagnostics.duplicateGroup.count,
+        canonicalFindingId: diagnostics.duplicateGroup.canonicalFindingId,
         reason: diagnostics.duplicateGroup.reason,
       }
     : undefined;
@@ -671,6 +695,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     "On-screen text / OCR:",
     "Extraction path:",
     "Source links found:",
+    "Shortlink expansions:",
     "Linked artifacts:",
     "Top comments:",
     "Extraction warnings:",
@@ -680,6 +705,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const ocrText = markerText(shown, "On-screen text / OCR:", [
     "Extraction path:",
     "Source links found:",
+    "Shortlink expansions:",
     "Linked artifacts:",
     "Top comments:",
     "Learning chapters:",
@@ -842,13 +868,14 @@ function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] 
 
   for (const [key, group] of sourceGroups.entries()) {
     if (group.length < 2) continue;
-    const duplicateGroup = duplicateGroupFor(key, group.length, "same source URL");
+    const duplicateGroup = duplicateGroupFor(key, group, "same source URL");
     for (const finding of group) duplicateByFilename.set(finding.filename, duplicateGroup);
   }
 
   const fallbackGroups = new Map<string, FindingSummary[]>();
   for (const finding of findings) {
     if (duplicateByFilename.has(finding.filename)) continue;
+    if (normalizeDuplicateUrl(finding.source.url)) continue;
     const key = fallbackDuplicateGroupKey(finding);
     if (!key) continue;
     fallbackGroups.set(key, [...(fallbackGroups.get(key) ?? []), finding]);
@@ -856,7 +883,7 @@ function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] 
 
   for (const [key, group] of fallbackGroups.entries()) {
     if (group.length < 2) continue;
-    const duplicateGroup = duplicateGroupFor(key, group.length, "same title and creator");
+    const duplicateGroup = duplicateGroupFor(key, group, "same title and creator");
     for (const finding of group) duplicateByFilename.set(finding.filename, duplicateGroup);
   }
 
@@ -877,10 +904,12 @@ function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] 
   });
 }
 
-function duplicateGroupFor(key: string, count: number, reason: FindingDuplicateGroup["reason"]): FindingDuplicateGroup {
+function duplicateGroupFor(key: string, group: FindingSummary[], reason: FindingDuplicateGroup["reason"]): FindingDuplicateGroup {
+  const canonicalFindingId = [...group].sort((a, b) => a.filename.localeCompare(b.filename))[0].filename;
   return {
     id: stableDuplicateId(key),
-    count,
+    count: group.length,
+    canonicalFindingId,
     reason,
   };
 }
@@ -898,14 +927,46 @@ function normalizeDuplicateUrl(rawUrl: string | null): string | null {
   try {
     const parsed = new URL(rawUrl);
     parsed.hash = "";
-    parsed.hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    parsed.hostname = parsed.hostname.replace(/^(?:www|m|mobile)\./, "").toLowerCase();
     parsed.pathname = parsed.pathname.replace(/\/+$/, "");
     stripTrackingParams(parsed.searchParams);
+    const socialKey = canonicalSocialSourceKey(parsed);
+    if (socialKey) return socialKey;
     parsed.searchParams.sort();
     return parsed.toString().replace(/\/$/, "");
   } catch {
     return normalizeDuplicateText(rawUrl) || null;
   }
+}
+
+function canonicalSocialSourceKey(url: URL): string | null {
+  const host = url.hostname;
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (host === "instagram.com" && /^(?:p|reel|reels|tv)$/i.test(segments[0] ?? "") && segments[1]) {
+    return `instagram:${segments[1]}`;
+  }
+
+  if (host === "youtu.be" && segments[0]) return `youtube:${segments[0]}`;
+  if ((host === "youtube.com" || host === "music.youtube.com") && url.searchParams.get("v")) {
+    return `youtube:${url.searchParams.get("v")}`;
+  }
+  if ((host === "youtube.com" || host === "music.youtube.com") && /^(?:shorts|embed|live)$/i.test(segments[0] ?? "") && segments[1]) {
+    return `youtube:${segments[1]}`;
+  }
+
+  if (host === "tiktok.com") {
+    const videoIndex = segments.findIndex((segment) => segment.toLowerCase() === "video");
+    if (videoIndex >= 0 && segments[videoIndex + 1]) return `tiktok:${segments[videoIndex + 1]}`;
+    const legacyVideo = segments[0]?.toLowerCase() === "v" ? segments[1]?.replace(/\.html$/i, "") : null;
+    if (legacyVideo) return `tiktok:${legacyVideo}`;
+  }
+
+  if ((host === "x.com" || host === "twitter.com") && segments[1]?.toLowerCase() === "status" && segments[2]) {
+    return `x:${segments[2]}`;
+  }
+
+  return null;
 }
 
 function stripTrackingParams(params: URLSearchParams): void {
@@ -945,7 +1006,14 @@ function stableDuplicateId(value: string): string {
 
 export function listPublicFindings(aiMemoryDir = getAiMemoryDir()): PublicFindingSummary[] {
   const appliedMap = loadAppliedMap(aiMemoryDir);
-  return listFindings(aiMemoryDir).map((finding) => toPublicFinding(finding, appliedMap));
+  return listClusteredFindings(aiMemoryDir).map((finding) => toPublicFinding(finding, appliedMap));
+}
+
+export function listClusteredFindings(aiMemoryDir = getAiMemoryDir()): FindingSummary[] {
+  return listFindings(aiMemoryDir).filter((finding) => {
+    const duplicateGroup = finding.diagnostics.duplicateGroup;
+    return !duplicateGroup || duplicateGroup.canonicalFindingId === finding.id;
+  });
 }
 
 export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir()): FindingDetail | null {
