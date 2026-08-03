@@ -13,6 +13,7 @@ import {
   getAiMemoryDir,
   getFindingDetail,
   getPublicFindingDetail,
+  listClusteredFindings,
   listFindings,
   listPublicFindings,
   type FindingSummary,
@@ -528,12 +529,12 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
 
   app.get("/api/findings", { preHandler: authMiddleware }, async () => {
     await ensureAiMemoryCheckout();
-    return { findings: listFindings() };
+    return { findings: listClusteredFindings() };
   });
 
   app.get("/api/audit", { preHandler: authMiddleware }, async () => {
     await ensureAiMemoryCheckout();
-    const findings = listFindings();
+    const findings = listClusteredFindings();
     return { audit: auditFindings(findings), filters: filterCounts(findings) };
   });
 

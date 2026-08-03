@@ -149,6 +149,8 @@ describe("dashboard HTML", () => {
     expect(html).toContain("function prioritizedQualityReasons(f)");
     expect(html).toContain("function qualityReasonChips(f)");
     expect(html).toContain("f.diagnostics?.duplicateGroup");
+    expect(html).toContain("canonicalFindingId");
+    expect(html).toContain("duplicateGroup.count");
     expect(html).toContain('reason.startsWith("triage ")');
     expect(html).toContain("duplicate");
     expect(html).toContain("duplicate/retry history");

@@ -269,7 +269,7 @@ describe("finding audit helpers", () => {
       filename: "duplicate.md",
       diagnostics: {
         extractionWarnings: [],
-        duplicateGroup: { id: "dup-source", count: 2, reason: "same source URL" },
+        duplicateGroup: { id: "dup-source", count: 2, canonicalFindingId: "duplicate.md", reason: "same source URL" },
       },
     });
 
