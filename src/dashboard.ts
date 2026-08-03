@@ -745,6 +745,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
+        max-height: 92px;
+        overflow: auto;
         padding: 0 12px 9px;
       }
       .health-chip {
@@ -1071,6 +1073,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     const secondaryFilters = new Set(["repo", "enrich", "ocr", "project", "skip"]);
 
     function setSecondaryFiltersOpen(open) {
+      if (open) setAuditPanelOpen(false);
       state.secondaryFiltersOpen = Boolean(open);
       const tray = $("secondary-filters");
       const button = $("more-filters");
@@ -1340,6 +1343,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     function setAuditPanelOpen(open) {
+      if (open) setSecondaryFiltersOpen(false);
       const panel = $("audit-panel");
       const button = $("audit-toggle");
       panel.hidden = !open;

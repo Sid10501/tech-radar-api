@@ -103,6 +103,7 @@ function createDashboardHarness(options: {
     innerHTML = "";
     scrollTop = 0;
     disabled = false;
+    hidden = false;
     value = "";
     handlers: Record<string, (event: any) => void> = {};
     children = new Map<string, FakeElement>();
@@ -359,7 +360,44 @@ describe("dashboard HTML", () => {
     expect(html).toContain('id="audit-mobile-details"');
     expect(html).toContain("function renderBatchHealth()");
     expect(html).toContain("value > 0");
+    expect(html).toContain("max-height: 92px");
     expect(html).toContain("No flagged reasons");
+  });
+
+  it("keeps the mobile More and Audit disclosures mutually exclusive", async () => {
+    const harness = createDashboardHarness();
+    await harness.settle();
+
+    expect(await harness.evaluate(`
+      setSecondaryFiltersOpen(true);
+      setAuditPanelOpen(true);
+      ({
+        secondaryOpen: state.secondaryFiltersOpen,
+        moreExpanded: $("more-filters").attributes["aria-expanded"],
+        auditExpanded: $("audit-toggle").attributes["aria-expanded"],
+        auditHidden: $("audit-panel").hidden
+      })
+    `)).toEqual({
+      secondaryOpen: false,
+      moreExpanded: "false",
+      auditExpanded: "true",
+      auditHidden: false,
+    });
+
+    expect(await harness.evaluate(`
+      setSecondaryFiltersOpen(true);
+      ({
+        secondaryOpen: state.secondaryFiltersOpen,
+        moreExpanded: $("more-filters").attributes["aria-expanded"],
+        auditExpanded: $("audit-toggle").attributes["aria-expanded"],
+        auditHidden: $("audit-panel").hidden
+      })
+    `)).toEqual({
+      secondaryOpen: true,
+      moreExpanded: "true",
+      auditExpanded: "false",
+      auditHidden: true,
+    });
   });
 
   it("keeps the desktop split explorer hooks", () => {
