@@ -606,7 +606,9 @@ describe("server routes", () => {
 
     beforeEach(() => {
       process.env["STOCKBOT_CALLBACK_SECRET"] = secret;
-      vi.mocked(runnerMock.applyStockBotCompletion).mockClear();
+      vi.mocked(runnerMock.applyStockBotCompletion)
+        .mockReset()
+        .mockImplementation(() => ({ id: "finance-run", status: "processed" }) as never);
     });
 
     afterAll(() => {
