@@ -1,4 +1,4 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyReply } from "fastify";
 import multipart from "@fastify/multipart";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -35,6 +35,16 @@ const SECURITY_HEADERS = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
 } as const;
 const NO_STORE_CACHE_CONTROL = "no-store, max-age=0";
+const METADATA_CACHE_CONTROL = "public, max-age=86400";
+const PUBLIC_READ_CACHE_CONTROL =
+  "public, max-age=60, s-maxage=300, stale-while-revalidate=3600";
+const ROBOTS_TEXT = [
+  "User-agent: *",
+  "Disallow: /api/",
+  "Disallow: /runs",
+  "Disallow: /telegram/",
+  "",
+].join("\n");
 
 interface EnrichCandidate {
   finding: FindingSummary;
@@ -120,6 +130,10 @@ function publicFeedAllowedOrigins(): Set<string> {
       .map((origin) => origin.trim())
       .filter(Boolean),
   );
+}
+
+function setPublicReadCache(reply: FastifyReply): void {
+  reply.header("Cache-Control", PUBLIC_READ_CACHE_CONTROL);
 }
 
 let aiMemorySync: Promise<void> | null = null;
@@ -245,10 +259,10 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
   // CORS is scoped to the public feed: exact origins from PUBLIC_FEED_ALLOWED_ORIGINS, never a wildcard
   app.addHook("onRequest", async (request, reply) => {
     if (!request.url.startsWith("/api/public/")) return;
+    reply.header("Vary", "Origin");
     const origin = request.headers.origin;
     if (typeof origin === "string" && publicFeedAllowedOrigins().has(origin)) {
       reply.header("Access-Control-Allow-Origin", origin);
-      reply.header("Vary", "Origin");
     }
     if (request.method === "OPTIONS") {
       reply.header("Access-Control-Allow-Methods", "GET");
@@ -258,6 +272,22 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
 
   app.get("/healthz", async () => {
     return { ok: true };
+  });
+
+  app.get("/robots.txt", async (_request, reply) => {
+    reply.header("Content-Type", "text/plain; charset=utf-8");
+    reply.header("Cache-Control", METADATA_CACHE_CONTROL);
+    return ROBOTS_TEXT;
+  });
+
+  app.get("/favicon.ico", async (_request, reply) => {
+    reply.header("Cache-Control", METADATA_CACHE_CONTROL);
+    return reply.code(204).send();
+  });
+
+  app.get("/apple-touch-icon.png", async (_request, reply) => {
+    reply.header("Cache-Control", METADATA_CACHE_CONTROL);
+    return reply.code(204).send();
   });
 
   app.post<{ Body: { password?: string } }>("/api/unlock", async (request, reply) => {
@@ -456,32 +486,44 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
     return listRuns();
   });
 
-  app.get("/api/public/findings", async () => {
+  app.get("/api/public/findings", async (_request, reply) => {
     await ensureAiMemoryCheckout();
-    return { findings: listPublicFindings() };
+    const body = { findings: listPublicFindings() };
+    setPublicReadCache(reply);
+    return body;
   });
 
-  app.get("/api/public/audit", async () => {
+  app.get("/api/public/audit", async (_request, reply) => {
     await ensureAiMemoryCheckout();
     const findings = listPublicFindings();
-    return { audit: auditPublicFindings(findings), filters: filterCountsFromPublic(findings) };
+    const body = {
+      audit: auditPublicFindings(findings),
+      filters: filterCountsFromPublic(findings),
+    };
+    setPublicReadCache(reply);
+    return body;
   });
 
-  app.get("/api/public/release-notes", async () => {
-    return { releases: listReleaseNotes() };
+  app.get("/api/public/release-notes", async (_request, reply) => {
+    const body = { releases: listReleaseNotes() };
+    setPublicReadCache(reply);
+    return body;
   });
 
   app.get("/api/public/findings/rss", async (request, reply) => {
     await ensureAiMemoryCheckout();
     const siteBase = process.env["PUBLIC_SITE_RADAR_BASE"] || `${request.protocol}://${request.headers.host}`;
+    const xml = buildRssXml(listPublicFindings(), { siteBase });
     reply.header("Content-Type", "application/rss+xml; charset=utf-8");
-    return buildRssXml(listPublicFindings(), { siteBase });
+    setPublicReadCache(reply);
+    return xml;
   });
 
   app.get<{ Params: { id: string } }>("/api/public/findings/:id", async (request, reply) => {
     await ensureAiMemoryCheckout();
     const detail = getPublicFindingDetail(request.params.id);
     if (!detail) return reply.code(404).send({ error: "Finding not found" });
+    setPublicReadCache(reply);
     return detail;
   });
 
