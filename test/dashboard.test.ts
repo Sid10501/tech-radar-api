@@ -316,11 +316,12 @@ describe("dashboard HTML", () => {
   it("keeps primary mobile filters visible and secondary filters behind More", () => {
     const html = DASHBOARD_HTML([]);
 
-    expect(html).toContain('class="primary-filters"');
+    expect(html).toContain('class="toolbar-filter-group primary-filters"');
     expect(html).toContain('id="more-filters"');
     expect(html).toContain('aria-controls="secondary-filters"');
-    expect(html).toContain('id="secondary-filters" class="secondary-filters" aria-hidden="false"');
+    expect(html).toContain('id="secondary-filters" class="toolbar-filter-group secondary-filters" aria-hidden="false"');
     expect(html).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
+    expect(html).toContain("order: -1");
     expect(html).toContain("function setSecondaryFiltersOpen(open)");
     expect(html).toContain("secondaryFilters.has(state.filter)");
   });
@@ -336,9 +337,9 @@ describe("dashboard HTML", () => {
 
     expect(html).toContain('id="mode-note-wide"');
     expect(html).toContain('id="mode-note-compact"');
-    expect(html).toContain(".mode-note-compact { display: none; }");
-    expect(html).toContain("Public view · Unlock for project fit");
-    expect(html).toContain("Sid view · Project fit visible");
+    expect(html).toContain(".mode-note-wide { display: none; }");
+    expect(html).toContain('id="active-filter-label"');
+    expect(html).toContain('state.privateUnlocked ? "Sid view" : "Public view"');
   });
 
   it("renders audit count hooks inside the toolbar disclosure without tabs", () => {
@@ -394,7 +395,7 @@ describe("dashboard HTML", () => {
     const html = DASHBOARD_HTML([]);
 
     expect(html).toContain("height: 100dvh");
-    expect(html).toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
+    expect(html).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
     expect(html).toContain("position: sticky");
     expect(html).toContain("top: 0");
   });
@@ -596,7 +597,7 @@ describe("dashboard HTML", () => {
       view: "findings",
       mobileDetailOpen: false,
     });
-    expect(harness.elements.get("detail")?.innerHTML).not.toContain("Release notes");
+    expect(harness.elements.get("detail-body")?.innerHTML).not.toContain("Release notes");
   });
 
   it("restores the visible list after search closes mobile notes and a finding opens", async () => {
@@ -614,7 +615,7 @@ describe("dashboard HTML", () => {
       view: "findings",
       mobileDetailOpen: false,
     });
-    expect(harness.elements.get("detail")?.innerHTML).not.toContain("Release notes");
+    expect(harness.elements.get("detail-body")?.innerHTML).not.toContain("Release notes");
   });
 
   it("keeps release notes open when the deferred initial findings load completes", async () => {
@@ -630,7 +631,7 @@ describe("dashboard HTML", () => {
     await harness.settle();
 
     expect(await harness.evaluate(`state.view`)).toBe("release-notes");
-    expect(harness.elements.get("detail")?.innerHTML).toContain("Release notes");
+    expect(harness.elements.get("detail-body")?.innerHTML).toContain("Release notes");
   });
 
   it.each([
@@ -806,14 +807,14 @@ describe("dashboard HTML", () => {
     harness.history.back();
     await harness.settle();
     harness.setMobile(false);
-    const restoredDetail = harness.elements.get("detail")?.innerHTML;
+    const restoredDetail = harness.elements.get("detail-body")?.innerHTML;
     expect(restoredDetail).not.toContain("Release notes");
     releaseNotesResponse.resolve(response);
 
     await expect(releaseNotesPromise).resolves.toBeUndefined();
     expect(await harness.evaluate(`state.view`)).toBe("findings");
-    expect(harness.elements.get("detail")?.innerHTML).toBe(restoredDetail);
-    expect(harness.elements.get("detail")?.innerHTML).not.toContain("Late release");
+    expect(harness.elements.get("detail-body")?.innerHTML).toBe(restoredDetail);
+    expect(harness.elements.get("detail-body")?.innerHTML).not.toContain("Late release");
     expect(harness.elements.get("toast")?.textContent).toBe("");
   });
 
@@ -830,8 +831,8 @@ describe("dashboard HTML", () => {
       };
       renderBatchHealth();
     `);
-    expect(harness.elements.get("batch-health-details")?.innerHTML).toContain("Transcript: 0");
-    expect(harness.elements.get("batch-health-details")?.innerHTML).toContain("No flagged reasons");
+    expect(harness.elements.get("audit-mobile-details")?.innerHTML).toContain("Transcript: 0");
+    expect(harness.elements.get("audit-mobile-details")?.innerHTML).toContain("No flagged reasons");
 
     await harness.evaluate(`
       state.audit = {
@@ -842,7 +843,7 @@ describe("dashboard HTML", () => {
       };
       renderBatchHealth();
     `);
-    const flaggedDetails = harness.elements.get("batch-health-details")?.innerHTML;
+    const flaggedDetails = harness.elements.get("audit-mobile-details")?.innerHTML;
     expect(flaggedDetails).toContain("Transcript: 2");
     expect(flaggedDetails).toContain("Weak quality: 1");
     expect(flaggedDetails).not.toContain("Missing links");

@@ -134,7 +134,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       min-width: 0;
       min-height: 0;
       display: grid;
-      grid-template-rows: auto auto auto auto minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
     }
     .queue-head {
       padding: 16px;
@@ -153,52 +153,40 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       font-size: 12px;
       font-weight: 760;
     }
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
+    .queue-head.compact {
+      padding: 14px 16px 12px;
     }
-    .stat {
+    .queue-status-line {
       min-width: 0;
-      border: 1px solid #e4e9e3;
-      border-radius: 8px;
-      background: var(--paper);
-      padding: 9px 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .stat-value {
-      font-size: 18px;
-      font-weight: 880;
-      line-height: 1;
-      margin-bottom: 4px;
-    }
-    .stat-label {
+    .queue-filter-summary {
+      display: flex;
+      gap: 10px;
+      margin-top: 9px;
       color: var(--muted);
       font-size: 11px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .mode-note {
-      padding: 10px 16px;
-      border-bottom: 1px solid #edf1ec;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.4;
+    .queue-filter-summary strong {
+      color: var(--ink);
+      font-size: 13px;
     }
     .primary-filters,
-    .secondary-filters { display: contents; }
-    .mode-note-compact { display: none; }
+    .secondary-filters { display: flex; }
+    .mode-note-wide { display: none; }
+    .mode-note-compact { display: inline; }
     .filter.more-filter { display: none; }
-    .batch-health-region { min-width: 0; }
-    .batch-health {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 6px;
-      padding: 10px 16px;
-      border-bottom: 1px solid #edf1ec;
-      background: #fbfcf8;
-    }
-    .batch-health-mobile { display: none; }
     .health-chip {
       min-width: 0;
       color: #314138;
@@ -212,14 +200,23 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .filters {
+    .filter-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
       display: flex;
       align-items: center;
       flex-wrap: wrap;
-      gap: 6px;
-      padding: 10px 16px;
-      border-bottom: 1px solid #edf1ec;
-      min-height: 56px;
+      gap: 7px;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(238, 242, 236, .94);
+    }
+    .toolbar-filter-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      min-width: 0;
     }
     .filter {
       flex: 0 0 auto;
@@ -248,6 +245,26 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       color: inherit;
       opacity: .72;
       margin-left: 3px;
+    }
+    .audit-toggle {
+      margin-left: auto;
+    }
+    .audit-panel {
+      margin: 12px 24px 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .audit-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 6px;
+      padding: 12px;
+    }
+    .audit-summary-mobile,
+    .audit-mobile-details {
+      display: none;
     }
     .private-only-filter { display: none; }
     .sid-unlocked .private-only-filter { display: inline-flex; }
@@ -321,10 +338,13 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       min-height: 0;
       overflow: auto;
     }
+    .detail-shell {
+      min-height: 100%;
+    }
     .detail {
       max-width: 1040px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 14px 24px 24px;
     }
     .mobile-detail-bar {
       display: none;
@@ -638,6 +658,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       .workspace {
         grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr);
         height: 100%;
         min-height: 0;
         overflow: hidden;
@@ -648,52 +669,68 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         min-height: 0;
         border-right: 0;
         border-bottom: 0;
-        grid-template-rows: auto auto auto auto minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
       }
       .content {
-        display: none;
-        height: 100%;
+        order: -1;
+        display: block;
+        height: auto;
         min-height: 0;
-        overflow: auto;
+        overflow: visible;
       }
       .mobile-detail-open .queue { display: none; }
-      .mobile-detail-open .content { display: block; }
+      .mobile-detail-open .workspace { grid-template-rows: minmax(0, 1fr); }
+      .mobile-detail-open .content {
+        order: 0;
+        height: 100%;
+        overflow: auto;
+      }
       .queue-head {
         padding: 10px 12px;
       }
       .queue-title {
         margin-bottom: 8px;
       }
-      .stats {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 6px;
+      .queue-filter-summary {
+        gap: 8px;
+        margin-top: 7px;
       }
-      .stat {
-        padding: 7px 8px;
-        border-radius: 7px;
+      .detail-shell {
+        min-height: 100%;
       }
-      .stat-value {
-        font-size: 15px;
-        margin-bottom: 2px;
+      #detail-body {
+        display: none;
       }
-      .mode-note {
-        padding: 6px 12px;
-        line-height: 1.25;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .mode-note-wide { display: none; }
-      .mode-note-compact { display: inline; }
-      .batch-health { display: none; }
-      .batch-health-mobile {
+      .mobile-detail-open #detail-body {
         display: block;
+      }
+      .filter-toolbar {
+        position: static;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 6px;
+        min-height: 44px;
+        padding: 8px 12px;
         border-bottom: 1px solid #edf1ec;
         background: #fbfcf8;
         color: #314138;
         font-size: 11px;
       }
-      .batch-health-mobile summary {
+      .mobile-detail-open .filter-toolbar,
+      .mobile-detail-open .audit-panel {
+        display: none;
+      }
+      .audit-panel {
+        margin: 0;
+        border-width: 0 0 1px;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      .audit-panel[hidden] {
+        display: none;
+      }
+      .audit-summary-mobile {
+        display: block;
         min-height: 34px;
         padding: 9px 12px;
         font-weight: 850;
@@ -701,7 +738,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .batch-health-details {
+      .audit-metrics {
+        display: none;
+      }
+      .audit-mobile-details {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
@@ -709,13 +749,6 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       .health-chip {
         padding: 6px 7px;
-      }
-      .filters {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 6px;
-        min-height: 44px;
-        padding: 8px 12px;
       }
       .primary-filters {
         display: grid;
@@ -739,7 +772,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }
       .secondary-filters.open { display: grid; }
       .secondary-filter { width: 100%; }
-      .filters {
+      .filter-toolbar {
         overflow: visible;
       }
       .filter {
@@ -860,44 +893,49 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     </header>
     <div class="workspace">
       <aside class="queue">
-        <div class="queue-head">
+        <div class="queue-head compact">
           <div class="queue-title"><span>Findings</span><span id="count" class="count">0 total</span></div>
-          <div class="stats" aria-label="Finding quality summary">
-            <div class="stat"><div id="strong-count" class="stat-value">0</div><div class="stat-label">Strong</div></div>
-            <div class="stat"><div id="review-count" class="stat-value">0</div><div class="stat-label">Review</div></div>
-            <div class="stat"><div id="weak-count" class="stat-value">0</div><div class="stat-label">Weak</div></div>
+          <div class="queue-status-line">
+            <span id="mode-note-wide" class="mode-note-wide">Public view</span>
+            <span id="mode-note-compact" class="mode-note-compact">Public view</span>
+            <span aria-hidden="true">·</span>
+            <span id="active-filter-label">All</span>
           </div>
-        </div>
-        <div id="mode-note" class="mode-note">
-          <span id="mode-note-wide" class="mode-note-wide">Public research is open. Unlock Sid view only when you want project fit and next actions.</span>
-          <span id="mode-note-compact" class="mode-note-compact">Public view · Unlock for project fit</span>
-        </div>
-        <div class="batch-health-region">
-          <div id="batch-health" class="batch-health" aria-label="Latest batch health"></div>
-          <details id="batch-health-mobile" class="batch-health-mobile">
-            <summary id="batch-health-summary">Latest batch health</summary>
-            <div id="batch-health-details" class="batch-health-details"></div>
-          </details>
-        </div>
-        <div class="filters" aria-label="Filter findings">
-          <div class="primary-filters">
-            <button class="filter primary-filter active" data-filter="all">All <span data-count-for="all">0</span></button>
-            <button class="filter primary-filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
-            <button class="filter primary-filter" data-filter="review">Review <span data-count-for="review">0</span></button>
-            <button class="filter primary-filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
-          </div>
-          <button id="more-filters" class="filter more-filter" type="button" aria-expanded="false" aria-controls="secondary-filters">More</button>
-          <div id="secondary-filters" class="secondary-filters" aria-hidden="false">
-            <button class="filter secondary-filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
-            <button class="filter secondary-filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
-            <button class="filter secondary-filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
-            <button class="filter secondary-filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
-            <button class="filter secondary-filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
+          <div id="queue-filter-summary" class="queue-filter-summary" aria-label="Finding quality summary">
+            <span><strong id="strong-count">0</strong> Strong</span>
+            <span><strong id="review-count">0</strong> Review</span>
+            <span><strong id="weak-count">0</strong> Weak</span>
           </div>
         </div>
         <div id="finding-list" class="list"></div>
       </aside>
-      <main id="detail" class="content"></main>
+      <main id="detail" class="content">
+        <div class="detail-shell">
+          <div id="filter-toolbar" class="filter-toolbar" aria-label="Filter findings">
+            <div class="toolbar-filter-group primary-filters">
+              <button class="filter primary-filter active" data-filter="all">All <span data-count-for="all">0</span></button>
+              <button class="filter primary-filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
+              <button class="filter primary-filter" data-filter="review">Review <span data-count-for="review">0</span></button>
+              <button class="filter primary-filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
+            </div>
+            <button id="more-filters" class="filter more-filter" type="button" aria-expanded="false" aria-controls="secondary-filters">More</button>
+            <div id="secondary-filters" class="toolbar-filter-group secondary-filters" aria-hidden="false">
+              <button class="filter secondary-filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
+              <button class="filter secondary-filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
+              <button class="filter secondary-filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
+              <button class="filter secondary-filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
+              <button class="filter secondary-filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
+            </div>
+            <button id="audit-toggle" class="filter audit-toggle" type="button" aria-expanded="false" aria-controls="audit-panel">Audit</button>
+          </div>
+          <section id="audit-panel" class="audit-panel" hidden>
+            <div id="audit-summary-mobile" class="audit-summary-mobile">Latest batch health unavailable</div>
+            <div id="audit-metrics" class="audit-metrics" aria-label="Latest batch health"></div>
+            <div id="audit-mobile-details" class="audit-mobile-details"></div>
+          </section>
+          <div id="detail-body"></div>
+        </div>
+      </main>
     </div>
   </div>
   <div id="toast" class="toast"></div>
@@ -1269,9 +1307,9 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       const audit = state.audit;
       const enrichmentReasons = audit?.enrichmentReasons || {};
       if (!audit) {
-        $("batch-health").innerHTML = "";
-        $("batch-health-summary").textContent = "Latest batch health unavailable";
-        $("batch-health-details").innerHTML = '<div class="health-chip">No audit data</div>';
+        $("audit-metrics").innerHTML = "";
+        $("audit-summary-mobile").textContent = "Latest batch health unavailable";
+        $("audit-mobile-details").innerHTML = '<div class="health-chip">No audit data</div>';
         return;
       }
 
@@ -1283,10 +1321,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         ["Enrich", audit.needsEnrichment ?? 0],
         ...reasonCountLabels.map(([key, label]) => [label, enrichmentReasons[key] ?? 0]),
       ];
-      $("batch-health").innerHTML = desktopEntries
+      $("audit-metrics").innerHTML = desktopEntries
         .map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ": " + escapeHtml(value) + "</div>")
         .join("");
-      $("batch-health-summary").textContent = "Latest " + (audit.total ?? 0) + " · Repo/docs " + repoDocs + " · Enrich " + (audit.needsEnrichment ?? 0);
+      $("audit-summary-mobile").textContent = "Latest " + (audit.total ?? 0) + " · Repo/docs " + repoDocs + " · Enrich " + (audit.needsEnrichment ?? 0);
 
       const mobileReasonEntries = reasonCountLabels
         .map(([key, label]) => [label, enrichmentReasons[key] ?? 0])
@@ -1295,10 +1333,17 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         ["Transcript", audit.evidence?.transcript ?? 0],
         ...mobileReasonEntries,
       ];
-      $("batch-health-details").innerHTML = mobileEntries
+      $("audit-mobile-details").innerHTML = mobileEntries
         .map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ": " + escapeHtml(value) + "</div>")
         .join("")
         + (mobileReasonEntries.length ? "" : '<div class="health-chip">No flagged reasons</div>');
+    }
+
+    function setAuditPanelOpen(open) {
+      const panel = $("audit-panel");
+      const button = $("audit-toggle");
+      panel.hidden = !open;
+      button.setAttribute("aria-expanded", String(open));
     }
 
     function updateStats() {
@@ -1321,12 +1366,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       });
       renderBatchHealth();
       $("count").textContent = state.loading ? "Loading" : visibleFindings().length + " of " + state.findings.length;
-      $("mode-note-wide").textContent = state.privateUnlocked
-        ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
-        : "Public research is open. Unlock Sid view only when you want project fit and next actions.";
-      $("mode-note-compact").textContent = state.privateUnlocked
-        ? "Sid view · Project fit visible"
-        : "Public view · Unlock for project fit";
+      const modeLabel = state.privateUnlocked ? "Sid view" : "Public view";
+      $("mode-note-wide").textContent = modeLabel;
+      $("mode-note-compact").textContent = modeLabel;
+      $("active-filter-label").textContent = filterLabel();
       $("unlock").querySelector(".wide-label").textContent = state.privateUnlocked ? "Unlocked" : "Unlock";
       $("unlock").querySelector(".short-label").textContent = state.privateUnlocked ? "Sid" : "Unlock";
       $("dashboard-root").classList.toggle("sid-unlocked", state.privateUnlocked);
@@ -1476,7 +1519,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     function renderReleaseNotes() {
-      const detail = $("detail");
+      const detail = $("detail-body");
       if (state.releaseNotesLoading) {
         detail.innerHTML = '<div class="detail"><section class="hero"><div class="hero-main"><div class="skeleton detail-line" style="width: 180px"></div><div class="skeleton detail-line" style="height: 54px; width: 72%; max-width: 760px"></div><div class="skeleton detail-line" style="width: 86%"></div></div></section></div>';
         return;
@@ -1521,7 +1564,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         renderReleaseNotes();
         return;
       }
-      const detail = $("detail");
+      const detail = $("detail-body");
       if (state.loading) {
         detail.innerHTML = '<div class="detail"><section class="hero"><div class="hero-main"><div class="skeleton detail-line" style="width: 180px"></div><div class="skeleton detail-line" style="height: 54px; width: 72%; max-width: 760px"></div><div class="skeleton detail-line" style="width: 86%"></div><div class="skeleton detail-line" style="width: 64%"></div></div></section></div>';
         return;
@@ -1770,6 +1813,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     });
     $("more-filters").addEventListener("click", () => setSecondaryFiltersOpen(!state.secondaryFiltersOpen));
     setSecondaryFiltersOpen(false);
+    $("audit-toggle").addEventListener("click", () => setAuditPanelOpen($("audit-panel").hidden));
+    setAuditPanelOpen(false);
 
     document.querySelectorAll(".filter[data-filter]").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled) return;
