@@ -1,5 +1,19 @@
 import type { Run } from "./runner.js";
 
+export function dashboardReasonKey(reason: string): string {
+  return reason.trim().replace(/^triage\s+/i, "").toLowerCase();
+}
+
+export function dedupeDashboardReasons(reasons: string[]): string[] {
+  const seen = new Set<string>();
+  return reasons.filter((reason) => {
+    const key = dashboardReasonKey(reason);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -171,6 +185,11 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       font-size: 12px;
       line-height: 1.4;
     }
+    .primary-filters,
+    .secondary-filters { display: contents; }
+    .mode-note-compact { display: none; }
+    .filter.more-filter { display: none; }
+    .batch-health-region { min-width: 0; }
     .batch-health {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -179,6 +198,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       border-bottom: 1px solid #edf1ec;
       background: #fbfcf8;
     }
+    .batch-health-mobile { display: none; }
     .health-chip {
       min-width: 0;
       color: #314138;
@@ -657,27 +677,70 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         margin-bottom: 2px;
       }
       .mode-note {
-        padding: 8px 12px;
+        padding: 6px 12px;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .mode-note-wide { display: none; }
+      .mode-note-compact { display: inline; }
+      .batch-health { display: none; }
+      .batch-health-mobile {
+        display: block;
+        border-bottom: 1px solid #edf1ec;
+        background: #fbfcf8;
+        color: #314138;
         font-size: 11px;
       }
-      .batch-health {
-        grid-template-columns: repeat(4, max-content);
-        overflow-x: auto;
-        padding: 8px 12px;
+      .batch-health-mobile summary {
+        min-height: 34px;
+        padding: 9px 12px;
+        font-weight: 850;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .batch-health-details {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
+        padding: 0 12px 9px;
       }
       .health-chip {
         padding: 6px 7px;
       }
       .filters {
-        flex-wrap: nowrap;
-        overflow-x: auto;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px;
         min-height: 44px;
         padding: 8px 12px;
-        scrollbar-width: none;
       }
-      .filters::-webkit-scrollbar {
+      .primary-filters {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 4px;
+        min-width: 0;
+      }
+      .primary-filter {
+        width: 100%;
+        min-width: 0;
+        padding-inline: 5px;
+      }
+      .primary-filter [data-count-for] { display: none; }
+      .filter.more-filter { display: inline-flex; }
+      .secondary-filters {
+        grid-column: 1 / -1;
         display: none;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        padding-top: 2px;
+      }
+      .secondary-filters.open { display: grid; }
+      .secondary-filter { width: 100%; }
+      .filters {
+        overflow: visible;
       }
       .filter {
         min-height: 28px;
@@ -805,18 +868,32 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
             <div class="stat"><div id="weak-count" class="stat-value">0</div><div class="stat-label">Weak</div></div>
           </div>
         </div>
-        <div id="mode-note" class="mode-note">Public research is open. Unlock Sid view only when you want project fit and next actions.</div>
-        <div id="batch-health" class="batch-health" aria-label="Latest batch health"></div>
+        <div id="mode-note" class="mode-note">
+          <span id="mode-note-wide" class="mode-note-wide">Public research is open. Unlock Sid view only when you want project fit and next actions.</span>
+          <span id="mode-note-compact" class="mode-note-compact">Public view · Unlock for project fit</span>
+        </div>
+        <div class="batch-health-region">
+          <div id="batch-health" class="batch-health" aria-label="Latest batch health"></div>
+          <details id="batch-health-mobile" class="batch-health-mobile">
+            <summary id="batch-health-summary">Latest batch health</summary>
+            <div id="batch-health-details" class="batch-health-details"></div>
+          </details>
+        </div>
         <div class="filters" aria-label="Filter findings">
-          <button class="filter active" data-filter="all">All <span data-count-for="all">0</span></button>
-          <button class="filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
-          <button class="filter" data-filter="review">Review <span data-count-for="review">0</span></button>
-          <button class="filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
-          <button class="filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
-          <button class="filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
-          <button class="filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
-          <button class="filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
-          <button class="filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
+          <div class="primary-filters">
+            <button class="filter primary-filter active" data-filter="all">All <span data-count-for="all">0</span></button>
+            <button class="filter primary-filter" data-filter="strong">Strong <span data-count-for="strong">0</span></button>
+            <button class="filter primary-filter" data-filter="review">Review <span data-count-for="review">0</span></button>
+            <button class="filter primary-filter" data-filter="weak">Weak <span data-count-for="weak">0</span></button>
+          </div>
+          <button id="more-filters" class="filter more-filter" type="button" aria-expanded="false" aria-controls="secondary-filters">More</button>
+          <div id="secondary-filters" class="secondary-filters" aria-hidden="false">
+            <button class="filter secondary-filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
+            <button class="filter secondary-filter" data-filter="enrich">Needs enrichment <span data-count-for="enrich">0</span></button>
+            <button class="filter secondary-filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
+            <button class="filter secondary-filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
+            <button class="filter secondary-filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
+          </div>
         </div>
         <div id="finding-list" class="list"></div>
       </aside>
@@ -826,7 +903,9 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false };
+    const dashboardReasonKey = ${dashboardReasonKey.toString()};
+    const dedupeDashboardReasons = ${dedupeDashboardReasons.toString()};
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false, secondaryFiltersOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false, releaseNotesRequestSeq: 0 };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -840,9 +919,138 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return window.matchMedia("(max-width: 980px)").matches;
     }
 
+    const mobileHistoryMarker = "tech-radar-dashboard";
+
+    function mobileCurrentView() {
+      if (!state.mobileDetailOpen) return "findings";
+      if (state.view === "release-notes") return "release-notes";
+      if (state.selectedId) return "finding";
+      return "findings";
+    }
+
+    function mobileHistorySnapshot(overrides = {}) {
+      return {
+        marker: mobileHistoryMarker,
+        view: mobileCurrentView(),
+        findingId: state.selectedId,
+        selectedId: state.selectedId,
+        filter: state.filter,
+        query: state.query,
+        scrollTop: $("finding-list").scrollTop,
+        ...overrides,
+      };
+    }
+
+    function initializeMobileHistoryRoot() {
+      if (!isMobileViewport()) return;
+      history.replaceState(mobileHistorySnapshot({ view: "findings" }), "", location.href);
+    }
+
+    function ensureMobileHistoryRoot() {
+      if (!isMobileViewport()) return;
+      if (history.state?.marker === mobileHistoryMarker) return;
+      history.replaceState(mobileHistorySnapshot(), "", location.href);
+    }
+
+    function pushMobileView(view, findingId = null) {
+      if (!isMobileViewport()) return;
+      ensureMobileHistoryRoot();
+      history.replaceState(mobileHistorySnapshot(), "", location.href);
+      const nextEntry = mobileHistorySnapshot({ view, findingId, selectedId: findingId, scrollTop: 0 });
+      history.pushState(nextEntry, "", location.href);
+    }
+
+    function closeMobileView() {
+      if (isMobileViewport() && history.state?.marker === mobileHistoryMarker && history.state.view !== "findings") {
+        history.back();
+        return;
+      }
+      invalidateReleaseNotesLoad();
+      state.view = "findings";
+      setMobileDetailOpen(false);
+      renderDetail();
+    }
+
+    function restoreMobileListFallback(message) {
+      invalidateReleaseNotesLoad();
+      state.view = "findings";
+      state.detail = null;
+      state.selectedId = visibleFindings()[0]?.id || null;
+      setMobileDetailOpen(false);
+      history.replaceState(mobileHistorySnapshot({ view: "findings" }), "", location.href);
+      renderList();
+      renderDetail();
+      showToast(message);
+    }
+
+    async function restoreMobileHistory(entry) {
+      if (!entry || entry.marker !== mobileHistoryMarker) return;
+      state.filter = entry.filter || "all";
+      state.query = entry.query || "";
+      state.selectedId = entry.selectedId || null;
+      $("search").value = state.query;
+      syncFilterControls();
+
+      if (entry.view === "release-notes") {
+        await loadReleaseNotes({ historyMode: "restore" });
+        return;
+      }
+      invalidateReleaseNotesLoad();
+      if (entry.view === "finding" && entry.findingId) {
+        if (!state.findings.some((finding) => finding.id === entry.findingId)) {
+          restoreMobileListFallback("Finding is no longer available.");
+          return;
+        }
+        state.view = "findings";
+        await selectFinding(entry.findingId, { openDetail: true, historyMode: "restore" });
+        return;
+      }
+
+      state.view = "findings";
+      setMobileDetailOpen(false);
+      renderList();
+      renderDetail();
+      const list = $("finding-list");
+      requestAnimationFrame(() => {
+        list.scrollTop = entry.scrollTop || 0;
+      });
+    }
+
     function setMobileDetailOpen(open) {
       state.mobileDetailOpen = Boolean(open);
       $("dashboard-root").classList.toggle("mobile-detail-open", state.mobileDetailOpen);
+    }
+
+    function invalidateReleaseNotesLoad() {
+      state.releaseNotesRequestSeq += 1;
+      state.releaseNotesLoading = false;
+    }
+
+    function isCurrentReleaseNotesRequest(requestId) {
+      return requestId === state.releaseNotesRequestSeq && state.view === "release-notes";
+    }
+
+    const secondaryFilters = new Set(["repo", "enrich", "ocr", "project", "skip"]);
+
+    function setSecondaryFiltersOpen(open) {
+      state.secondaryFiltersOpen = Boolean(open);
+      const tray = $("secondary-filters");
+      const button = $("more-filters");
+      const mobile = isMobileViewport();
+      tray.classList.toggle("open", mobile && state.secondaryFiltersOpen);
+      tray.setAttribute("aria-hidden", String(mobile && !state.secondaryFiltersOpen));
+      button.setAttribute("aria-expanded", String(state.secondaryFiltersOpen));
+      syncFilterControls();
+    }
+
+    function syncFilterControls() {
+      document.querySelectorAll(".filter[data-filter]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.filter === state.filter);
+      });
+      const secondaryActive = secondaryFilters.has(state.filter);
+      const more = $("more-filters");
+      more.classList.toggle("active", secondaryActive);
+      more.setAttribute("aria-label", secondaryActive ? "More filters, " + filterLabel() + " active" : "More filters");
     }
 
     async function syncSession() {
@@ -927,7 +1135,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       for (const reason of f.quality.reasons || []) {
         if (!chips.includes(reason)) chips.push(reason);
       }
-      return chips.filter(Boolean).slice(0, 3);
+      return dedupeDashboardReasons(chips.filter(Boolean)).slice(0, 3);
     }
 
     function qualityReasonChips(f) {
@@ -999,8 +1207,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     function resetFilterToAll() {
       state.filter = "all";
-      document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
-      document.querySelector('[data-filter="all"]')?.classList.add("active");
+      syncFilterControls();
     }
 
     function filterLabel() {
@@ -1058,6 +1265,42 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       ["dm_gated_no_link", "DM gated"],
     ];
 
+    function renderBatchHealth() {
+      const audit = state.audit;
+      const enrichmentReasons = audit?.enrichmentReasons || {};
+      if (!audit) {
+        $("batch-health").innerHTML = "";
+        $("batch-health-summary").textContent = "Latest batch health unavailable";
+        $("batch-health-details").innerHTML = '<div class="health-chip">No audit data</div>';
+        return;
+      }
+
+      const repoDocs = (audit.evidence?.repo ?? 0) + (audit.evidence?.docs ?? 0);
+      const desktopEntries = [
+        ["Latest", audit.total ?? 0],
+        ["Repo/docs", repoDocs],
+        ["Transcript", audit.evidence?.transcript ?? 0],
+        ["Enrich", audit.needsEnrichment ?? 0],
+        ...reasonCountLabels.map(([key, label]) => [label, enrichmentReasons[key] ?? 0]),
+      ];
+      $("batch-health").innerHTML = desktopEntries
+        .map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ": " + escapeHtml(value) + "</div>")
+        .join("");
+      $("batch-health-summary").textContent = "Latest " + (audit.total ?? 0) + " · Repo/docs " + repoDocs + " · Enrich " + (audit.needsEnrichment ?? 0);
+
+      const mobileReasonEntries = reasonCountLabels
+        .map(([key, label]) => [label, enrichmentReasons[key] ?? 0])
+        .filter(([, value]) => value > 0);
+      const mobileEntries = [
+        ["Transcript", audit.evidence?.transcript ?? 0],
+        ...mobileReasonEntries,
+      ];
+      $("batch-health-details").innerHTML = mobileEntries
+        .map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ": " + escapeHtml(value) + "</div>")
+        .join("")
+        + (mobileReasonEntries.length ? "" : '<div class="health-chip">No flagged reasons</div>');
+    }
+
     function updateStats() {
       const counts = { strong: 0, review: 0, weak: 0 };
       for (const finding of state.findings) counts[finding.quality.level] += 1;
@@ -1073,29 +1316,21 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         const count = state.filterCounts[key] ?? 0;
         button.disabled = key !== "all" && count === 0;
         if (button.disabled && button.classList.contains("active")) {
-          button.classList.remove("active");
           state.filter = "all";
-          document.querySelector('[data-filter="all"]')?.classList.add("active");
         }
       });
-      const audit = state.audit;
-      const enrichmentReasons = audit?.enrichmentReasons || {};
-      $("batch-health").innerHTML = audit
-        ? [
-            ["Latest", audit.total ?? 0],
-            ["Repo/docs", (audit.evidence?.repo ?? 0) + (audit.evidence?.docs ?? 0)],
-            ["Transcript", audit.evidence?.transcript ?? 0],
-            ["Enrich", audit.needsEnrichment ?? 0],
-            ...reasonCountLabels.map(([key, label]) => [label, enrichmentReasons[key] ?? 0]),
-          ].map(([label, value]) => '<div class="health-chip">' + escapeHtml(label) + ': ' + escapeHtml(value) + '</div>').join("")
-        : "";
+      renderBatchHealth();
       $("count").textContent = state.loading ? "Loading" : visibleFindings().length + " of " + state.findings.length;
-      $("mode-note").textContent = state.privateUnlocked
+      $("mode-note-wide").textContent = state.privateUnlocked
         ? "Sid view is unlocked. Project fit and next action are shown inside each finding."
         : "Public research is open. Unlock Sid view only when you want project fit and next actions.";
+      $("mode-note-compact").textContent = state.privateUnlocked
+        ? "Sid view · Project fit visible"
+        : "Public view · Unlock for project fit";
       $("unlock").querySelector(".wide-label").textContent = state.privateUnlocked ? "Unlocked" : "Unlock";
       $("unlock").querySelector(".short-label").textContent = state.privateUnlocked ? "Sid" : "Unlock";
       $("dashboard-root").classList.toggle("sid-unlocked", state.privateUnlocked);
+      syncFilterControls();
     }
 
     async function loadAudit() {
@@ -1138,7 +1373,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           <div class="item-meta">\${escapeHtml(f.saved || "unsaved")} · \${escapeHtml(f.source.platform)} · \${escapeHtml(f.quality.score)}/100\${state.privateUnlocked && f.targetProject ? " · " + escapeHtml(f.targetProject) : ""}</div>
           <div class="item-evidence">\${evidenceChips(f)}\${qualityReasonChips(f)}</div>
         </button>\`).join("");
-      list.querySelectorAll(".item").forEach((button) => button.addEventListener("click", () => selectFinding(button.dataset.id, { openDetail: true })));
+      list.querySelectorAll(".item").forEach((button) => button.addEventListener("click", () => selectFinding(button.dataset.id, { openDetail: true, historyMode: "push" })));
     }
 
     function markdownToHtml(markdown) {
@@ -1267,9 +1502,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           </section>
         </div>\`;
       detail.querySelector("[data-action='back-findings']")?.addEventListener("click", () => {
-        state.view = "findings";
-        setMobileDetailOpen(false);
-        renderDetail();
+        closeMobileView();
       });
     }
 
@@ -1358,7 +1591,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           </section>
         </div>\`;
       detail.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => {
-        if (button.dataset.action === "mobile-back") setMobileDetailOpen(false);
+        if (button.dataset.action === "mobile-back") closeMobileView();
         if (button.dataset.action === "unlock") unlockPrivateView();
         if (button.dataset.action === "copy-next") {
           const text = nextTaskText(f);
@@ -1367,7 +1600,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       }));
       detail.querySelectorAll("[data-workflow-finding]").forEach((link) => link.addEventListener("click", (event) => {
         event.preventDefault();
-        selectFinding(link.dataset.workflowFinding, { openDetail: true });
+        selectFinding(link.dataset.workflowFinding, { openDetail: true, historyMode: "push" });
       }));
     }
 
@@ -1381,10 +1614,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       const path = state.privateUnlocked ? "/api/findings/" : "/api/public/findings/";
       const res = await fetch(path + encodeURIComponent(id), { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
       if (requestId !== state.requestSeq || state.selectedId !== id) return null;
-      if (!res.ok) {
-        showToast("Could not load finding.");
-        return null;
-      }
+      if (!res.ok) return null;
       const detail = await res.json();
       state.detailCache.set(cacheKey, detail);
       return detail;
@@ -1411,7 +1641,21 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return "Review source evidence, then decide whether this belongs in backlog or should be skipped.";
     }
 
+    function isCurrentFindingSelection(id, requestId, historyMode) {
+      if (requestId !== state.requestSeq || state.selectedId !== id) return false;
+      if (historyMode !== "restore") return true;
+      return history.state?.marker === mobileHistoryMarker
+        && history.state.view === "finding"
+        && history.state.findingId === id;
+    }
+
     async function selectFinding(id, options = {}) {
+      const historyMode = options.historyMode || "none";
+      if (options.openDetail && isMobileViewport() && historyMode === "push") {
+        pushMobileView("finding", id);
+      }
+      invalidateReleaseNotesLoad();
+      state.view = "findings";
       state.selectedId = id;
       if (options.openDetail && isMobileViewport()) setMobileDetailOpen(true);
       const requestId = ++state.requestSeq;
@@ -1421,24 +1665,45 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         state.detail = cached;
         renderDetail();
         prefetchNextFindings();
-        return;
+        return true;
       }
       const current = state.findings.find((finding) => finding.id === id);
       if (current) {
         state.detail = { finding: current, sections: { tldr: current.summary, shown: "", workflow: "", research: current.summary, links: "", kickstarter: "", fit: "", implementation: "", childArtifacts: "", followups: "", retryHistory: "", extractionWarnings: "" }, markdown: "" };
         renderDetail();
       }
-      const detail = await fetchFindingDetail(id, requestId);
-      if (requestId !== state.requestSeq || state.selectedId !== id) return;
+      let detail;
+      try {
+        detail = await fetchFindingDetail(id, requestId);
+      } catch {
+        if (!isCurrentFindingSelection(id, requestId, historyMode)) return;
+        if (historyMode === "restore") {
+          restoreMobileListFallback("Could not restore finding.");
+        } else {
+          showToast("Could not load finding.");
+        }
+        return false;
+      }
+      if (!isCurrentFindingSelection(id, requestId, historyMode)) return;
       if (detail) {
         state.detail = detail;
         renderDetail();
         prefetchNextFindings();
+        return true;
       }
+      if (historyMode === "restore") {
+        restoreMobileListFallback("Could not restore finding.");
+      } else {
+        showToast("Could not load finding.");
+      }
+      return false;
     }
 
     async function loadFindings(options = {}) {
-      if (!options.preserveView) state.view = "findings";
+      if (!options.preserveView) {
+        invalidateReleaseNotesLoad();
+        state.view = "findings";
+      }
       state.loading = true;
       renderList();
       renderDetail();
@@ -1455,26 +1720,44 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       selectFirstVisibleIfNeeded();
       renderList();
       loadAudit().then(() => renderList());
+      if (options.preserveView && state.view === "release-notes") {
+        renderDetail();
+        return;
+      }
       if (state.selectedId) await selectFinding(state.selectedId);
       else renderDetail();
     }
 
-    async function loadReleaseNotes() {
+    async function loadReleaseNotes(options = {}) {
+      const historyMode = options.historyMode || "none";
+      if (isMobileViewport() && historyMode === "push") pushMobileView("release-notes");
       state.view = "release-notes";
       if (isMobileViewport()) setMobileDetailOpen(true);
+      const requestId = ++state.releaseNotesRequestSeq;
       state.releaseNotesLoading = true;
       renderReleaseNotes();
-      const res = await fetch("/api/public/release-notes", { credentials: "same-origin" });
-      state.releaseNotesLoading = false;
-      if (!res.ok) {
+      try {
+        const res = await fetch("/api/public/release-notes", { credentials: "same-origin" });
+        if (!isCurrentReleaseNotesRequest(requestId)) return;
+        if (!res.ok) {
+          state.releaseNotesLoading = false;
+          state.releaseNotes = [];
+          showToast("Could not load release notes.");
+          renderReleaseNotes();
+          return;
+        }
+        const body = await res.json();
+        if (!isCurrentReleaseNotesRequest(requestId)) return;
+        state.releaseNotesLoading = false;
+        state.releaseNotes = body.releases || [];
+        renderReleaseNotes();
+      } catch {
+        if (!isCurrentReleaseNotesRequest(requestId)) return;
+        state.releaseNotesLoading = false;
         state.releaseNotes = [];
         showToast("Could not load release notes.");
         renderReleaseNotes();
-        return;
       }
-      const body = await res.json();
-      state.releaseNotes = body.releases || [];
-      renderReleaseNotes();
     }
 
     $("search").addEventListener("input", (event) => {
@@ -1485,18 +1768,20 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       renderList();
       if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
     });
-    document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => {
+    $("more-filters").addEventListener("click", () => setSecondaryFiltersOpen(!state.secondaryFiltersOpen));
+    setSecondaryFiltersOpen(false);
+
+    document.querySelectorAll(".filter[data-filter]").forEach((button) => button.addEventListener("click", () => {
       if (button.disabled) return;
-      document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
       state.filter = button.dataset.filter || "all";
+      setSecondaryFiltersOpen(false);
       const previousId = state.selectedId;
       setMobileDetailOpen(false);
       renderList();
       if (state.selectedId && state.selectedId !== previousId) selectFinding(state.selectedId);
     }));
-    $("refresh").addEventListener("click", () => state.view === "release-notes" ? loadReleaseNotes() : loadFindings());
-    $("release-notes").addEventListener("click", () => loadReleaseNotes());
+    $("refresh").addEventListener("click", () => state.view === "release-notes" ? loadReleaseNotes({ historyMode: "none" }) : loadFindings());
+    $("release-notes").addEventListener("click", () => loadReleaseNotes({ historyMode: "push" }));
 
     async function unlockPrivateView() {
       if (state.privateUnlocked) return true;
@@ -1534,7 +1819,15 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
 
     window.addEventListener("resize", () => {
       if (!isMobileViewport()) setMobileDetailOpen(false);
+      setSecondaryFiltersOpen(isMobileViewport() ? state.secondaryFiltersOpen : false);
     });
+
+    window.addEventListener("popstate", (event) => {
+      if (!isMobileViewport()) return;
+      void restoreMobileHistory(event.state);
+    });
+
+    initializeMobileHistoryRoot();
 
     renderList();
     renderDetail();
