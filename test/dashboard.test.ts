@@ -281,6 +281,38 @@ describe("dashboard reason presentation", () => {
 });
 
 describe("dashboard HTML", () => {
+  it("renders desktop filters in the detail toolbar instead of permanent sidebar chrome", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('class="detail-shell"');
+    expect(html).toContain('id="filter-toolbar" class="filter-toolbar" aria-label="Filter findings"');
+    expect(html).toContain('id="queue-filter-summary"');
+    expect(html).toContain('id="active-filter-label"');
+    expect(html).toContain('id="audit-toggle"');
+    expect(html).toContain('id="audit-panel"');
+    expect(html).not.toContain('class="batch-health-region"');
+  });
+
+  it("keeps the desktop queue chrome compact so the finding list starts high", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain("grid-template-rows: auto minmax(0, 1fr)");
+    expect(html).toContain(".queue-filter-summary");
+    expect(html).toContain(".queue-head.compact");
+    expect(html).not.toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
+  });
+
+  it("renders audit metrics inside a hidden-by-default disclosure panel", () => {
+    const html = DASHBOARD_HTML([]);
+
+    expect(html).toContain('button id="audit-toggle"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-controls="audit-panel"');
+    expect(html).toContain('id="audit-panel" class="audit-panel" hidden');
+    expect(html).toContain('id="audit-metrics"');
+    expect(html).toContain("function setAuditPanelOpen(open)");
+  });
+
   it("keeps primary mobile filters visible and secondary filters behind More", () => {
     const html = DASHBOARD_HTML([]);
 
@@ -293,7 +325,7 @@ describe("dashboard HTML", () => {
     expect(html).toContain("secondaryFilters.has(state.filter)");
   });
 
-  it("keeps the More disclosure hidden in the desktop filter rail", () => {
+  it("keeps the More disclosure hidden in the desktop toolbar", () => {
     const html = DASHBOARD_HTML([]);
 
     expect(html).toContain(".filter.more-filter { display: none; }");
@@ -309,24 +341,21 @@ describe("dashboard HTML", () => {
     expect(html).toContain("Sid view · Project fit visible");
   });
 
-  it("renders audit count hooks without tabs", () => {
+  it("renders audit count hooks inside the toolbar disclosure without tabs", () => {
     const html = DASHBOARD_HTML([]);
 
     expect(html).toContain('data-filter="enrich"');
     expect(html).toContain('data-filter="skip"');
     expect(html).toContain('data-count-for="repo"');
-    expect(html).toContain("batch-health");
+    expect(html).toContain("audit-metrics");
     expect(html).not.toContain('class="tabs"');
   });
 
-  it("renders compact expandable mobile batch health without changing desktop data", () => {
+  it("renders compact expandable mobile batch health through the audit panel data", () => {
     const html = DASHBOARD_HTML([]);
 
-    expect(html).toContain('class="batch-health-region"');
-    expect(html).toContain('id="batch-health" class="batch-health"');
-    expect(html).toContain('id="batch-health-mobile" class="batch-health-mobile"');
-    expect(html).toContain('id="batch-health-summary"');
-    expect(html).toContain('id="batch-health-details"');
+    expect(html).toContain('id="audit-summary-mobile"');
+    expect(html).toContain('id="audit-mobile-details"');
     expect(html).toContain("function renderBatchHealth()");
     expect(html).toContain("value > 0");
     expect(html).toContain("No flagged reasons");
