@@ -266,6 +266,67 @@ describe("server routes", () => {
     expect(res.headers["vary"]).toContain("Origin");
   });
 
+  it("GET /api/public/findings and RSS omit unresolved weak captures while direct detail returns 404", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-public-publishable-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "sample.md"),
+      [
+        "# Public Sample",
+        "",
+        "**Source:** github · [Repo](https://github.com/example/repo)",
+        "**Saved:** 20260615",
+        "**Tags:** github, ai",
+        "",
+        "## TL;DR",
+        "",
+        "General research summary.",
+        "",
+        "## What it actually is",
+        "",
+        "- What: A public tool.",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "unresolved.md"),
+      [
+        "# Harnoor Singh (@iHarnoorSingh) on X",
+        "",
+        "**Source:** other · [unknown](https://x.com/iharnoorsingh/status/2052902837844406361?s=46)",
+        "**Saved:** 20260621",
+        "**Tags:** other",
+        "**Display:** Unresolved X.com Short Link — The captured post only contained a shortened t.co URL, so the underlying technology could not be identified.",
+        "",
+        "## TL;DR",
+        "",
+        "Unable to identify the technology from the provided post data. The caption contains only a shortened URL with no visible technology name or description.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: https://t.co/Hgx0AJIj78",
+        "",
+        "Key claims from transcript:",
+        "- (no transcript available)",
+      ].join("\n"),
+    );
+    process.env["AI_MEMORY_LOCAL_DIR"] = dir;
+
+    const list = await app.inject({ method: "GET", url: "/api/public/findings" });
+    const rss = await app.inject({ method: "GET", url: "/api/public/findings/rss" });
+    const hiddenDetail = await app.inject({ method: "GET", url: "/api/public/findings/unresolved.md" });
+
+    expect(list.statusCode).toBe(200);
+    expect(list.json().findings.map((finding: any) => finding.id)).toEqual(["sample.md"]);
+    expect(list.json().findings[0].publicStatus).toMatchObject({ state: "published", publishable: true });
+    expect(rss.statusCode).toBe(200);
+    expect(rss.body).toContain("Public Sample");
+    expect(rss.body).not.toContain("Unresolved X.com Short Link");
+    expect(hiddenDetail.statusCode).toBe(404);
+    expectSecurityHeaders(hiddenDetail.headers);
+    expect(hiddenDetail.headers["cache-control"]).toBe(EXPECTED_CACHE_CONTROL);
+  });
+
   it("GET /api/public/audit returns latest batch health without auth", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "server-public-audit-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");

@@ -49,13 +49,14 @@ export interface FindingRetryHistory {
 export interface FindingDiagnostics {
   extractionWarnings: string[];
   duplicateGroup?: FindingDuplicateGroup;
+  publicArtifactKey?: string;
 }
 
 export interface FindingDuplicateGroup {
   id: string;
   count: number;
   canonicalFindingId: string;
-  reason: "same source URL" | "same title and creator";
+  reason: "same source URL" | "same public artifact" | "same title and creator";
 }
 
 export interface FindingWorkflowChild {
@@ -110,7 +111,28 @@ export interface FindingSummary {
   recommendedAction: "Create task" | "Backlog" | "Skip" | "Retry" | "Review";
 }
 
+export type PublicFindingStatusState =
+  | "published"
+  | "needs_verification"
+  | "hidden_unresolved"
+  | "duplicate_of";
+
+export type PublicFindingStatusReason =
+  | "weak_signal"
+  | "weak_retryable"
+  | "unresolved_capture"
+  | "duplicate"
+  | null;
+
+export interface PublicFindingStatus {
+  state: PublicFindingStatusState;
+  publishable: boolean;
+  reason: PublicFindingStatusReason;
+  canonicalFindingId?: string;
+}
+
 export type PublicFindingSummary = Omit<FindingSummary, "targetProject" | "verdict" | "recommendedAction"> & {
+  publicStatus: PublicFindingStatus;
   isPrivate: false;
   applied: AppliedEntry | null;
 };
@@ -617,15 +639,71 @@ function publicQuality(finding: FindingSummary): FindingQuality {
 export function toPublicFinding(finding: FindingSummary, appliedMap: AppliedMap = {}): PublicFindingSummary {
   const { targetProject: _targetProject, verdict: _verdict, recommendedAction: _recommendedAction, triage: _triage, ...rest } = finding;
   const quality = publicQuality(finding);
+  const triage = publicTriage(finding, quality);
   return {
     ...rest,
     quality,
-    triage: publicTriage(finding, quality),
+    triage,
     retry: publicRetryHistory(finding.retry),
     diagnostics: publicDiagnostics(finding.diagnostics),
+    publicStatus: publicStatusFor(finding, quality, triage),
     isPrivate: false,
     applied: appliedMap[finding.filename] ?? null,
   };
+}
+
+function publicStatusFor(finding: FindingSummary, quality: FindingQuality, triage: FindingTriage): PublicFindingStatus {
+  const duplicateGroup = finding.diagnostics.duplicateGroup;
+  if (duplicateGroup && duplicateGroup.canonicalFindingId !== finding.id) {
+    return {
+      state: "duplicate_of",
+      publishable: false,
+      reason: "duplicate",
+      canonicalFindingId: duplicateGroup.canonicalFindingId,
+    };
+  }
+
+  if (isUnresolvedPublicCapture(finding, quality, triage)) {
+    return {
+      state: "hidden_unresolved",
+      publishable: false,
+      reason: "unresolved_capture",
+    };
+  }
+
+  if (quality.level === "weak") {
+    return {
+      state: "needs_verification",
+      publishable: true,
+      reason: triage.retryable ? "weak_retryable" : "weak_signal",
+    };
+  }
+
+  return {
+    state: "published",
+    publishable: true,
+    reason: null,
+  };
+}
+
+function isUnresolvedPublicCapture(finding: FindingSummary, quality: FindingQuality, triage: FindingTriage): boolean {
+  if (quality.level !== "weak" || !triage.retryable) return false;
+  if (triage.kind === "unresolved_shortlink") return true;
+
+  const text = stripMarkdown([
+    finding.title,
+    finding.summary,
+    finding.displayTitle,
+    finding.displaySummary,
+  ].join("\n")).toLowerCase();
+  return (
+    /\bunresolved\b/.test(text) ||
+    /\bcould not be identified\b/.test(text) ||
+    /\bunable to identify\b/.test(text) ||
+    /\bunderlying technology could not\b/.test(text) ||
+    /\bspecific technology unavailable\b/.test(text) ||
+    /\bno actionable information\b/.test(text)
+  );
 }
 
 function publicTriage(finding: FindingSummary, quality: FindingQuality): FindingTriage {
@@ -749,7 +827,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
     quality,
     triage,
     retry,
-    diagnostics: { extractionWarnings },
+    diagnostics: { extractionWarnings, publicArtifactKey: publicArtifactDuplicateKey(markdown, sourceUrl) ?? undefined },
     workflow,
     recommendedAction: action,
   };
@@ -872,6 +950,20 @@ function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] 
     for (const finding of group) duplicateByFilename.set(finding.filename, duplicateGroup);
   }
 
+  const artifactGroups = new Map<string, FindingSummary[]>();
+  for (const finding of findings) {
+    if (duplicateByFilename.has(finding.filename)) continue;
+    const key = finding.diagnostics.publicArtifactKey;
+    if (!key) continue;
+    artifactGroups.set(key, [...(artifactGroups.get(key) ?? []), finding]);
+  }
+
+  for (const [key, group] of artifactGroups.entries()) {
+    if (group.length < 2) continue;
+    const duplicateGroup = duplicateGroupFor(key, group, "same public artifact");
+    for (const finding of group) duplicateByFilename.set(finding.filename, duplicateGroup);
+  }
+
   const fallbackGroups = new Map<string, FindingSummary[]>();
   for (const finding of findings) {
     if (duplicateByFilename.has(finding.filename)) continue;
@@ -905,7 +997,7 @@ function withDuplicateDiagnostics(findings: FindingSummary[]): FindingSummary[] 
 }
 
 function duplicateGroupFor(key: string, group: FindingSummary[], reason: FindingDuplicateGroup["reason"]): FindingDuplicateGroup {
-  const canonicalFindingId = [...group].sort((a, b) => a.filename.localeCompare(b.filename))[0].filename;
+  const canonicalFindingId = [...group].sort(compareDuplicateCanonical)[0].filename;
   return {
     id: stableDuplicateId(key),
     count: group.length,
@@ -914,12 +1006,75 @@ function duplicateGroupFor(key: string, group: FindingSummary[], reason: Finding
   };
 }
 
+function compareDuplicateCanonical(a: FindingSummary, b: FindingSummary): number {
+  const aScore = duplicateCanonicalScore(a);
+  const bScore = duplicateCanonicalScore(b);
+  if (aScore !== bScore) return bScore - aScore;
+  const aQuality = publicQuality(a).score;
+  const bQuality = publicQuality(b).score;
+  if (aQuality !== bQuality) return bQuality - aQuality;
+  const aSaved = a.saved ?? "";
+  const bSaved = b.saved ?? "";
+  if (aSaved !== bSaved) return bSaved.localeCompare(aSaved);
+  return a.filename.localeCompare(b.filename);
+}
+
+function duplicateCanonicalScore(finding: FindingSummary): number {
+  const quality = publicQuality(finding);
+  const triage = publicTriage(finding, quality);
+  if (isUnresolvedPublicCapture(finding, quality, triage)) return 0;
+  if (quality.level === "strong") return 3;
+  if (quality.level === "review") return 2;
+  return 1;
+}
+
 function fallbackDuplicateGroupKey(finding: FindingSummary): string | null {
   const title = normalizeDuplicateText(finding.title);
   const creator = normalizeDuplicateText(finding.source.label ?? "");
   const platform = normalizeDuplicateText(finding.source.platform);
   if (!title || !creator || !platform || platform === "unknown") return null;
   return `title:${platform}:${creator}:${title}`;
+}
+
+function publicArtifactDuplicateKey(markdown: string, sourceUrl: string | null): string | null {
+  const candidates = [sourceUrl, ...githubUrls(markdown)].filter((url): url is string => Boolean(url));
+  for (const candidate of candidates) {
+    const key = normalizeGithubArtifactKey(candidate);
+    if (key) return key;
+  }
+  return curatedPublicArtifactKey(markdown);
+}
+
+function normalizeGithubArtifactKey(rawUrl: string): string | null {
+  if (!isRealGithubRepoUrl(rawUrl) && !isRealGithubGistUrl(rawUrl)) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (host === "github.com" && segments[0] && segments[1]) {
+      return `github:${segments[0].toLowerCase()}/${segments[1].replace(/\.git$/i, "").toLowerCase()}`;
+    }
+    if (host === "gist.github.com" && segments[0] && segments[1] && /^[a-f0-9]+$/i.test(segments[1])) {
+      return `gist:${segments[0].toLowerCase()}/${segments[1].toLowerCase()}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function curatedPublicArtifactKey(markdown: string): string | null {
+  const text = stripMarkdown(markdown);
+  if (
+    /\bkronos\b/i.test(text) &&
+    (/\bK-line\s+Tokenization\b/i.test(text) ||
+      /\b12\s+billion records\b/i.test(text) ||
+      /\bcandlestick charts?\b/i.test(text) ||
+      /\bquant\s+trading\b/i.test(text))
+  ) {
+    return "curated:kronos";
+  }
+  return null;
 }
 
 function normalizeDuplicateUrl(rawUrl: string | null): string | null {
@@ -1006,7 +1161,9 @@ function stableDuplicateId(value: string): string {
 
 export function listPublicFindings(aiMemoryDir = getAiMemoryDir()): PublicFindingSummary[] {
   const appliedMap = loadAppliedMap(aiMemoryDir);
-  return listClusteredFindings(aiMemoryDir).map((finding) => toPublicFinding(finding, appliedMap));
+  return listClusteredFindings(aiMemoryDir)
+    .map((finding) => toPublicFinding(finding, appliedMap))
+    .filter((finding) => finding.publicStatus.publishable);
 }
 
 export function listClusteredFindings(aiMemoryDir = getAiMemoryDir()): FindingSummary[] {
@@ -1046,9 +1203,12 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
 export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir()): PublicFindingDetail | null {
   const detail = getFindingDetail(filename, aiMemoryDir);
   if (!detail) return null;
+  const clusteredFinding = listFindings(aiMemoryDir).find((finding) => finding.filename === detail.finding.filename) ?? detail.finding;
+  const finding = toPublicFinding(clusteredFinding, loadAppliedMap(aiMemoryDir));
+  if (!finding.publicStatus.publishable) return null;
   const publicMarkdown = withoutPrivateSections(detail.markdown);
   return {
-    finding: toPublicFinding(detail.finding, loadAppliedMap(aiMemoryDir)),
+    finding,
     markdown: publicMarkdown,
     sections: {
       tldr: textBetween(publicMarkdown, "TL;DR"),

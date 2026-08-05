@@ -39,6 +39,7 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     retry: null,
     diagnostics: { extractionWarnings: [] },
     workflow: { kind: "standalone", artifactType: null, role: null, parent: null, children: [] },
+    publicStatus: { state: "published", publishable: true, reason: null },
     isPrivate: false,
     applied: null,
     ...overrides,
@@ -128,6 +129,25 @@ describe("buildRssXml()", () => {
 
     expect(xml).toContain("<item>");
     expect(xml).not.toContain("<pubDate>");
+  });
+
+  it("does not serialize non-publishable findings", () => {
+    const xml = buildRssXml(
+      [
+        publicFinding({ displayTitle: "Published" }),
+        publicFinding({
+          id: "hidden.md",
+          filename: "hidden.md",
+          displayTitle: "Unresolved X.com Short Link",
+          publicStatus: { state: "hidden_unresolved", publishable: false, reason: "unresolved_capture" },
+        }),
+      ],
+      { siteBase: BASE },
+    );
+
+    expect(xml).toContain("<title>Published</title>");
+    expect(xml).not.toContain("Unresolved X.com Short Link");
+    expect(xml).not.toContain(`${BASE}/hidden`);
   });
 });
 

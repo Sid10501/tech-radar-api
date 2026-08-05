@@ -872,6 +872,134 @@ describe("parseFindingMarkdown()", () => {
 });
 
 describe("public finding shape", () => {
+  it("marks weak retryable public findings as needing verification without hiding identifiable tools", () => {
+    const finding = parseFindingMarkdown(
+      "20260803-gemini-web2api.md",
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Gemini Web2API")
+        .replace("Ponytail is useful as operating-system guidance, not a replacement for Superpowers.", "Gemini Web2API proxies requests through an authenticated browser session.")
+        .replace("Key claims from transcript:\nIt helps save tokens and make better architecture decisions.\n\n", "")
+        .replace("On-screen text / OCR:\nToken usage down\nsmallest useful diff\n\n", "")
+        .replace("## Links\n\n- Repo: https://github.com/example/ponytail", "## Links\n\n- (no links found)")
+        .replace("- Target project: ai-memory", "- Target project: unknown"),
+    );
+
+    const publicFinding = toPublicFinding(finding);
+
+    expect(publicFinding.quality.level).toBe("weak");
+    expect(publicFinding.triage.retryable).toBe(true);
+    expect(publicFinding.publicStatus).toMatchObject({
+      state: "needs_verification",
+      publishable: true,
+      reason: "weak_retryable",
+    });
+  });
+
+  it("keeps unresolved weak captures out of public lists and details", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-unresolved-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "unresolved.md"),
+      [
+        "# Harnoor Singh (@iHarnoorSingh) on X",
+        "",
+        "**Source:** other · [unknown](https://x.com/iharnoorsingh/status/2052902837844406361?s=46)",
+        "**Saved:** 20260621",
+        "**Tags:** other",
+        "**Display:** Unresolved X.com Short Link — The captured post only contained a shortened t.co URL, so the underlying technology could not be identified.",
+        "",
+        "## TL;DR",
+        "",
+        "Unable to identify the technology from the provided post data. The caption contains only a shortened URL with no visible technology name or description.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: https://t.co/Hgx0AJIj78",
+        "",
+        "Key claims from transcript:",
+        "- (no transcript available)",
+        "",
+        "## Links",
+        "",
+        "- (no links found)",
+      ].join("\n"),
+    );
+    fs.writeFileSync(path.join(findingsDir, "sample.md"), SAMPLE_FINDING);
+
+    const privateFinding = listFindings(dir).find((finding) => finding.id === "unresolved.md");
+
+    expect(privateFinding?.quality.level).toBe("weak");
+    expect(toPublicFinding(privateFinding!).publicStatus).toMatchObject({
+      state: "hidden_unresolved",
+      publishable: false,
+      reason: "unresolved_capture",
+    });
+    expect(listPublicFindings(dir).map((finding) => finding.id)).toEqual(["sample.md"]);
+    expect(getPublicFindingDetail("unresolved.md", dir)).toBeNull();
+  });
+
+  it("does not expose direct public details for non-canonical duplicate findings", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-duplicate-detail-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/dupe/"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Same source duplicate")
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/dupe/?igsh=tracking"),
+    );
+
+    expect(toPublicFinding(listFindings(dir).find((finding) => finding.id === "b.md")!).publicStatus).toMatchObject({
+      state: "duplicate_of",
+      publishable: false,
+      canonicalFindingId: "a.md",
+    });
+    expect(getPublicFindingDetail("a.md", dir)?.finding.publicStatus).toMatchObject({ state: "published", publishable: true });
+    expect(getPublicFindingDetail("b.md", dir)).toBeNull();
+  });
+
+  it("keeps a resolved duplicate public when an older unresolved capture is the filename-sort candidate", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-resolved-duplicate-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      [
+        "# Unresolved X.com Short Link",
+        "",
+        "**Source:** instagram · [Creator](https://www.instagram.com/reel/shared-source/)",
+        "**Saved:** 20260614",
+        "**Tags:** instagram",
+        "**Display:** Unresolved X.com Short Link — The captured post only contained a shortened t.co URL, so the underlying technology could not be identified.",
+        "",
+        "## TL;DR",
+        "",
+        "Unable to identify the technology from the provided post data.",
+        "",
+        "## What the post showed",
+        "",
+        "> Caption: https://t.co/Hgx0AJIj78",
+        "",
+        "Key claims from transcript:",
+        "- (no transcript available)",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/shared-source/"),
+    );
+
+    expect(listFindings(dir).find((finding) => finding.id === "b.md")?.diagnostics.duplicateGroup?.canonicalFindingId).toBe("b.md");
+    expect(listPublicFindings(dir).map((finding) => finding.id)).toEqual(["b.md"]);
+    expect(getPublicFindingDetail("a.md", dir)).toBeNull();
+    expect(getPublicFindingDetail("b.md", dir)?.finding.publicStatus).toMatchObject({ state: "published", publishable: true });
+  });
+
   it("removes Sid-specific project fields and sections", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-finding-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
@@ -1251,7 +1379,8 @@ describe("listFindings()", () => {
       path.join(findingsDir, "b.md"),
       SAMPLE_FINDING
         .replace("Ponytail agent rubric", "Different video")
-        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.youtube.com/watch?v=beta&utm_source=x"),
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.youtube.com/watch?v=beta&utm_source=x")
+        .replace("https://github.com/example/ponytail", "https://github.com/example/different-video"),
     );
 
     const findings = listFindings(dir);
@@ -1269,7 +1398,9 @@ describe("listFindings()", () => {
     );
     fs.writeFileSync(
       path.join(findingsDir, "b.md"),
-      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/second-post/"),
+      SAMPLE_FINDING
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/second-post/")
+        .replace("https://github.com/example/ponytail", "https://github.com/example/other-ponytail"),
     );
 
     const findings = listFindings(dir);
@@ -1278,17 +1409,65 @@ describe("listFindings()", () => {
     expect(listPublicFindings(dir)).toHaveLength(2);
   });
 
+  it("does not cluster generic GitHub pages as public artifacts", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "generic-github-page-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      SAMPLE_FINDING
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/github-topic-one/")
+        .replace("https://github.com/example/ponytail", "https://github.com/topics/ai"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Different topic post")
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/github-topic-two/")
+        .replace("https://github.com/example/ponytail", "https://github.com/topics/ai"),
+    );
+
+    expect(listFindings(dir).map((finding) => finding.diagnostics.duplicateGroup)).toEqual([undefined, undefined]);
+  });
+
+  it("clusters distinct source posts that resolve to the same public artifact", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duplicate-artifact-findings-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(findingsDir, "a.md"),
+      SAMPLE_FINDING.replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/first-artifact-post/"),
+    );
+    fs.writeFileSync(
+      path.join(findingsDir, "b.md"),
+      SAMPLE_FINDING
+        .replace("Ponytail agent rubric", "Ponytail agent workflow")
+        .replace("https://www.instagram.com/reel/DZmyMFoqCRm/", "https://www.instagram.com/reel/second-artifact-post/")
+        .replace("https://github.com/example/ponytail", "https://github.com/Example/Ponytail#readme"),
+    );
+
+    const findings = listFindings(dir);
+
+    expect(findings.map((finding) => finding.diagnostics.duplicateGroup?.reason)).toEqual(["same public artifact", "same public artifact"]);
+    expect(findings.map((finding) => finding.diagnostics.duplicateGroup?.canonicalFindingId)).toEqual(["a.md", "a.md"]);
+    expect(listPublicFindings(dir).map((finding) => finding.id)).toEqual(["a.md"]);
+  });
+
   it("annotates duplicate findings by normalized title, creator, and platform when source URL is missing", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duplicate-title-findings-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
     fs.mkdirSync(findingsDir, { recursive: true });
     fs.writeFileSync(
       path.join(findingsDir, "a.md"),
-      SAMPLE_FINDING.replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** instagram · Shawn"),
+      SAMPLE_FINDING
+        .replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** instagram · Shawn")
+        .replace("## Links\n\n- Repo: https://github.com/example/ponytail", "## Links\n\n- (no links found)"),
     );
     fs.writeFileSync(
       path.join(findingsDir, "b.md"),
-      SAMPLE_FINDING.replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** instagram · Shawn"),
+      SAMPLE_FINDING
+        .replace("**Source:** instagram · [Shawn](https://www.instagram.com/reel/DZmyMFoqCRm/)", "**Source:** instagram · Shawn")
+        .replace("## Links\n\n- Repo: https://github.com/example/ponytail", "## Links\n\n- (no links found)"),
     );
 
     const findings = listFindings(dir);
