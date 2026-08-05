@@ -45,6 +45,7 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
     retry: null,
     diagnostics: { extractionWarnings: [] },
     workflow: { kind: "standalone", artifactType: null, role: null, parent: null, children: [] },
+    publicStatus: { state: "published", publishable: true, reason: null },
     isPrivate: false,
     applied: null,
     ...overrides,

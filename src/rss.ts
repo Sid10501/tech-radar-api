@@ -37,7 +37,10 @@ function rssItem(finding: PublicFindingSummary, siteBase: string): string {
 
 export function buildRssXml(findings: PublicFindingSummary[], opts: RssOptions): string {
   const siteBase = opts.siteBase.replace(/\/+$/, "");
-  const items = findings.slice(0, MAX_RSS_ITEMS).map((finding) => rssItem(finding, siteBase));
+  const items = findings
+    .filter((finding) => finding.publicStatus.publishable)
+    .slice(0, MAX_RSS_ITEMS)
+    .map((finding) => rssItem(finding, siteBase));
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<rss version="2.0">`,
