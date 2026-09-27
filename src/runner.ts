@@ -830,8 +830,8 @@ function extractSecurityMentions(sources: Array<{ text: string }>, context?: { v
   }
   const hasEtfContext = /\bETFs?\b/i.test(text);
   const hasSecurityContext = hasEtfContext || /\b(?:stocks?|shares?|funds?|invest(?:ing|ment|ors?)?|portfolio|NASDAQ|NYSE)\b/i.test(text);
-  for (const symbol of extractExplicitVisualTickerList(context?.visualText, context?.corroboratingText, hasSecurityContext)) {
-    bySymbol.set(symbol, { symbol, assetType: hasEtfContext ? "etf" : "stock", confidence: 0.65 });
+  for (const ticker of extractExplicitVisualTickerList(context?.visualText, context?.corroboratingText, hasSecurityContext)) {
+    bySymbol.set(ticker.symbol, { symbol: ticker.symbol, assetType: ticker.assetType, confidence: 0.65 });
   }
   for (const company of text.matchAll(/\b([A-Z][A-Za-z&.' -]{1,80}(?:Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|PLC))\s*\(([A-Z][A-Z0-9.-]{0,9})\)/g)) {
     const symbol = company[2];
@@ -863,7 +863,7 @@ function extractSecurityMentions(sources: Array<{ text: string }>, context?: { v
   return [...bySymbol.values(), ...named.values()];
 }
 
-function extractExplicitVisualTickerList(visualText: string | undefined, corroboratingText: string | undefined, hasSecurityContext: boolean): string[] {
+function extractExplicitVisualTickerList(visualText: string | undefined, corroboratingText: string | undefined, hasSecurityContext: boolean): Array<{ symbol: string; assetType: "stock" | "etf" }> {
   if (!visualText || !hasSecurityContext) return [];
   const stopWords = new Set([
     "ETF", "ETFS", "FUND", "FUNDS", "NASDAQ", "NYSE", "TSX", "ASX", "LSE", "USA", "US",
@@ -873,20 +873,30 @@ function extractExplicitVisualTickerList(visualText: string | undefined, corrobo
   const valid = (value: string): boolean => /^[A-Z][A-Z0-9.-]{1,5}$/.test(value) && !stopWords.has(value);
   const isCorroborated = (symbol: string): boolean => new RegExp(`\\b${symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(corroboratingText ?? "");
   const lines = visualText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const numbered = lines.flatMap((line) => {
+  const numbered = lines.flatMap((line, index) => {
     const match = line.match(/^\d{1,2}\s*[.)-]\s*\$?([A-Z][A-Z0-9.-]{1,5})$/);
-    return match && valid(match[1]) ? [match[1]] : [];
+    return match && valid(match[1]) ? [{ symbol: match[1], index }] : [];
   });
-  if (numbered.length >= 2 && numbered.filter(isCorroborated).length >= 2) return [...new Set(numbered)];
+  if (numbered.length >= 2 && numbered.filter(({ symbol }) => isCorroborated(symbol)).length >= 2) {
+    const first = numbered[0].index;
+    const localContext = lines.slice(Math.max(0, first - 1), numbered.at(-1)!.index + 1).join(" ");
+    return [...new Set(numbered.map(({ symbol }) => symbol))].map((symbol) => ({ symbol, assetType: /\bETFs?\b/i.test(localContext) ? "etf" : "stock" }));
+  }
 
   const compact = lines.flatMap((line) => {
     const tokens = line.split(/[\s,|/]+/).map((token) => token.replace(/^\$/, "")).filter(Boolean);
     const candidates = tokens.filter(valid);
-    return candidates.length >= 2 && tokens.length <= 10 ? [candidates] : [];
+    const usesListDelimiter = /[,|/]/.test(line);
+    const listMarkersOnly = tokens.every((token) => valid(token) || stopWords.has(token));
+    const corroboratedPhrase = (corroboratingText ?? "").match(new RegExp(`\\b${candidates.map((candidate) => candidate.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")).join("\\W+")}\\b`, "i"))?.[0] ?? "";
+    const corroboratedSentence = candidates.length > 2 && /[a-z]/.test(corroboratedPhrase);
+    return candidates.length >= 2 && tokens.length <= 10 && listMarkersOnly && (usesListDelimiter || !corroboratedSentence) ? [{ candidates, localContext: line }] : [];
   }).find((tokens) => {
-    return tokens.filter(isCorroborated).length >= 2;
+    return tokens.candidates.filter(isCorroborated).length >= 2;
   });
-  return compact ? [...new Set(compact)] : [];
+  return compact
+    ? [...new Set(compact.candidates)].map((symbol) => ({ symbol, assetType: /\bETFs?\b/i.test(compact.localContext) ? "etf" : "stock" }))
+    : [];
 }
 
 function normalizeSecurityName(value: string): string {

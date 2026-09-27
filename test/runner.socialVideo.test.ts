@@ -256,6 +256,47 @@ describe("social-video runner routing", () => {
     expect(mixedCallToAction.financeClaims.securities.map(({ symbol }) => symbol)).toEqual(["VOO", "VXUS"]);
   });
 
+  it("rejects an uppercase OCR sentence while preserving explicit symbols and ambiguous company names", () => {
+    const sentenceEvidence = buildSocialVideoEvidence({
+      extract: {
+        ...enriched,
+        caption: "Anthropic stock could rally.",
+        transcript: "Which stocks and are riding the momentum? NYSE: SKM is one of them.",
+        visual_text: "WHICH STOCKS AND ARE RIDING THE\nNYSE: SKM",
+      },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "uppercase-ocr-sentence",
+      canonicalUrl: "https://www.instagram.com/reel/uppercase-sentence/",
+      origin: { channel: "api" },
+    });
+    const sentenceSymbols = sentenceEvidence.financeClaims.securities.map(({ symbol }) => symbol).filter(Boolean);
+    expect(sentenceSymbols).toContain("SKM");
+    expect(sentenceSymbols).not.toEqual(expect.arrayContaining(["WHICH", "STOCKS", "AND", "ARE", "RIDING", "THE"]));
+    const anthropic = sentenceEvidence.financeClaims.securities.find(({ companyName }) => companyName === "Anthropic");
+    expect(anthropic).toMatchObject({ companyName: "Anthropic", assetType: "stock" });
+    expect(anthropic?.symbol).toBeUndefined();
+
+    const dollarSymbol = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "Stock watch", transcript: null, visual_text: "$ARE" },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "explicit-dollar-symbol",
+      canonicalUrl: "https://www.instagram.com/reel/explicit-dollar-symbol/",
+      origin: { channel: "api" },
+    });
+    expect(dollarSymbol.financeClaims.securities).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "ARE" })]));
+
+    const exchangeSymbol = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "Stock watch", transcript: null, visual_text: "NYSE: ARE" },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "explicit-exchange-symbol",
+      canonicalUrl: "https://www.instagram.com/reel/explicit-exchange-symbol/",
+      origin: { channel: "api" },
+    });
+    expect(exchangeSymbol.financeClaims.securities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbol: "ARE", exchange: "NYSE" }),
+    ]));
+  });
+
   it("rejects durations over 1800 seconds instead of clamping and rounds valid fractions", () => {
     const input = { extract: { ...enriched, duration_sec: 1800.1 }, classification: { category: "finance" as const, confidence: 1, reasons: [] }, runId: "duration", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" as const } };
     expect(() => buildSocialVideoEvidence(input)).toThrow(/duration_limit/);
