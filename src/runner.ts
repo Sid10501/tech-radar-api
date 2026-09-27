@@ -886,11 +886,10 @@ function extractExplicitVisualTickerList(visualText: string | undefined, corrobo
   const compact = lines.flatMap((line) => {
     const tokens = line.split(/[\s,|/]+/).map((token) => token.replace(/^\$/, "")).filter(Boolean);
     const candidates = tokens.filter(valid);
-    const usesListDelimiter = /[,|/]/.test(line);
     const listMarkersOnly = tokens.every((token) => valid(token) || stopWords.has(token));
     const corroboratedPhrase = (corroboratingText ?? "").match(new RegExp(`\\b${candidates.map((candidate) => candidate.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")).join("\\W+")}\\b`, "i"))?.[0] ?? "";
     const corroboratedSentence = candidates.length > 2 && /[a-z]/.test(corroboratedPhrase);
-    return candidates.length >= 2 && tokens.length <= 10 && listMarkersOnly && (usesListDelimiter || !corroboratedSentence) ? [{ candidates, localContext: line }] : [];
+    return candidates.length >= 2 && tokens.length <= 10 && listMarkersOnly && !corroboratedSentence ? [{ candidates, localContext: line }] : [];
   }).find((tokens) => {
     return tokens.candidates.filter(isCorroborated).length >= 2;
   });

@@ -297,6 +297,38 @@ describe("social-video runner routing", () => {
     ]));
   });
 
+  it("rejects comma-delimited OCR prose while retaining explicit symbols and local ETF lists", () => {
+    const dollarSymbol = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "Stock watch", transcript: "We are buying AAPL today.", visual_text: "WE, ARE, BUYING, $AAPL" },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "comma-delimited-prose-dollar-symbol",
+      canonicalUrl: "https://www.instagram.com/reel/comma-delimited-prose-dollar-symbol/",
+      origin: { channel: "api" },
+    });
+    expect(dollarSymbol.financeClaims.securities.map(({ symbol }) => symbol).filter(Boolean)).toEqual(["AAPL"]);
+
+    const exchangeSymbol = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "Stock watch", transcript: "We are buying AAPL today.", visual_text: "WE, ARE, BUYING, NYSE: AAPL" },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "comma-delimited-prose-exchange-symbol",
+      canonicalUrl: "https://www.instagram.com/reel/comma-delimited-prose-exchange-symbol/",
+      origin: { channel: "api" },
+    });
+    expect(exchangeSymbol.financeClaims.securities).toEqual([expect.objectContaining({ symbol: "AAPL", exchange: "NYSE" })]);
+
+    const compactEtfs = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "Stock watch", transcript: "VOO and QQQM are funds.", visual_text: "ETFS VOO QQQM" },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "local-compact-etf-list",
+      canonicalUrl: "https://www.instagram.com/reel/local-compact-etf-list/",
+      origin: { channel: "api" },
+    });
+    expect(compactEtfs.financeClaims.securities.map(({ symbol, assetType }) => ({ symbol, assetType }))).toEqual([
+      { symbol: "VOO", assetType: "etf" },
+      { symbol: "QQQM", assetType: "etf" },
+    ]);
+  });
+
   it("rejects durations over 1800 seconds instead of clamping and rounds valid fractions", () => {
     const input = { extract: { ...enriched, duration_sec: 1800.1 }, classification: { category: "finance" as const, confidence: 1, reasons: [] }, runId: "duration", canonicalUrl: "https://www.youtube.com/watch?v=abc", origin: { channel: "api" as const } };
     expect(() => buildSocialVideoEvidence(input)).toThrow(/duration_limit/);
