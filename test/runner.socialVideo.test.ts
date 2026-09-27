@@ -271,7 +271,7 @@ describe("social-video runner routing", () => {
     });
     const sentenceSymbols = sentenceEvidence.financeClaims.securities.map(({ symbol }) => symbol).filter(Boolean);
     expect(sentenceSymbols).toContain("SKM");
-    expect(sentenceSymbols).not.toEqual(expect.arrayContaining(["WHICH", "STOCKS", "AND", "ARE", "RIDING", "THE"]));
+    expect(sentenceSymbols).toEqual(["SKM"]);
     const anthropic = sentenceEvidence.financeClaims.securities.find(({ companyName }) => companyName === "Anthropic");
     expect(anthropic).toMatchObject({ companyName: "Anthropic", assetType: "stock" });
     expect(anthropic?.symbol).toBeUndefined();
@@ -326,6 +326,30 @@ describe("social-video runner routing", () => {
     expect(compactEtfs.financeClaims.securities.map(({ symbol, assetType }) => ({ symbol, assetType }))).toEqual([
       { symbol: "VOO", assetType: "etf" },
       { symbol: "QQQM", assetType: "etf" },
+    ]);
+  });
+
+  it.each([
+    "Which stocks are riding the momentum?",
+    "WHICH STOCKS AND ARE RIDING THE MOMENTUM?",
+    "Which stocks—and are riding the momentum?",
+  ])("rejects unstructured OCR prose despite transcription variation: %s", (transcript) => {
+    const evidence = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "Stock watch", transcript, visual_text: "WHICH STOCKS AND ARE RIDING THE\nNYSE: SKM" },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "ocr-prose-variation", canonicalUrl: "https://www.instagram.com/reel/prose/", origin: { channel: "api" },
+    });
+    expect(evidence.financeClaims.securities.map(({ symbol }) => symbol).filter(Boolean)).toEqual(["SKM"]);
+  });
+
+  it("retains a labelled three-item ETF list with lowercase transcript tickers", () => {
+    const evidence = buildSocialVideoEvidence({
+      extract: { ...enriched, caption: "Stock watch", transcript: "VOO qqqm vxus are good funds.", visual_text: "ETFS VOO QQQM VXUS" },
+      classification: { category: "finance", confidence: 0.9, reasons: ["finance signals"] },
+      runId: "three-etfs", canonicalUrl: "https://www.instagram.com/reel/etfs/", origin: { channel: "api" },
+    });
+    expect(evidence.financeClaims.securities.map(({ symbol, assetType }) => ({ symbol, assetType }))).toEqual([
+      { symbol: "VOO", assetType: "etf" }, { symbol: "QQQM", assetType: "etf" }, { symbol: "VXUS", assetType: "etf" },
     ]);
   });
 

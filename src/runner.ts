@@ -737,6 +737,7 @@ export function buildSocialVideoEvidence(input: {
     ...(input.extract.visual_text?.trim() ? splitClaimBlocks(input.extract.visual_text).map((text) => ({ text })) : []),
   ];
   const securities = extractSecurityMentions(sources, {
+    caption: input.extract.caption ?? undefined,
     visualText: input.extract.visual_text ?? undefined,
     corroboratingText: [input.extract.caption, transcriptText].filter(Boolean).join("\n"),
   }).slice(0, 10);
@@ -808,7 +809,7 @@ function sampleEvenly<T>(values: T[], limit: number): T[] {
   return Array.from({ length: limit }, (_, index) => values[Math.round(index * (values.length - 1) / (limit - 1))]);
 }
 
-function extractSecurityMentions(sources: Array<{ text: string }>, context?: { visualText?: string; corroboratingText?: string }): Array<{
+function extractSecurityMentions(sources: Array<{ text: string }>, context?: { visualText?: string; corroboratingText?: string; caption?: string }): Array<{
   symbol?: string;
   exchange?: string;
   companyName?: string;
@@ -830,7 +831,7 @@ function extractSecurityMentions(sources: Array<{ text: string }>, context?: { v
   }
   const hasEtfContext = /\bETFs?\b/i.test(text);
   const hasSecurityContext = hasEtfContext || /\b(?:stocks?|shares?|funds?|invest(?:ing|ment|ors?)?|portfolio|NASDAQ|NYSE)\b/i.test(text);
-  for (const ticker of extractExplicitVisualTickerList(context?.visualText, context?.corroboratingText, hasSecurityContext)) {
+  for (const ticker of extractExplicitVisualTickerList(context?.visualText, context?.corroboratingText, hasSecurityContext, context?.caption)) {
     bySymbol.set(ticker.symbol, { symbol: ticker.symbol, assetType: ticker.assetType, confidence: 0.65 });
   }
   for (const company of text.matchAll(/\b([A-Z][A-Za-z&.' -]{1,80}(?:Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|PLC))\s*\(([A-Z][A-Z0-9.-]{0,9})\)/g)) {
@@ -863,7 +864,7 @@ function extractSecurityMentions(sources: Array<{ text: string }>, context?: { v
   return [...bySymbol.values(), ...named.values()];
 }
 
-function extractExplicitVisualTickerList(visualText: string | undefined, corroboratingText: string | undefined, hasSecurityContext: boolean): Array<{ symbol: string; assetType: "stock" | "etf" }> {
+function extractExplicitVisualTickerList(visualText: string | undefined, corroboratingText: string | undefined, hasSecurityContext: boolean, caption?: string): Array<{ symbol: string; assetType: "stock" | "etf" }> {
   if (!visualText || !hasSecurityContext) return [];
   const stopWords = new Set([
     "ETF", "ETFS", "FUND", "FUNDS", "NASDAQ", "NYSE", "TSX", "ASX", "LSE", "USA", "US",
@@ -887,9 +888,19 @@ function extractExplicitVisualTickerList(visualText: string | undefined, corrobo
     const tokens = line.split(/[\s,|/]+/).map((token) => token.replace(/^\$/, "")).filter(Boolean);
     const candidates = tokens.filter(valid);
     const listMarkersOnly = tokens.every((token) => valid(token) || stopWords.has(token));
-    const corroboratedPhrase = (corroboratingText ?? "").match(new RegExp(`\\b${candidates.map((candidate) => candidate.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")).join("\\W+")}\\b`, "i"))?.[0] ?? "";
-    const corroboratedSentence = candidates.length > 2 && /[a-z]/.test(corroboratedPhrase);
-    return candidates.length >= 2 && tokens.length <= 10 && listMarkersOnly && !corroboratedSentence ? [{ candidates, localContext: line }] : [];
+    const countWords = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+    const countedHeading = caption?.match(/^(\d+|two|three|four|five|six|seven|eight|nine|ten)\s+(?:ETFs?|stocks?|funds?)\b/i)?.[1];
+    const declaredCount = countedHeading ? (Number(countedHeading) || countWords.indexOf(countedHeading.toLowerCase())) : 0;
+    const escaped = candidates.map((candidate) => candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const corroboratedPair = candidates.length === 2 && new RegExp(
+      `\\b${escaped[0]}\\s+(?:and|&)\\s+${escaped[1]}\\s+(?:are\\s+)?(?:[a-z]+\\s+){0,2}(?:ETFs?|funds?|stocks?|shares?)\\b`, "i",
+    ).test(corroboratingText ?? "");
+    // Uppercase words alone are not a list. Compact lists need a
+    // local label, counted heading, or a pair explicitly described as securities.
+    const hasListStructure = /^(?:ETFS?|FUNDS?)\s+/.test(line)
+      || (declaredCount === candidates.length && candidates.length >= 2)
+      || corroboratedPair;
+    return candidates.length >= 2 && tokens.length <= 10 && listMarkersOnly && hasListStructure ? [{ candidates, localContext: line }] : [];
   }).find((tokens) => {
     return tokens.candidates.filter(isCorroborated).length >= 2;
   });
