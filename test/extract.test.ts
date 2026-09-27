@@ -102,6 +102,15 @@ describe("extract()", () => {
     ).rejects.toThrow("extract failed");
   });
 
+  it("reports termination signals when the extractor exits without stderr", async () => {
+    const { extract } = await import("../src/extract.js");
+    vi.mocked(childProcess.execFile).mockImplementation((_file, _args, _opts, callback: any) => {
+      callback(Object.assign(new Error("Command failed: bash run_pipeline.sh"), { code: null, signal: "SIGKILL", killed: false }), "", "");
+      return {} as any;
+    });
+    await expect(extract("https://example.com/video")).rejects.toThrow("signal=SIGKILL");
+  });
+
   it("returns structured failed extraction JSON when the script exits non-zero with valid stdout", async () => {
     vi.resetModules();
     const { extract } = await import("../src/extract.js");

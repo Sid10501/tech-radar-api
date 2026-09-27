@@ -102,9 +102,9 @@ describe("runPipeline()", () => {
     });
 
     vi.doMock("@anthropic-ai/sdk", () => ({
-      default: vi.fn().mockImplementation(() => ({
+      default: vi.fn().mockImplementation(function () { return {
         messages: { create: mockCreate },
-      })),
+      }; }),
     }));
 
     vi.doMock("../src/tools/github.js", () => ({
@@ -177,9 +177,9 @@ describe("runPipeline()", () => {
 
     // SDK mock to avoid import errors (not called in this test)
     vi.doMock("@anthropic-ai/sdk", () => ({
-      default: vi.fn().mockImplementation(() => ({
+      default: vi.fn().mockImplementation(function () { return {
         messages: { create: vi.fn() },
-      })),
+      }; }),
     }));
 
     const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-fail-"));
@@ -212,9 +212,9 @@ describe("runPipeline()", () => {
     }));
 
     vi.doMock("@anthropic-ai/sdk", () => ({
-      default: vi.fn().mockImplementation(() => ({
+      default: vi.fn().mockImplementation(function () { return {
         messages: { create: vi.fn() },
-      })),
+      }; }),
     }));
 
     const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-skip1-"));
@@ -261,9 +261,9 @@ describe("runPipeline()", () => {
     }));
 
     vi.doMock("@anthropic-ai/sdk", () => ({
-      default: vi.fn().mockImplementation(() => ({
+      default: vi.fn().mockImplementation(function () { return {
         messages: { create: vi.fn() },
-      })),
+      }; }),
     }));
 
     const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-skip2-"));
@@ -339,9 +339,9 @@ describe("runPipeline()", () => {
     });
 
     vi.doMock("@anthropic-ai/sdk", () => ({
-      default: vi.fn().mockImplementation(() => ({
+      default: vi.fn().mockImplementation(function () { return {
         messages: { create: mockCreate },
-      })),
+      }; }),
     }));
 
     vi.doMock("../src/tools/ai_memory.js", () => ({

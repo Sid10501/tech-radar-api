@@ -629,6 +629,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   }
 
   const port = Number(process.env["PORT"] ?? 3000);
-  await app.listen({ port, host: "0.0.0.0" });
+  const host = process.env["HOST"]?.trim() || (process.env["NODE_ENV"] === "production" ? "0.0.0.0" : "127.0.0.1");
+  await app.listen({ port, host });
   console.log(`listening on port ${port}`);
 }

@@ -13,10 +13,10 @@ vi.mock("../src/runner.js", () => ({
 
 vi.mock("../src/git.js", () => ({
   setupSshKey: vi.fn(() => "/tmp/mock-key"),
-  AiMemoryRepo: vi.fn().mockImplementation(() => ({
+  AiMemoryRepo: vi.fn().mockImplementation(function () { return {
     init: vi.fn(async () => {}),
     pullLatest: vi.fn(async () => {}),
-  })),
+  }; }),
 }));
 
 const { buildServer } = await import("../src/server.js");

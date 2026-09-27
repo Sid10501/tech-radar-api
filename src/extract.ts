@@ -164,7 +164,12 @@ export async function extract(url: string, options: ExtractOptions = {}): Promis
             // Fall through to the existing shell-level error when stdout is not extractor JSON.
           }
         }
-        return reject(new ExtractError(`extract failed: ${stderr || err.message}`, err));
+        const termination = [
+          err.code != null ? `exit=${err.code}` : null,
+          err.signal ? `signal=${err.signal}` : null,
+          err.killed ? "killed=true" : null,
+        ].filter(Boolean).join(", ");
+        return reject(new ExtractError(`extract failed${termination ? ` (${termination})` : ""}: ${stderr || err.message}`, err));
       }
       try {
         const result = parseExtractJson(stdout) as ExtractResult;

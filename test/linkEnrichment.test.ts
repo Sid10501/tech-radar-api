@@ -21,6 +21,16 @@ const baseExtract: ExtractResult = {
 };
 
 describe("link enrichment", () => {
+  it("ignores GitHub homepages, profiles and non-repository pages without losing valid links", () => {
+    const candidates = extractLinkCandidates({
+      ...baseExtract,
+      caption: "https://github.com https://github.com/acme https://github.com/topics/ai https://docs.github.com/en/pages https://github.com/acme/tool/blob/main/README.md",
+    });
+    expect(candidates.filter((candidate) => candidate.kind === "github")).toEqual([
+      { kind: "github", url: "https://github.com/acme/tool", source: "caption", confidence: "confirmed" },
+    ]);
+  });
+
   it("treats resolved source links as deterministic enrichment evidence", () => {
     const candidates = extractLinkCandidates({
       ...baseExtract,

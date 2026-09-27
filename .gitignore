@@ -13,3 +13,6 @@ MEMORY.md
 CLAUDE.md
 AGENTS.md
 __pycache__/
+
+.env.*
+!.env.example

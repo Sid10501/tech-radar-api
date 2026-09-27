@@ -90,11 +90,11 @@ describe("runImplementation()", () => {
       });
 
       return {
-        default: vi.fn().mockImplementation(() => ({
+        default: vi.fn().mockImplementation(function () { return {
           messages: {
             create: mockCreate,
           },
-        })),
+        }; }),
       };
     });
 

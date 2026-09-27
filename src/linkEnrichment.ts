@@ -11,7 +11,7 @@ type GithubLookup = (repo: string) => Promise<GithubRepoInfo>;
 type GithubSearch = (query: string, limit: number) => Promise<GithubRepoSearchResult[]>;
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
-const GITHUB_RE = /(?:https?:\/\/)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/gi;
+const GITHUB_RE = /(?<![A-Za-z0-9_.\/-])(?:https?:\/\/)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/gi;
 const NPM_PACKAGE_RE = /(?:npm\s+(?:install|i)\s+|pnpm\s+add\s+|yarn\s+add\s+)(@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+)/gi;
 
 interface CuratedProject {
@@ -163,9 +163,11 @@ function collectUrlCandidates(value: string, source: TextSource, candidates: Enr
     const url = cleanUrl(match[0]);
     const kind = linkKind(url);
     if (!kind) continue;
+    const normalized = kind === "github" ? normalizeGithubUrl(url) : normalizeNpmUrl(url);
+    if (!normalized) continue;
     candidates.push({
       kind,
-      url: kind === "github" ? normalizeGithubUrl(url) : normalizeNpmUrl(url),
+      url: normalized,
       source,
       confidence: kind === "github" ? "confirmed" : "candidate",
     });
@@ -174,9 +176,11 @@ function collectUrlCandidates(value: string, source: TextSource, candidates: Enr
 
 function collectGithubTextCandidates(value: string, source: TextSource, candidates: EnrichedLinkCandidate[]): void {
   for (const match of value.matchAll(GITHUB_RE)) {
+    const normalized = normalizeGithubUrl(`https://github.com/${match[1]}/${match[2]}`);
+    if (!normalized) continue;
     candidates.push({
       kind: "github",
-      url: `https://github.com/${match[1]}/${match[2]}`,
+      url: normalized,
       source,
       confidence: "confirmed",
     });
@@ -232,9 +236,11 @@ async function githubSearchCandidates(
   const results = await search(searchSpec.query, 3);
   const best = results.find((result) => isHighConfidenceSearchHit(result, searchSpec.name));
   if (!best) return [];
+  const url = normalizeGithubUrl(best.htmlUrl);
+  if (!url) return [];
   return [{
     kind: "github",
-    url: normalizeGithubUrl(best.htmlUrl),
+    url,
     source: searchSpec.source,
     confidence: "candidate",
     discovered_by: "github_search",
@@ -327,7 +333,7 @@ function linkKind(url: string): EnrichedLinkCandidate["kind"] | null {
   } catch {
     return null;
   }
-  if (host === "github.com" || host.endsWith(".github.com")) return "github";
+  if (host === "github.com" || host === "www.github.com") return "github";
   if (host === "npmjs.com" || host === "www.npmjs.com") return "npm";
   if (host.includes("docs") || /\/docs(?:\/|$)/i.test(url) || host.endsWith(".dev") || host.endsWith(".app")) return "docs";
   return null;
@@ -337,9 +343,13 @@ function cleanUrl(url: string): string {
   return url.replace(/[),.;]+$/g, "");
 }
 
-function normalizeGithubUrl(url: string): string {
-  const repo = githubRepoFromUrl(url);
-  return `https://github.com/${repo}`;
+function normalizeGithubUrl(url: string): string | null {
+  try {
+    return `https://github.com/${githubRepoFromUrl(url)}`;
+  } catch {
+    // Profiles, homepages and navigation links are valid evidence, but not repos.
+    return null;
+  }
 }
 
 function normalizeNpmUrl(url: string): string {
@@ -349,7 +359,12 @@ function normalizeNpmUrl(url: string): string {
 function githubRepoFromUrl(url: string): string {
   const parsed = new URL(url.startsWith("http") ? url : `https://${url}`);
   const [owner, repo] = parsed.pathname.split("/").filter(Boolean);
-  if (!owner || !repo) throw new Error(`invalid GitHub repo URL: ${url}`);
+  const reservedOwners = new Set(["topics", "collections", "settings", "orgs", "users", "search", "marketplace", "features", "sponsors", "login", "signup", "about", "enterprise"]);
+  if (!["github.com", "www.github.com"].includes(parsed.hostname.toLowerCase()) ||
+      !owner || !repo || reservedOwners.has(owner.toLowerCase()) ||
+      !/^[A-Za-z0-9-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) {
+    throw new Error(`invalid GitHub repo URL: ${url}`);
+  }
   return `${owner}/${repo.replace(/\.git$/, "")}`;
 }
 

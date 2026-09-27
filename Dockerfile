@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:24-slim
 
 # Install runtime dependencies for the Python extractor
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -35,6 +35,7 @@ RUN npm prune --omit=dev
 # The extract.ts shells out to run_pipeline.sh; path is resolved at runtime via AI_MEMORY_LOCAL_DIR
 
 ENV NODE_ENV=production
+ENV HOST=0.0.0.0
 EXPOSE 3000
 
 CMD ["node", "dist/src/server.js"]

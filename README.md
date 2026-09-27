@@ -296,7 +296,7 @@ Public, sanitized markdown detail for one finding — private sections are remov
 
 | Layer | Choice |
 |-------|--------|
-| Runtime | Node.js 20 + TypeScript |
+| Runtime | Node.js 24 LTS + TypeScript |
 | HTTP | Fastify |
 | Agents | Anthropic SDK (`claude-sonnet-4-6`) with tool use |
 | Extraction | Python + yt-dlp + faster-whisper + pypdf |
@@ -309,8 +309,12 @@ Public, sanitized markdown detail for one finding — private sections are remov
 
 ## Development
 
+Use Node.js 24 LTS to match the Docker runtime. `npm run dev` loads `.env` when present; existing environment variables take precedence. Set `HOST` and `PORT` to override the local address. Docker defaults to `0.0.0.0` so Railway can reach it.
+
+The extractor uses `python3` from `PATH`. If using the local virtual environment, activate it first with `source tmp/venv/bin/activate`. Keep local memory and Git remotes isolated from production when testing pipeline writes.
+
 ```bash
-npm run dev                                          # hot reload on port 3000
+npm run dev                                          # loads .env; hot reload on 127.0.0.1:3000
 npm test                                             # run tests
 npm run build                                        # compile
 

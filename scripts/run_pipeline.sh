@@ -79,8 +79,8 @@ if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v tesseract >/dev/null 2>&1
   OCR_FLAG="--no-ocr"
 fi
 
-OUT_DIR_ARGS=()
+EXTRACT_ARGS=("$SCRIPT_DIR/extract_post.py" "$URL")
 if [[ -n "$OUT_DIR" ]]; then
-  OUT_DIR_ARGS=(--out-dir "$OUT_DIR")
+  EXTRACT_ARGS+=(--out-dir "$OUT_DIR")
 fi
-exec python3 "$SCRIPT_DIR/extract_post.py" "$URL" "${OUT_DIR_ARGS[@]}" ${TRANSCRIBE_FLAG:+$TRANSCRIBE_FLAG} ${OCR_FLAG:+$OCR_FLAG}
+exec python3 "${EXTRACT_ARGS[@]}" ${TRANSCRIBE_FLAG:+$TRANSCRIBE_FLAG} ${OCR_FLAG:+$OCR_FLAG}
