@@ -929,6 +929,35 @@ describe("server routes", () => {
       }
     });
 
+    it("POST /runs/upload deduplicates repeated bearer submissions by stable analysis identity", async () => {
+      const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), "bearer-upload-dedupe-"));
+      process.env["MEDIA_UPLOAD_DIR"] = mediaDir;
+      const boundary = "----bearer-upload-dedupe";
+      const payload = Buffer.from([
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nx\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="intent"\r\n\r\nfinance\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="origin"\r\n\r\napi\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="idempotencyKey"\r\n\r\nstable-key\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="analysisId"\r\n\r\nstable-analysis\r\n`,
+        `--${boundary}--\r\n`,
+      ].join(""));
+      vi.mocked(runnerMock.runMediaPipeline).mockClear();
+      vi.mocked(runnerMock.findMediaRunBySubmission)
+        .mockReturnValueOnce(undefined)
+        .mockReturnValueOnce({ id: "stable-run", status: "pending" } as never);
+      try {
+        const headers = { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` };
+        const first = await app.inject({ method: "POST", url: "/runs/upload", headers, payload });
+        const second = await app.inject({ method: "POST", url: "/runs/upload", headers, payload });
+        expect(first.statusCode).toBe(202);
+        expect(second.json()).toEqual({ runId: "stable-run", status: "pending", deduplicated: true });
+        expect(runnerMock.runMediaPipeline).toHaveBeenCalledTimes(1);
+      } finally {
+        delete process.env["MEDIA_UPLOAD_DIR"];
+        fs.rmSync(mediaDir, { recursive: true, force: true });
+      }
+    });
+
     it("POST /runs/upload rejects unknown and repeated singleton multipart fields", async () => {
       const boundary = "----invalid-fields";
       const request = async (fields: Array<[string, string]>) => app.inject({ method: "POST", url: "/runs/upload", headers: { authorization: "Bearer dispatch-secret", "content-type": `multipart/form-data; boundary=${boundary}` }, payload: Buffer.from([
