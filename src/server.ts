@@ -393,6 +393,13 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
       if (analysisId !== undefined && !analysisId.trim()) throw new Error("analysisId must not be empty");
       if (analysisId && analysisId.length > 200) throw new Error("analysisId exceeds 200 characters");
       const uploadClaims = (request as typeof request & { uploadClaims?: UploadClaims; uploadToken?: string }).uploadClaims;
+      if (!uploadClaims && analysisId && idempotencyKey) {
+        const existing = findMediaRunBySubmission(analysisId, idempotencyKey);
+        if (existing) {
+          await fs.promises.unlink(mediaPath).catch(() => {});
+          return reply.code(202).send({ runId: existing.id, status: existing.status, deduplicated: true });
+        }
+      }
       if (uploadClaims) {
         const size = (await fs.promises.stat(mediaPath)).size;
         if (intent !== uploadClaims.intent || String(originChannel) !== uploadClaims.origin || idempotencyKey !== uploadClaims.idempotencyKey || analysisId !== uploadClaims.analysisId || size !== uploadClaims.size) throw new Error("multipart fields or size do not match upload token");
