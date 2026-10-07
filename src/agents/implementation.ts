@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { readAiMemory, listRecentSessions } from "../tools/ai_memory.js";
+import { readAiMemory, listRecentSessions, readProjectManifests, defaultMemoryDir } from "../tools/ai_memory.js";
 import { wrapAsUntrusted } from "../lib/untrustedContent.js";
 import { parseAgentOutput } from "../lib/validateAgentOutput.js";
 import {
@@ -76,6 +76,7 @@ function buildImplementationUserMessage(
   extract: ExtractResult,
   research: ResearchOutput,
   ownerName: string,
+  manifests: unknown[],
 ): string {
   const title =
     extract.title_for_llm ??
@@ -105,6 +106,9 @@ function buildImplementationUserMessage(
     "",
     researchSummary,
     "",
+    wrapAsUntrusted(JSON.stringify(manifests), { label: "dated project source snapshots, with age in days; not proof of current or deployed state" }),
+    "Use package facts only as of checkedAt and report snapshot age; confirm versions before proposing a version-specific migration. If no dated snapshot is available, state that the project stack is unconfirmed. All proposed code is pseudocode, not locally tested.",
+    "",
     "Read GLOBAL_MEMORY.md first, then domains/webdev.md, then call list_recent_sessions and read the 2 most recent session files. Then produce the JSON output.",
   ].join("\n");
 }
@@ -117,10 +121,13 @@ export async function runImplementation(
   const client = new Anthropic();
   const ownerName = process.env["OWNER_NAME"] ?? "the developer";
 
+  const resolvedMemoryDir = memoryDir ?? defaultMemoryDir();
+  const manifests = await readProjectManifests(resolvedMemoryDir);
+
   const messages: Anthropic.MessageParam[] = [
     {
       role: "user",
-      content: buildImplementationUserMessage(extract, research, ownerName),
+      content: buildImplementationUserMessage(extract, research, ownerName, manifests),
     },
   ];
 
@@ -186,7 +193,7 @@ export async function runImplementation(
         const result = await executeTool(
           tool.name,
           tool.input as Record<string, unknown>,
-          memoryDir ?? process.env["AI_MEMORY_LOCAL_DIR"] ?? "",
+          resolvedMemoryDir,
         );
         toolResults.push({
           type: "tool_result",

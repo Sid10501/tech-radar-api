@@ -1,6 +1,7 @@
 import type { ExtractResult } from "../extract.js";
 import { buildWorkflowAuditBlock, linkedArtifactsForExtract } from "./linkedArtifacts.js";
 import { wrapAsUntrusted } from "./untrustedContent.js";
+import { visualEvidence } from "../videoEvidence.js";
 
 /** Prefer pipeline `*_for_llm` fields; otherwise wrap raw extractor text. */
 export function llmCaptionBlock(extract: ExtractResult): string {
@@ -80,6 +81,10 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
   const caption = llmCaptionBlock(extract);
   const transcript = llmTranscriptBlock(extract);
   const visualText = llmVisualTextBlock(extract);
+  const frameObservations = visualEvidence({ ...extract, visual_text: null }).map((item) => {
+    const timestamp = item.timestampMs == null ? "timestamp unavailable" : `${(item.timestampMs / 1000).toFixed(3)}s`;
+    return `${timestamp}: ${item.text.slice(0, 160)}`;
+  }).join("\n");
   const title = llmTitleBlock(extract);
   const enrichedLinks = llmEnrichedLinksBlock(extract);
   const comments = llmCommentsBlock(extract);
@@ -127,6 +132,10 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
   }
   if (visualText) {
     parts.push("", "On-screen text / OCR:", visualText);
+  }
+  if (frameObservations) {
+    parts.push("", "Frame observations (OCR excerpts; source timestamps, not verified claims):",
+      wrapAsUntrusted(frameObservations, { label: "timestamped video frame OCR", maxChars: 5_000 }));
   }
   if (enrichedLinks) {
     parts.push(

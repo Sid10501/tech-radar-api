@@ -30,8 +30,9 @@ with tempfile.TemporaryDirectory() as directory:
   });
   it("blocks localhost and private-network fetch URLs", () => {
     const output = runPythonSnippet(`
-import json
+import json, socket
 from scripts.extract_post import is_allowed_fetch_url
+socket.getaddrinfo = lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
 
 print(json.dumps({
   "public": is_allowed_fetch_url("https://example.com/image.jpg"),
@@ -138,7 +139,7 @@ with tempfile.TemporaryDirectory() as directory:
     ]);
   });
 
-  it("samples frames uniformly across short-form video duration by default", () => {
+  it("spreads a bounded frame budget across long videos as well as short reels", () => {
     const output = runPythonSnippet(`
 import json, os
 from scripts.extract_post import frame_sample_interval
@@ -155,7 +156,91 @@ values["blank"] = frame_sample_interval(24.0, 8)
 print(json.dumps(values))
 `);
 
-    expect(JSON.parse(output)).toEqual({ reel: 3, short: 0.5, bounded: 10, unknown: 2, blank: 3 });
+    expect(JSON.parse(output)).toEqual({ reel: 3, short: 0.5, bounded: 37.5, unknown: 2, blank: 3 });
+  });
+
+  it("retains per-frame text and presentation timestamps in screenshot assets", () => {
+    const output = runPythonSnippet(`
+import json, tempfile
+from pathlib import Path
+from scripts.extract_post import ocr_frame_assets
+with tempfile.TemporaryDirectory() as directory:
+    frames = Path(directory) / "ocr-frames"
+    frames.mkdir()
+    (frames / "frame-001.png").write_bytes(b"first")
+    (frames / "frame-002.png").write_bytes(b"late")
+    (frames / "index.json").write_text(json.dumps([
+        {"file": "frame-001.png", "timestamp_ms": 1500, "ocr_text": "First repo"},
+        {"file": "frame-002.png", "timestamp_ms": 281500, "ocr_text": "Late repo"},
+    ]))
+    print(json.dumps(ocr_frame_assets(Path(directory))))
+`);
+    expect(JSON.parse(output)).toEqual([
+      expect.objectContaining({ timestamp_ms: 1500, ocr_text: "First repo" }),
+      expect.objectContaining({ timestamp_ms: 281500, ocr_text: "Late repo" }),
+    ]);
+  });
+
+  it.skipIf(!["ffmpeg", "ffprobe", "tesseract"].every((tool) => {
+    try { execFileSync(tool, [tool === "tesseract" ? "--version" : "-version"], { stdio: "ignore" }); return true; } catch { return false; }
+  }))("extracts actual late frames with source timestamps from a synthetic five-minute clip", () => {
+    const output = runPythonSnippet(`
+import json, os, subprocess, tempfile
+from pathlib import Path
+from scripts.extract_post import extract_visual_text, ocr_frame_assets
+os.environ.pop("OCR_FRAME_INTERVAL_SEC", None)
+os.environ["OCR_MAX_FRAMES"] = "8"
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory)
+    video = root / "long.mp4"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=blue:s=64x64:r=2:d=300", "-c:v", "libx264", str(video)], check=True)
+    text, error = extract_visual_text(video, root, 300)
+    assets = ocr_frame_assets(root)
+    print(json.dumps({"error": error, "times": [a.get("timestamp_ms") for a in assets]}))
+`);
+    const result = JSON.parse(output);
+    expect(result.error).toBeNull();
+    expect(result.times).toHaveLength(8);
+    expect(result.times[0]).toBe(19000);
+    expect(result.times.at(-1)).toBe(281500);
+  }, 20000);
+
+  it("downloads YouTube video only when visual acquisition is explicitly enabled", () => {
+    const output = runPythonSnippet(`
+import json, os, socket, tempfile
+from pathlib import Path
+import scripts.extract_post as extractor
+socket.getaddrinfo = lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+requests = []
+def download(url, directory, **options):
+    requests.append(options)
+    return {"title": "Tutorial", "duration": 300}, None, None, None
+extractor.run_ytdlp = download
+extractor.download_image_assets = lambda *args: ([], [], [])
+with tempfile.TemporaryDirectory() as directory:
+    for setting, ocr in [(None, True), ("1", True), ("1", False)]:
+        os.environ.pop("YOUTUBE_VISUAL_ENABLED", None)
+        if setting: os.environ["YOUTUBE_VISUAL_ENABLED"] = setting
+        extractor.extract("https://www.youtube.com/watch?v=abc", Path(directory), False, ocr)
+print(json.dumps([request["want_video"] for request in requests]))
+`);
+    expect(JSON.parse(output)).toEqual([false, true, false]);
+  });
+
+  it("reports a failed opt-in visual download even when YouTube metadata succeeds", () => {
+    const output = runPythonSnippet(`
+import json, os, socket, tempfile
+from pathlib import Path
+import scripts.extract_post as extractor
+socket.getaddrinfo = lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+os.environ["YOUTUBE_VISUAL_ENABLED"] = "1"
+extractor.run_ytdlp = lambda *args, **kwargs: ({"title": "Tutorial", "duration": 300}, None, None, "yt-dlp download exceeded 52428800 bytes")
+extractor.download_image_assets = lambda *args: ([], [], [])
+with tempfile.TemporaryDirectory() as directory:
+    result = extractor.extract("https://www.youtube.com/watch?v=abc", Path(directory), False, True)
+    print(json.dumps(result["extraction_warnings"]))
+`);
+    expect(JSON.parse(output)).toContain("yt-dlp download exceeded 52428800 bytes");
   });
 
   it("attaches sampled frame assets to local video extraction", () => {

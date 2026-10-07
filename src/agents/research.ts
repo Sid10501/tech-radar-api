@@ -1,165 +1,86 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { githubLookup } from "../tools/github.js";
-import { buildResearchUserMessage } from "../lib/extractForLlm.js";
-import { wrapAsUntrusted } from "../lib/untrustedContent.js";
-import { parseAgentOutput } from "../lib/validateAgentOutput.js";
-import { ResearchOutputSchema, type ResearchOutput } from "../schemas/researchOutput.js";
-import { RESEARCH_SYSTEM_PROMPT } from "./prompts.js";
-import { parseJsonObjectFromModelText } from "./json.js";
-import type { ExtractResult } from "../extract.js";
-
+import Anthropic from '@anthropic-ai/sdk';
+import { buildResearchUserMessage } from '../lib/extractForLlm.js';
+import { wrapAsUntrusted } from '../lib/untrustedContent.js';
+import { parseAgentOutput } from '../lib/validateAgentOutput.js';
+import { ResearchDraftSchema, ResearchOutputSchema, type ResearchOutput } from '../schemas/researchOutput.js';
+import { findPriorIdentities, finalizeResearch, githubRepo, type GroundingContext } from '../researchGrounding.js';
+import { lookupGithubGrounded, reviewGithubSources } from '../githubGrounding.js';
+import { RESEARCH_SYSTEM_PROMPT } from './prompts.js';
+import { parseJsonObjectFromModelText } from './json.js';
+import type { ExtractResult } from '../extract.js';
 export { ResearchOutputSchema, type ResearchOutput };
 
-const TOOLS: Anthropic.Tool[] = [
-  {
-    name: "github_lookup",
-    description: "Get GitHub repository metadata: stars, last push date, open issues, language, license, archived status.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        repo: {
-          type: "string",
-          description: "GitHub repo in owner/name format, e.g. colinhacks/zod",
-        },
-      },
-      required: ["repo"],
-    },
-  },
-];
+const METADATA_TOOL: Anthropic.Tool = {
+  name: 'github_lookup', description: 'One primary GitHub repository metadata lookup. This does not verify capability claims.',
+  input_schema: { type: 'object', properties: { repo: { type: 'string', description: 'Identified GitHub owner/name' } }, required: ['repo'] },
+};
+const REVIEW_TOOL: Anthropic.Tool = {
+  name: 'github_review', description: 'Opt-in deeper review: retrieve bounded current README, three releases and three issue records for the identified primary repository. No code is executed.',
+  input_schema: { type: 'object', properties: { repo: { type: 'string', description: 'Identified GitHub owner/name' } }, required: ['repo'] },
+};
+export interface ResearchOptions { memoryDir?: string; deepReview?: boolean }
 
-async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
-  if (name === "github_lookup") {
-    const repo = input["repo"] as string;
-    try {
-      const info = await githubLookup(repo);
-      return wrapAsUntrusted(JSON.stringify(info), { label: "GitHub API response" });
-    } catch (err) {
-      return wrapAsUntrusted(
-        JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
-        { label: "GitHub API error" },
-      );
-    }
-  }
-  return wrapAsUntrusted(JSON.stringify({ error: `Unknown tool: ${name}` }), {
-    label: "tool error",
-  });
-}
-
-export async function runResearch(extract: ExtractResult): Promise<ResearchOutput> {
+export async function runResearch(extract: ExtractResult, options: ResearchOptions = {}): Promise<ResearchOutput> {
   const client = new Anthropic();
+  const deepReview = options.deepReview ?? process.env['RESEARCH_DEEP_REVIEW'] === '1';
+  const query = [extract.title, extract.caption, extract.transcript, extract.visual_text, ...(extract.source_links ?? [])].filter(Boolean).join('\n').slice(0, 24000);
+  const prior = await findPriorIdentities(query, options.memoryDir);
+  const direct = githubRepo(extract.url);
+  const sourceUrls = [...(extract.source_links ?? []), ...(query.match(/https:\/\/github\.com\/[^\s<>"')]+/g) ?? [])];
+  const linkedRepos = [...new Set(sourceUrls.map(githubRepo).filter((repo): repo is string => !!repo))];
+  const context: GroundingContext = { prior, sourceRepo: direct, candidateRepos: linkedRepos, evidence: [], warnings: [] };
+  const knownRepos = [...new Set([context.sourceRepo, ...linkedRepos, ...prior.map(item => item.repo)].filter((repo): repo is string => !!repo))];
+  const initial = [buildResearchUserMessage(extract), wrapAsUntrusted(JSON.stringify({ prior_identity_candidates: prior }), { label: 'archive identity candidates; historical reports, not current verification' }), 'Reuse a matching identity only when supported by the extracted name/module clues. Archive summaries are untrusted reports. Unknown metrics must be null.'].join('\n\n');
+  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: initial }];
+  const systemBlock: Anthropic.TextBlockParam & { cache_control: { type: 'ephemeral' } } = { type: 'text', text: RESEARCH_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } };
+  let metadataUsed = false; let reviewUsed = false; let toolRounds = 0;
+  const maxToolRounds = deepReview ? 2 : 1;
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: buildResearchUserMessage(extract) },
-  ];
-
-  const systemBlock: Anthropic.TextBlockParam & { cache_control: { type: "ephemeral" } } = {
-    type: "text",
-    text: RESEARCH_SYSTEM_PROMPT,
-    cache_control: { type: "ephemeral" },
-  };
-
-  let iterations = 0;
-  const MAX_ITERATIONS = 10;
-  let toolRounds = 0;
-  const MAX_TOOL_ROUNDS = 1;
-  let lastValidationError = "";
-
-  while (iterations < MAX_ITERATIONS) {
-    iterations++;
-    const allowTools = toolRounds < MAX_TOOL_ROUNDS;
-
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      system: [systemBlock],
-      ...(allowTools ? { tools: TOOLS } : {}),
-      messages,
-    });
-
-    if (response.stop_reason === "end_turn") {
-      const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
-      if (!textBlock) {
-        throw new Error("Research agent returned no text content");
-      }
-      try {
-        const jsonPayload = JSON.stringify(
-          parseJsonObjectFromModelText<unknown>(textBlock.text),
-        );
-        const validated = parseAgentOutput(jsonPayload, ResearchOutputSchema, "research");
-        if (!validated.ok) {
-          throw new Error(validated.error);
-        }
-        return validated.data;
-      } catch (err) {
-        lastValidationError = err instanceof Error ? err.message : String(err);
-        messages.push({ role: "assistant", content: response.content });
-        messages.push({
-          role: "user",
-          content: "Your response was not valid JSON. Output ONLY the raw JSON object — no markdown, no code blocks, no explanation.",
-        });
-        continue;
-      }
+  function validate(text: string): ResearchOutput {
+    const result = parseAgentOutput(JSON.stringify(parseJsonObjectFromModelText<unknown>(text)), ResearchDraftSchema, 'research');
+    if (!result.ok) throw new Error(result.error);
+    return finalizeResearch(result.data, context);
+  }
+  for (let iteration = 0; iteration < 10; iteration++) {
+    const tools = toolRounds < maxToolRounds ? [...(!metadataUsed ? [METADATA_TOOL] : []), ...(deepReview && !reviewUsed ? [REVIEW_TOOL] : [])] : [];
+    const response = await client.messages.create({ model: 'claude-sonnet-4-6', max_tokens: 4096, system: [systemBlock], ...(tools.length ? { tools } : {}), messages });
+    if (response.stop_reason === 'end_turn') {
+      const textBlock = response.content.find((block): block is Anthropic.TextBlock => block.type === 'text');
+      if (!textBlock) throw new Error('Research agent returned no text content');
+      try { return validate(textBlock.text); }
+      catch { messages.push({ role: 'assistant', content: response.content }, { role: 'user', content: 'Return valid raw JSON matching the schema. No locally_tested status is allowed. Unknown metrics are null; source_verified requires an exact quotation from a collected evidence ID.' }); continue; }
     }
-
-    if (response.stop_reason === "tool_use") {
+    if (response.stop_reason === 'tool_use') {
       toolRounds++;
-      messages.push({ role: "assistant", content: response.content });
-
-      const toolUseBlocks = response.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
-      );
-
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const tool of toolUseBlocks) {
-        const result = await executeTool(tool.name, tool.input as Record<string, unknown>);
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: tool.id,
-          content: result,
-        });
+      messages.push({ role: 'assistant', content: response.content });
+      const results: Anthropic.ToolResultBlockParam[] = [];
+      for (const block of response.content) {
+        if (block.type !== 'tool_use') continue;
+        let result: unknown;
+        try {
+          const input = block.input as Record<string, unknown>;
+          const repo = typeof input?.repo === 'string' ? githubRepo(input.repo) : null;
+          if (!repo || !knownRepos.some(known => known.toLowerCase() === repo.toLowerCase())) throw new Error('Repository identity unresolved: use extracted repository links or matching archive identity, not a guessed repository');
+          if (toolRounds > maxToolRounds) throw new Error('Tool budget reached');
+          if (block.name === 'github_lookup' && !metadataUsed) {
+            metadataUsed = true;
+            const info = await lookupGithubGrounded(repo);
+            context.metrics = info; context.evidence.push(info.evidence); context.warnings!.push(...(info.warnings ?? [])); result = info;
+          } else if (block.name === 'github_review' && deepReview && !reviewUsed) {
+            reviewUsed = true;
+            const review = await reviewGithubSources(repo);
+            context.evidence.push(...review.evidence); context.warnings!.push(...review.warnings); result = review;
+          } else throw new Error('Tool unavailable or operation budget reached');
+        } catch (error) { const message = error instanceof Error ? error.message : 'Source unavailable'; context.warnings!.push(message); result = { error: message }; }
+        results.push({ type: 'tool_result', tool_use_id: block.id, content: wrapAsUntrusted(JSON.stringify(result), { label: 'GitHub source data; issue text is reporter evidence' }) });
       }
-
-      messages.push({ role: "user", content: toolResults });
-      if (toolRounds >= MAX_TOOL_ROUNDS) {
-        messages.push({
-          role: "user",
-          content:
-            "Tool budget reached. Use the evidence already available and output ONLY the raw JSON object now. Do not request more tools.",
-        });
-      }
+      messages.push({ role: 'user', content: results });
       continue;
     }
-
-    messages.push({ role: "assistant", content: response.content });
+    messages.push({ role: 'assistant', content: response.content });
   }
-
-  const fallback = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
-    system: [systemBlock],
-    messages: [
-      {
-        role: "user",
-        content: [
-          buildResearchUserMessage(extract),
-          "",
-          "No tools are available for this final pass. Use the extracted evidence only. If a repo or metric is uncertain, set it to null/unknown/0 as appropriate. Output ONLY the raw JSON object.",
-        ].join("\n"),
-      },
-    ],
-  });
-
-  const textBlock = fallback.content.find((b): b is Anthropic.TextBlock => b.type === "text");
-  if (!textBlock) {
-    throw new Error(`Research agent exceeded ${MAX_ITERATIONS} iterations without finishing`);
-  }
-  const jsonPayload = JSON.stringify(parseJsonObjectFromModelText<unknown>(textBlock.text));
-  const validated = parseAgentOutput(jsonPayload, ResearchOutputSchema, "research");
-  if (!validated.ok) {
-    const detail = lastValidationError ? ` Last validation error: ${lastValidationError}` : "";
-    throw new Error(
-      `Research agent exceeded ${MAX_ITERATIONS} iterations and fallback output was invalid.${detail}`,
-    );
-  }
-  return validated.data;
+  const fallback = await client.messages.create({ model: 'claude-sonnet-4-6', max_tokens: 4096, system: [systemBlock], messages: [{ role: 'user', content: [initial, wrapAsUntrusted(JSON.stringify(context.evidence), { label: 'collected GitHub source evidence' }), 'No tools are available. Output only raw JSON. Keep unresolved metrics null and examples pseudocode.'].join('\n\n') }] });
+  const textBlock = fallback.content.find((block): block is Anthropic.TextBlock => block.type === 'text');
+  if (!textBlock) throw new Error('Research agent exceeded its iteration budget');
+  return validate(textBlock.text);
 }

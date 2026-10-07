@@ -59,6 +59,23 @@ describe("extractForLlm", () => {
     expect(msg).toContain("FrameAgent");
   });
 
+  it("includes bounded late-frame timestamps as untrusted OCR without leaking local paths", () => {
+    const msg = buildResearchUserMessage({
+      ...baseExtract,
+      visual_text: null,
+      media_assets: Array.from({ length: 20 }, (_, i) => ({
+        type: "screenshot", source: "video-frame", timestamp_ms: i === 19 ? 281500 : 1000 + i * 1000,
+        ocr_text: `repo-${i} ${"x".repeat(1000)}`, path: `/private/upload/frame-${i}.png`,
+      })),
+    });
+    expect(msg).toContain("Frame observations");
+    expect(msg).toContain("281.500s: repo-19");
+    expect(msg).toContain("1.000s: repo-0");
+    expect(msg).toContain("UNTRUSTED");
+    expect(msg).not.toContain("/private/");
+    expect(msg.length).toBeLessThan(6500);
+  });
+
   it("includes enriched link candidates as untrusted evidence", () => {
     const msg = buildResearchUserMessage({
       ...baseExtract,

@@ -107,6 +107,13 @@ describe("runPipeline()", () => {
       }; }),
     }));
 
+    vi.doMock("../src/githubGrounding.js", () => ({
+      lookupGithubGrounded: vi.fn(async (repo: string) => ({ repo,
+        signals: { github_stars: 32000, last_pushed: "2026-04-01T00:00:00Z", open_issues: 42, license: "MIT", archived: false },
+        evidence: { id: 'github-metadata', kind: 'metadata', url: `https://github.com/${repo}`, retrieved_at: '2026-09-12T00:00:00Z', published_at: null, excerpt: 'Metadata only' },
+      })),
+    }));
+
     vi.doMock("../src/tools/github.js", () => ({
       githubLookup: vi.fn(async () => ({
         stars: 32000, lastPushed: "2026-04-01T00:00:00Z",
@@ -115,7 +122,8 @@ describe("runPipeline()", () => {
       githubSearchRepositories: vi.fn(async () => []),
     }));
 
-    vi.doMock("../src/tools/ai_memory.js", () => ({
+    vi.doMock("../src/tools/ai_memory.js", async (importOriginal) => ({
+      ...await importOriginal<typeof import("../src/tools/ai_memory.js")>(),
       readAiMemory: vi.fn(async (filePath: string) => {
         if (filePath === "GLOBAL_MEMORY.md") return "# Global Memory\nProjects: Cross-Tax\n";
         return "# domain\n";
@@ -344,7 +352,8 @@ describe("runPipeline()", () => {
       }; }),
     }));
 
-    vi.doMock("../src/tools/ai_memory.js", () => ({
+    vi.doMock("../src/tools/ai_memory.js", async (importOriginal) => ({
+      ...await importOriginal<typeof import("../src/tools/ai_memory.js")>(),
       readAiMemory: vi.fn(async () => "# memory\n"),
       listRecentSessions: vi.fn(async () => []),
     }));

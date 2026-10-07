@@ -10,6 +10,7 @@ import { AiMemoryRepo, acquireAiMemoryRepoMutation, setupSshKey } from "./git.js
 import type { AiMemoryRepoOptions } from "./git.js";
 import { enrichLinksFromExtract } from "./linkEnrichment.js";
 import { extractTextWithVision } from "./visionOcr.js";
+import { visualEvidence } from "./videoEvidence.js";
 import type { ExtractResult } from "./extract.js";
 import { childArtifactInboxRows } from "./lib/linkedArtifactIntake.js";
 import {
@@ -248,7 +249,9 @@ export async function withVisionFallback(
     ...mediaAssets.filter((asset) => asset.type === "image"),
   ];
   const imageLimit = existingVisualText ? 8 : 4;
-  const imagePaths = [...new Set(prioritizedAssets.flatMap((asset) => asset.path ? [asset.path] : []))].slice(0, imageLimit);
+  const framePaths = [...new Set(prioritizedAssets.filter((asset) => asset.type === "screenshot").flatMap((asset) => asset.path ? [asset.path] : []))];
+  const otherPaths = [...new Set(prioritizedAssets.filter((asset) => asset.type !== "screenshot").flatMap((asset) => asset.path ? [asset.path] : []))].filter((value) => !framePaths.includes(value));
+  const imagePaths = [...sampleEvenly(framePaths, imageLimit), ...otherPaths].slice(0, imageLimit);
   if (imagePaths.length === 0) return extractResult;
 
   const vision = await visionExtractor(imagePaths);
@@ -534,10 +537,10 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const routed = await routeEnrichedExtract(enrichedExtract, run.intent ?? "technology", {
       classifier: opts.classifier,
       technology: async (sharedExtract) => {
-        const researchResult = await runResearch(sharedExtract);
         const implementationMemoryDir = configuredAiMemoryDir && fs.existsSync(path.join(configuredAiMemoryDir, "GLOBAL_MEMORY.md"))
           ? configuredAiMemoryDir
           : localDir;
+        const researchResult = await runResearch(sharedExtract, { memoryDir: implementationMemoryDir });
         const implementationResult = await runImplementation(sharedExtract, researchResult, implementationMemoryDir);
         const composed = composeFinding({ extract: sharedExtract, research: researchResult, implementation: implementationResult });
         const write = await activeRepo.writeFindingForSource({ sourceUrl: url, filename: composed.filename, body: composed.body, date: today });
@@ -764,9 +767,7 @@ export function buildSocialVideoEvidence(input: {
       method: input.extract.transcript_source ?? undefined,
       segments: transcriptSegments,
     },
-    visualTexts: input.extract.visual_text?.trim()
-      ? [{ text: input.extract.visual_text, method: input.extract.visual_text_source ?? undefined }]
-      : [],
+    visualTexts: visualEvidence(input.extract),
     extraction: { methods: [...methods], warnings: input.extract.extraction_warnings ?? [] },
     financeClaims: {
       securities: securities.map((security) => ({

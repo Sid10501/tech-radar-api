@@ -88,16 +88,13 @@ describe("runResearch()", () => {
     });
 
     // Mock the github tool so we can track calls without hitting the real API
-    vi.mock("../../src/tools/github.js", () => ({
-      githubLookup: vi.fn(async (repo: string) => {
+    vi.mock("../../src/githubGrounding.js", () => ({
+      lookupGithubGrounded: vi.fn(async (repo: string) => {
         githubLookupCalls.push(repo);
         return {
-          stars: 32000,
-          lastPushed: "2026-04-01T00:00:00Z",
-          openIssues: 42,
-          language: "TypeScript",
-          license: "MIT",
-          archived: false,
+          repo,
+          signals: { github_stars: 32000, last_pushed: "2026-04-01T00:00:00Z", open_issues: 42, license: "MIT", archived: false },
+          evidence: { id: 'github-metadata', kind: 'metadata', url: `https://github.com/${repo}`, retrieved_at: '2026-09-12T00:00:00Z', published_at: null, excerpt: 'Metadata only' },
         };
       }),
     }));

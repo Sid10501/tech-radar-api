@@ -44,6 +44,19 @@ describe("extract()", () => {
     expect(result.hashtags).toEqual(["ai", "dev"]);
   });
 
+  it("scopes the YouTube visual opt-in to the extraction subprocess", async () => {
+    const { extract } = await import("../src/extract.js");
+    const previous = process.env.YOUTUBE_VISUAL_ENABLED;
+    vi.mocked(childProcess.execFile).mockImplementation((_file, _args, options, callback: any) => {
+      const enabled = (options as any).env?.YOUTUBE_VISUAL_ENABLED;
+      callback(null, JSON.stringify({ status: "ok", media_assets: enabled === "1" ? [{ type: "screenshot" }] : [] }), "");
+      return {} as any;
+    });
+    expect((await extract("https://youtu.be/abc", { youtubeVisuals: true })).media_assets).toHaveLength(1);
+    expect((await extract("https://youtu.be/abc", { youtubeVisuals: false })).media_assets).toHaveLength(0);
+    expect(process.env.YOUTUBE_VISUAL_ENABLED).toBe(previous);
+  });
+
   it("expands extracted shortlinks before returning evidence", async () => {
     vi.resetModules();
     const fetcher = vi.fn(async (url: string) => {

@@ -9,6 +9,9 @@ import { runPipeline, runMediaPipeline, getRun, listRuns, hydrateRunsFromInbox, 
 import { MAX_LOCAL_MEDIA_BYTES } from "./localMedia.js";
 import { handleTelegramUpdate } from "./telegram.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
+import { LabStore } from "./lab.js";
+import { captureDiscussion } from "./labSources.js";
+import { registerLabRoutes } from "./labRoutes.js";
 import {
   getAiMemoryDir,
   getFindingDetail,
@@ -170,7 +173,7 @@ async function ensureAiMemoryCheckout(): Promise<void> {
 
 type EventReservationStore = Pick<StockBotEventDeduper, "begin" | "state" | "markApplied" | "forget"> & Partial<Pick<StockBotEventDeduper, "startHeartbeat">>;
 
-export function buildServer(dependencies: { callbackEvents?: EventReservationStore; consumedUploadTokens?: EventReservationStore } = {}) {
+export function buildServer(dependencies: { callbackEvents?: EventReservationStore; consumedUploadTokens?: EventReservationStore; labStore?: LabStore; captureDiscussion?: typeof captureDiscussion } = {}) {
   if (process.env["NODE_ENV"] === "production") {
     const configured = process.env["RUN_STATE_DIR"];
     const resolved = configured ? path.resolve(configured) : "";
@@ -179,6 +182,13 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
       throw new Error("production RUN_STATE_DIR must be configured on persistent storage");
     }
     if (!process.env["AUTH_TOKEN"]?.trim()) throw new Error("production AUTH_TOKEN must be configured for private owner surfaces");
+    const labDirectory = process.env["LAB_STATE_DIR"]?.trim();
+    if (labDirectory) {
+      const labResolved = path.resolve(labDirectory);
+      if (labResolved === temporaryRoot || labResolved.startsWith(`${temporaryRoot}${path.sep}`) || labResolved === "/tmp" || labResolved.startsWith("/tmp/") || labResolved === "/private/tmp" || labResolved.startsWith("/private/tmp/")) {
+        throw new Error("production LAB_STATE_DIR must use persistent storage");
+      }
+    }
   }
   const app = Fastify({ logger: true });
   app.register(multipart, { limits: { files: 1, fileSize: MAX_LOCAL_MEDIA_BYTES, fields: 10, parts: 11 } });
@@ -269,6 +279,8 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
       return reply.code(204).send();
     }
   });
+
+  registerLabRoutes(app, dependencies.labStore ?? new LabStore(process.env["LAB_STATE_DIR"]?.trim() || path.join(process.env["RUN_STATE_DIR"] ?? os.tmpdir(), "lab")), isOwnerAuthorized, dependencies.captureDiscussion);
 
   app.get("/healthz", async () => {
     return { ok: true };

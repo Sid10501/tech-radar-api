@@ -332,3 +332,25 @@ Copy `CLAUDE.example.md` → `CLAUDE.md` and `MEMORY.example.md` → `MEMORY.md`
 ## License
 
 MIT
+
+## Community Lab and Project Universe
+
+Open `/lab` to capture a public GitHub issue, GitHub Discussion, or Hacker News item, review its bounded source snapshot, write a project brief, and record a measurable experiment. The editor is manual: it never treats a comment as a reproduced bug or invents a result. Select captured evidence, optionally add a real portfolio project slug and radar finding filenames, then save. New briefs start private. The publication checkbox explicitly publishes the full reviewed brief and only referenced source metadata; raw source bodies and comments stay private. Unchecking it removes the brief from subsequent public feed requests.
+
+- `GET /api/lab`: owner-only captured evidence and briefs.
+- `POST /api/lab/capture`: `{ "url": "https://github.com/owner/repo/issues/123" }`; GitHub Discussions additionally requires `GITHUB_TOKEN`.
+- `POST /api/lab/briefs`: create a schema-validated brief. A completed experiment needs both a result and HTTP(S) evidence links.
+- `PATCH /api/lab/briefs/:id`: full brief input plus `expectedUpdatedAt`; stale writes return 409.
+- `GET /api/public/lab`: version 1 public projection, with `Cache-Control: no-store` and existing public-feed CORS policy.
+
+Every private Lab endpoint requires `AUTH_TOKEN`, even in development. Capture only requests the fixed GitHub/HN APIs, caps response size and comments, labels partial coverage, and never renders source HTML. GitHub REST capture is unauthenticated to enforce public-only access; authenticated Discussions capture rejects private repositories. GitHub issue capture is bounded to 20 comments; Discussions to 10 parent comments/5 replies each with 20 total; HN to 12 reply requests. Only one capture runs at a time per server. Storage is limited to 500 sources, 500 briefs, and 16 MiB.
+
+Set `LAB_STATE_DIR` to persistent private storage, or it defaults to `$RUN_STATE_DIR/lab` (temporary storage only for local development when no run directory is configured). Back up `community-lab.json`. Writes use schema validation, private permissions, atomic rename, and optimistic edit versions. Run **one API writer process** per Lab directory; file storage does not coordinate multiple replicas. Atomic rename and directory fsync support are required (macOS/Linux); unsupported filesystems fail visibly. If a save acknowledgement fails, reload before retrying because the rename may already have completed. A corrupt store fails closed and is not silently replaced. These records are separate from AI Memory git history so private drafts are not pushed into a public archive.
+
+The portfolio `/universe` consumes `/api/public/lab` from its existing radar API setting. Connections derive from recorded project/finding/evidence IDs and saved application links. Missing or unreachable Lab data is explicitly unavailable; no sample experiments are substituted. A project/finding reference is an owner assertion and must match a real slug/filename; the API validates syntax and the portfolio omits dangling connections.
+
+## Research and video evidence controls
+
+Set `RESEARCH_DEEP_REVIEW=1` to add bounded primary README, release, and issue review. Collector-owned source receipts and retrieval limitations accompany each finding. Unknown metadata remains null; `source_verified` verifies an exact quotation, not upstream functionality. The research model cannot mark work locally tested, and generated implementation code stays labeled pseudocode. Checked-in dated project manifests under AI Memory `projects/` supply stack context; refresh them when dependencies or architecture change.
+
+Set `YOUTUBE_VISUAL_ENABLED=1` to enable bounded YouTube visual acquisition; caption-first remains the default. Frame selection spans the full known duration and preserves decoded timestamps through OCR, vision evidence, and the research prompt. The synthetic benchmark in `docs/benchmarks/` measures late-frame coverage and sampling latency. Its separate twelve-source protocol must be run with labels before claiming better semantic quality or switching scrapers.

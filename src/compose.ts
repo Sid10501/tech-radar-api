@@ -27,7 +27,7 @@ export function composeFinding(input: {
     ...(extract.hashtags ?? []).slice(0, 3),
   ].filter(Boolean).join(", ");
 
-  const starsFormatted = research.viability_signals.github_stars.toLocaleString("en-US");
+  const starsFormatted = research.viability_signals.github_stars?.toLocaleString("en-US") ?? "unknown";
 
   const links: string[] = [];
   if (research.links.github) links.push(`- Repo: ${research.links.github}`);
@@ -122,13 +122,25 @@ ${workflowAuditSection}
 - Why it matters: ${research.why}
 - How it compares to alternatives:
 ${comparisons}
-- GitHub stars: ${starsFormatted} · License: ${research.viability_signals.license ?? "unknown"} · Archived: ${research.viability_signals.archived ? "yes" : "no"}
+- GitHub stars: ${starsFormatted} · License: ${research.viability_signals.license ?? "unknown"} · Archived: ${research.viability_signals.archived === null ? "unknown" : research.viability_signals.archived ? "yes" : "no"}
 
 ## Links
 
 ${links.join("\n")}
 
+## Research evidence
+
+${(research.grounding_warnings ?? []).map(warning => `- Review limitation: ${warning}`).join("\n")}
+
+General descriptions are reported, not independently tested. source_verified means the exact quotation was found in retrieved source text; it does not establish that an upstream claim works locally.
+- Identity: ${research.identity?.status ?? "unresolved"} · Basis: ${research.identity?.basis ?? "unresolved"}
+${(research.identity?.finding_ids ?? []).map(id => `- Prior finding: ${id}`).join("\n")}
+${(research.claims ?? []).map(claim => `- ${claim.status}: ${claim.statement} (evidence: ${claim.evidence_ids.join(", ") || "none"})`).join("\n")}
+${(research.evidence ?? []).map(source => `- [${source.id}](${source.url}) · ${source.kind} · retrieved ${source.retrieved_at} · published ${source.published_at ?? "unknown"}\n  Source excerpt: ${source.excerpt.slice(0, 1200).replace(/\n/g, " ")}`).join("\n")}
+
 ## Kickstarter guide
+
+Pseudocode / untested proposal. Check current upstream instructions and the target project before execution.
 
 ${research.kickstarter}
 
@@ -139,6 +151,8 @@ ${research.kickstarter}
 - Verdict: \`${verdict}\`
 
 ## Implementation Idea
+
+Pseudocode / untested proposal; no local execution was performed by the recommendation agent.
 
 ${implementation.implementation_idea_markdown.trim()}
 

@@ -99,7 +99,8 @@ describe("runImplementation()", () => {
     });
 
     // Mock ai_memory tools — track reads
-    vi.mock("../../src/tools/ai_memory.js", () => ({
+    vi.mock("../../src/tools/ai_memory.js", async (importOriginal) => ({
+      ...await importOriginal<typeof import("../../src/tools/ai_memory.js")>(),
       readAiMemory: vi.fn(async (filePath: string, _memoryDir?: string) => {
         memoryFilesRead.push(filePath);
         if (filePath === "GLOBAL_MEMORY.md") {

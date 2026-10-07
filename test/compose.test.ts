@@ -222,3 +222,12 @@ describe("composeFinding() display header", () => {
     expect(body).not.toContain("**Display:**");
   });
 });
+
+it('persists unknown metrics, evidence provenance, and pseudocode labels without upgrading legacy claims', async () => {
+  const { composeFinding } = await import('../src/compose.js');
+  const { body } = composeFinding({ extract: extractFixture, implementation: implementationFixture,
+    research: { ...researchFixture, viability_signals: { ...researchFixture.viability_signals, github_stars: null, archived: null }, claims: [{ statement: 'Runs on Python.', status: 'source_verified', evidence_ids: ['readme'], quoted_text: 'Runs on Python.' }], evidence: [{ id: 'readme', kind: 'readme', url: 'https://github.com/acme/tool/blob/main/README.md', retrieved_at: '2026-09-12T00:00:00Z', published_at: null, excerpt: 'Runs on Python.' }] } });
+  expect(body).toContain('GitHub stars: unknown'); expect(body).toContain('Archived: unknown');
+  expect(body).toContain('source_verified'); expect(body).toContain('retrieved 2026-09-12');
+  expect(body).toContain('Pseudocode / untested proposal'); expect(body).toContain('General descriptions are reported');
+});

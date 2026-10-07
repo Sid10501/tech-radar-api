@@ -45,6 +45,7 @@ import queue
 import html
 import ipaddress
 import json
+import math
 import os
 import re
 import shutil
@@ -53,6 +54,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse, quote
 
@@ -971,84 +973,104 @@ def probe_video_duration(video_path: Path) -> float | None:
 
 
 def frame_sample_interval(duration_sec: float | None, max_frames: int) -> float:
+    """Configured spacing is a minimum; a bounded budget still covers the full duration."""
     configured_interval = os.getenv("OCR_FRAME_INTERVAL_SEC")
-    if configured_interval and configured_interval.strip():
-        return _float_env("OCR_FRAME_INTERVAL_SEC", 2.0, 0.5, 10.0)
-    if isinstance(duration_sec, (int, float)) and duration_sec > 0:
-        return max(0.5, min(10.0, duration_sec / max_frames))
-    return 2.0
+    minimum = _float_env("OCR_FRAME_INTERVAL_SEC", 2.0, 0.5, 10.0) if configured_interval and configured_interval.strip() else 0.5
+    if isinstance(duration_sec, (int, float)) and math.isfinite(duration_sec) and duration_sec > 0:
+        return max(minimum, duration_sec / max(1, max_frames))
+    return max(2.0, minimum)
+
+
+def sample_video_frames(video_path: Path, out_dir: Path, duration_sec: float | None = None) -> tuple[list[dict], str | None]:
+    """Seek to bounded uniform midpoints; record decoded PTS, never a guessed timestamp."""
+    if not shutil.which("ffmpeg"):
+        return [], "ocr skipped: ffmpeg not installed"
+    if not video_path.exists():
+        return [], "ocr skipped: video file missing"
+    duration = probe_video_duration(video_path) or duration_sec
+    known_duration = isinstance(duration, (int, float)) and math.isfinite(duration) and duration > 0
+    if known_duration and duration > 1800:
+        return [], "duration_limit: media exceeds 1800 seconds"
+    max_frames = _int_env("OCR_MAX_FRAMES", 8, 1, 20)
+    interval = frame_sample_interval(duration, max_frames)
+    times = [(i + 0.5) * interval for i in range(max_frames) if (i + 0.5) * interval < duration] if known_duration else [i * interval for i in range(max_frames)]
+    if not times:
+        times = [0.0]
+    frames_dir = out_dir / "ocr-frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    # A repeated extraction must never expose stale frames from an earlier attempt.
+    for previous in frames_dir.glob("frame-*.png"):
+        previous.unlink()
+    index_path = frames_dir / "index.json"
+    index_path.write_text("[]")
+    frames: list[dict] = []
+    warning = None if known_duration else "frame coverage limited: video duration unavailable"
+    deadline = time.monotonic() + _float_env("OCR_FFMPEG_TIMEOUT_SEC", 30.0, 1.0, 180.0)
+    for index, timestamp in enumerate(times, 1):
+        frame = frames_dir / f"frame-{index:03d}.png"
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("frame extraction budget exhausted")
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "info", "-nostdin", "-y",
+                 "-ss", str(timestamp), "-copyts", "-start_at_zero", "-i", str(video_path),
+                 "-map", "0:v:0", "-vf", "scale=960:-1,showinfo", "-frames:v", "1",
+                 "-fps_mode", "passthrough", "-update", "1", str(frame)],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=remaining,
+            )
+            if not frame.is_file():
+                continue
+            match = re.search(r"\bn:\s*0\s+pts:.*?\bpts_time:([0-9.eE+\-]+)", result.stderr)
+            pts = float(match.group(1)) if match else None
+            timestamp_ms = round(pts * 1000) if pts is not None and math.isfinite(pts) and 0 <= pts <= 1800 else None
+            frames.append({"file": frame.name, "timestamp_ms": timestamp_ms, "ocr_text": None})
+            index_path.write_text(json.dumps(frames))
+        except Exception as error:
+            if frame.exists():
+                frame.unlink()
+            warning = f"ocr frame extraction error: {error.__class__.__name__}: {error}"
+            break
+    return frames, warning
 
 
 def extract_visual_text(video_path: Path, out_dir: Path, duration_sec: float | None = None) -> tuple[str | None, str | None]:
-    """Sample a few video frames and OCR visible text with tesseract."""
-    if not shutil.which("ffmpeg"):
-        return None, "ocr skipped: ffmpeg not installed"
+    """Keep per-frame OCR with its timestamp, plus a backwards-compatible aggregate."""
+    frames, warning = sample_video_frames(video_path, out_dir, duration_sec)
+    if not frames:
+        return None, warning
     if not shutil.which("tesseract"):
-        return None, "ocr skipped: tesseract not installed"
-    if not video_path.exists():
-        return None, "ocr skipped: video file missing"
-
-    max_frames = _int_env("OCR_MAX_FRAMES", 8, 1, 20)
-    interval = frame_sample_interval(duration_sec or probe_video_duration(video_path), max_frames)
+        return None, warning or "ocr skipped: tesseract not installed"
     frames_dir = out_dir / "ocr-frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                str(video_path),
-                "-vf",
-                f"fps=1/{interval},scale=960:-1",
-                "-frames:v",
-                str(max_frames),
-                str(frames_dir / "frame-%03d.png"),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=_float_env("OCR_FFMPEG_TIMEOUT_SEC", 30.0, 1.0, 180.0),
-        )
-    except Exception as e:
-        return None, f"ocr frame extraction error: {e.__class__.__name__}: {e}"
-
     blocks: list[str] = []
-    for frame in sorted(frames_dir.glob("frame-*.png")):
+    for frame in frames:
         try:
             result = subprocess.run(
-                ["tesseract", str(frame), "stdout", "--psm", "6"],
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
+                ["tesseract", str(frames_dir / frame["file"]), "stdout", "--psm", "6"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
                 timeout=_float_env("OCR_TESSERACT_TIMEOUT_SEC", 20.0, 1.0, 120.0),
             )
+            frame["ocr_text"] = merge_text_blocks([result.stdout]) or None
+            blocks.append(frame["ocr_text"] or "")
         except Exception:
-            continue
-        blocks.append(result.stdout)
-
-    text = merge_text_blocks(blocks)
-    return text or None, None
+            warning = warning or "ocr incomplete: one or more sampled frames could not be read"
+    (frames_dir / "index.json").write_text(json.dumps(frames))
+    return merge_text_blocks(blocks) or None, warning
 
 
 def ocr_frame_assets(out_dir: Path) -> list[dict]:
-    """Expose sampled video frames so a later vision pass sees the video, not only its thumbnail."""
+    """Only expose local sampled files, retaining frame-level text and source time."""
+    frames_dir = out_dir / "ocr-frames"
+    try:
+        records = json.loads((frames_dir / "index.json").read_text())
+        metadata = {entry["file"]: entry for entry in records if isinstance(entry, dict) and isinstance(entry.get("file"), str)}
+    except (OSError, ValueError, TypeError):
+        metadata = {}
     return [
-        {
-            "type": "screenshot",
-            "source": "video-frame",
-            "path": str(frame),
-            "url": None,
-            "ocr_text": None,
-            "confidence": "medium",
-        }
-        for frame in sorted((out_dir / "ocr-frames").glob("frame-*.png"))
-        if frame.is_file()
+        {"type": "screenshot", "source": "video-frame", "path": str(frame), "url": None,
+         "ocr_text": metadata.get(frame.name, {}).get("ocr_text"),
+         "timestamp_ms": metadata.get(frame.name, {}).get("timestamp_ms"), "confidence": "medium"}
+        for frame in sorted(frames_dir.glob("frame-*.png"))[:20] if frame.is_file()
     ]
 
 
@@ -1079,7 +1101,7 @@ def extract_local_file(file_path: Path, out_dir: Path, source_id: str, do_transc
         if visual:
             result["visual_text"], result["visual_text_source"] = visual, "ocr"
             result["extraction_methods"].append("tesseract:ocr")
-        elif error:
+        if error:
             errors.append(error)
     result["status"] = "ok" if result["transcript"] or result["visual_text"] else "partial"
     if errors:
@@ -1166,7 +1188,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         url,
         out_dir,
         want_audio=do_transcribe and not prefer_subtitles,
-        want_video=do_ocr and platform != "youtube",
+        want_video=do_ocr and (platform != "youtube" or os.getenv("YOUTUBE_VISUAL_ENABLED", "").strip() == "1"),
         want_subtitles=False,
         max_comments=0,
     )
@@ -1180,7 +1202,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         if cli_err and not info:
             errors.append(cli_err)
 
-    if yt_err and not info:
+    if yt_err:
         errors.append(yt_err)
 
     html_meta: dict | None = None
@@ -1255,7 +1277,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         elif sub_err:
             errors.append(sub_err)
 
-    if do_transcribe and not result["transcript"] and platform == "youtube":
+    if do_transcribe and not result["transcript"] and platform == "youtube" and not audio_path:
         retry_info, retry_audio, _retry_video, retry_err = run_ytdlp(
             url,
             out_dir,
@@ -1303,7 +1325,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
     visual_blocks: list[str] = []
     if do_ocr and video_path and video_path.exists():
         visual_text, ocr_err = extract_visual_text(video_path, out_dir, result.get("duration_sec"))
-        frame_assets = ocr_frame_assets(out_dir)
+        result["media_assets"].extend(ocr_frame_assets(out_dir))
         if visual_text:
             visual_blocks.append(visual_text)
             result["media_assets"].append({
@@ -1314,12 +1336,9 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 "ocr_text": visual_text,
                 "confidence": "medium",
             })
-            result["media_assets"].extend(frame_assets)
             result["extraction_methods"].append("tesseract:ocr")
-        elif ocr_err:
+        if ocr_err:
             errors.append(ocr_err)
-        else:
-            result["media_assets"].extend(frame_assets)
 
     if do_ocr:
         image_urls = collect_image_urls(info, html_meta)

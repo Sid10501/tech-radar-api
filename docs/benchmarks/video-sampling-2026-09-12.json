@@ -1,0 +1,362 @@
+{
+  "schema_version": 1,
+  "scope": "locally_tested synthetic color-event coverage; no semantic accuracy measurement",
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "python": "3.14.7",
+    "ffmpeg": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "controls": {
+    "max_frames": 8,
+    "width": 960,
+    "source_fps": 2,
+    "ocr": false,
+    "vision": false,
+    "network": false,
+    "paid_api_calls": 0,
+    "repeats": 3
+  },
+  "cases": [
+    {
+      "duration_seconds": 2,
+      "late_event_start_seconds": 1.5,
+      "source_bytes": 1713,
+      "source_sha256": "7f0da2bea9e294d2ca5bf513d8f9db4b9bccd5850add17afa858a04b749d034c",
+      "old": {
+        "cached_sampling_seconds": [
+          0.035149,
+          0.033206,
+          0.041012
+        ],
+        "median_seconds": 0.035149,
+        "attempts": [
+          {
+            "frame_count": 4,
+            "late_frames": 1,
+            "timestamps_ms": null,
+            "warning": null
+          },
+          {
+            "frame_count": 4,
+            "late_frames": 1,
+            "timestamps_ms": null,
+            "warning": null
+          },
+          {
+            "frame_count": 4,
+            "late_frames": 1,
+            "timestamps_ms": null,
+            "warning": null
+          }
+        ]
+      },
+      "current": {
+        "cached_sampling_seconds": [
+          0.152154,
+          0.15765,
+          0.154416
+        ],
+        "median_seconds": 0.154416,
+        "attempts": [
+          {
+            "frame_count": 3,
+            "late_frames": 1,
+            "timestamps_ms": [
+              500,
+              1000,
+              1500
+            ],
+            "warning": null
+          },
+          {
+            "frame_count": 3,
+            "late_frames": 1,
+            "timestamps_ms": [
+              500,
+              1000,
+              1500
+            ],
+            "warning": null
+          },
+          {
+            "frame_count": 3,
+            "late_frames": 1,
+            "timestamps_ms": [
+              500,
+              1000,
+              1500
+            ],
+            "warning": null
+          }
+        ]
+      }
+    },
+    {
+      "duration_seconds": 24,
+      "late_event_start_seconds": 19.0,
+      "source_bytes": 2329,
+      "source_sha256": "8f9bc8da26617b4264b6a41090f8ffe2f0a772b582a88e5b68c618e706a366fc",
+      "old": {
+        "cached_sampling_seconds": [
+          0.038038,
+          0.038577,
+          0.038078
+        ],
+        "median_seconds": 0.038078,
+        "attempts": [
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": null,
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": null,
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": null,
+            "warning": null
+          }
+        ]
+      },
+      "current": {
+        "cached_sampling_seconds": [
+          0.313991,
+          0.301398,
+          0.308702
+        ],
+        "median_seconds": 0.308702,
+        "attempts": [
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              1500,
+              4500,
+              7500,
+              10500,
+              13500,
+              16500,
+              19500,
+              22500
+            ],
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              1500,
+              4500,
+              7500,
+              10500,
+              13500,
+              16500,
+              19500,
+              22500
+            ],
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              1500,
+              4500,
+              7500,
+              10500,
+              13500,
+              16500,
+              19500,
+              22500
+            ],
+            "warning": null
+          }
+        ]
+      }
+    },
+    {
+      "duration_seconds": 300,
+      "late_event_start_seconds": 240.0,
+      "source_bytes": 10186,
+      "source_sha256": "738025b8160584a46b729e88524cbddafcccbf0328ddc93982c04f0d2b2b3321",
+      "old": {
+        "cached_sampling_seconds": [
+          0.039366,
+          0.040424,
+          0.037815
+        ],
+        "median_seconds": 0.039366,
+        "attempts": [
+          {
+            "frame_count": 8,
+            "late_frames": 0,
+            "timestamps_ms": null,
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 0,
+            "timestamps_ms": null,
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 0,
+            "timestamps_ms": null,
+            "warning": null
+          }
+        ]
+      },
+      "current": {
+        "cached_sampling_seconds": [
+          0.325317,
+          0.320404,
+          0.317085
+        ],
+        "median_seconds": 0.320404,
+        "attempts": [
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              19000,
+              56500,
+              94000,
+              131500,
+              169000,
+              206500,
+              244000,
+              281500
+            ],
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              19000,
+              56500,
+              94000,
+              131500,
+              169000,
+              206500,
+              244000,
+              281500
+            ],
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              19000,
+              56500,
+              94000,
+              131500,
+              169000,
+              206500,
+              244000,
+              281500
+            ],
+            "warning": null
+          }
+        ]
+      }
+    },
+    {
+      "duration_seconds": 1800,
+      "late_event_start_seconds": 1440.0,
+      "source_bytes": 52964,
+      "source_sha256": "b1ad519275ca6488b135f00e126148d3848253b6b40305e6881611543efd4348",
+      "old": {
+        "cached_sampling_seconds": [
+          0.041432,
+          0.043665,
+          0.038922
+        ],
+        "median_seconds": 0.041432,
+        "attempts": [
+          {
+            "frame_count": 8,
+            "late_frames": 0,
+            "timestamps_ms": null,
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 0,
+            "timestamps_ms": null,
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 0,
+            "timestamps_ms": null,
+            "warning": null
+          }
+        ]
+      },
+      "current": {
+        "cached_sampling_seconds": [
+          0.320445,
+          0.314643,
+          0.315942
+        ],
+        "median_seconds": 0.315942,
+        "attempts": [
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              112500,
+              337500,
+              562500,
+              787500,
+              1012500,
+              1237500,
+              1462500,
+              1687500
+            ],
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              112500,
+              337500,
+              562500,
+              787500,
+              1012500,
+              1237500,
+              1462500,
+              1687500
+            ],
+            "warning": null
+          },
+          {
+            "frame_count": 8,
+            "late_frames": 2,
+            "timestamps_ms": [
+              112500,
+              337500,
+              562500,
+              787500,
+              1012500,
+              1237500,
+              1462500,
+              1687500
+            ],
+            "warning": null
+          }
+        ]
+      }
+    }
+  ]
+}

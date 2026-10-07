@@ -78,6 +78,8 @@ export interface ExtractedMediaAsset {
   path?: string | null;
   url?: string | null;
   ocr_text?: string | null;
+  /** Decoded frame presentation time from the start of the video; absent for untimed assets. */
+  timestamp_ms?: number | null;
   confidence?: "high" | "medium" | "low";
 }
 
@@ -146,6 +148,8 @@ function resolveScriptPath(): string {
 
 export interface ExtractOptions extends ResolveShortlinkOptions {
   outDir?: string;
+  /** Request bounded YouTube frames after judging caption-only intake insufficient. */
+  youtubeVisuals?: boolean;
 }
 
 export async function extract(url: string, options: ExtractOptions = {}): Promise<ExtractResult> {
@@ -155,7 +159,10 @@ export async function extract(url: string, options: ExtractOptions = {}): Promis
   const scriptPath = resolveScriptPath();
 
   return new Promise((resolve, reject) => {
-    execFile("bash", [scriptPath, url, ...(options.outDir ? [options.outDir] : [])], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const env = options.youtubeVisuals === undefined ? process.env : {
+      ...process.env, YOUTUBE_VISUAL_ENABLED: options.youtubeVisuals ? "1" : "0",
+    };
+    execFile("bash", [scriptPath, url, ...(options.outDir ? [options.outDir] : [])], { maxBuffer: 10 * 1024 * 1024, env }, (err, stdout, stderr) => {
       if (err) {
         if (stdout.trim()) {
           try {

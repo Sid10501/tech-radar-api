@@ -101,7 +101,7 @@ describe("social-video runner routing", () => {
         sampledFrames[0]!,
       ],
     }, cappedVision);
-    expect(cappedVision).toHaveBeenCalledWith(sampledFrames.slice(0, 8).map(({ path }) => path));
+    expect(cappedVision).toHaveBeenCalledWith([1, 2, 4, 5, 6, 7, 9, 10].map((n) => `/tmp/frame-${n}.png`));
 
     const genericVision = vi.fn(async () => ({ text: "generic OCR", warning: null }));
     await withVisionFallback({
@@ -110,7 +110,7 @@ describe("social-video runner routing", () => {
       visual_text_source: null,
       media_assets: sampledFrames,
     }, genericVision);
-    expect(genericVision).toHaveBeenCalledWith(sampledFrames.slice(0, 4).map(({ path }) => path));
+    expect(genericVision).toHaveBeenCalledWith([1, 4, 7, 10].map((n) => `/tmp/frame-${n}.png`));
 
     const nonfinanceVision = vi.fn(async () => ({ text: "should not be used", warning: null }));
     await withVisionFallback({
@@ -185,6 +185,34 @@ describe("social-video runner routing", () => {
     expect(evidence.financeClaims.securities[0].claims.length).toBeGreaterThanOrEqual(3);
     expect(evidence.financeClaims.securities[0].claims.some((claim) => claim.startMs === undefined)).toBe(true);
     expect(evidence.financeClaims.securities[0].claims.some((claim) => claim.startMs === 0)).toBe(true);
+  });
+
+  it("preserves timestamped frame OCR without attributing aggregate vision output to a frame", () => {
+    const evidence = buildSocialVideoEvidence({
+      extract: { ...enriched, duration_sec: 300, media_assets: [
+        { type: "screenshot", source: "video-frame", timestamp_ms: 281500, ocr_text: "Late repository name", path: "/private/source/frame.png" },
+      ] },
+      classification: { category: "mixed", confidence: 0.9, reasons: ["signals"] },
+      runId: "timestamped", canonicalUrl: enriched.url, origin: { channel: "telegram" },
+    });
+    expect(evidence.visualTexts).toEqual([
+      { text: "Late repository name", timestampMs: 281500, method: "ocr" },
+      { text: enriched.visual_text, method: "vision_ocr" },
+    ]);
+    expect(JSON.stringify(evidence)).not.toContain("/private/");
+  });
+
+  it("bounds frame OCR evidence and does not invent valid times for invalid timestamps", () => {
+    const evidence = buildSocialVideoEvidence({
+      extract: { ...enriched, visual_text: null, media_assets: Array.from({ length: 20 }, () => ({
+        type: "screenshot" as const, source: "video-frame", timestamp_ms: 1800001, ocr_text: "a".repeat(6000),
+      })) },
+      classification: { category: "mixed", confidence: 0.9, reasons: ["signals"] },
+      runId: "bounded", canonicalUrl: enriched.url, origin: { channel: "telegram" },
+    });
+    expect(evidence.visualTexts.length).toBeGreaterThan(0);
+    expect(evidence.visualTexts.reduce((sum, item) => sum + item.text.length, 0)).toBeLessThanOrEqual(50000);
+    expect(evidence.visualTexts.every((item) => item.text.length <= 4000 && item.timestampMs === undefined)).toBe(true);
   });
 
   it("extracts an ordered ETF ticker list from finance-context visual text", () => {

@@ -899,6 +899,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       <div class="logo"><div class="mark">TR</div><div>Tech Radar</div></div>
       <input id="search" class="search" placeholder="Search findings, tools, sources, or project fit">
       <div class="top-actions">
+        <a href="/lab" class="button" style="text-decoration:none"><span class="wide-label">Community Lab</span><span class="short-label">Lab</span></a>
         <button id="release-notes" class="button"><span class="wide-label">Release notes</span><span class="short-label">Notes</span></button>
         <button id="refresh" class="button" title="Refresh findings"><span class="wide-label">Refresh</span><span class="short-label">Refresh</span></button>
         <button id="unlock" class="button"><span class="wide-label">Unlock</span><span class="short-label">Unlock</span></button>
