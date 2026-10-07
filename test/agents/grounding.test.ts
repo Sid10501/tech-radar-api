@@ -12,7 +12,7 @@ const extract = { url: 'https://www.instagram.com/reel/example', title: 'A tool'
 it('provides bounded untrusted prior identity before the first model pass and preserves it in the result', async () => {
   const dir = await memory(); await fs.mkdir(path.join(dir, 'tech-radar/findings'), { recursive: true });
   await fs.writeFile(path.join(dir, 'tech-radar/findings/20260615-agent.md'), '# Saved note\n**Display:** Agent Reach — source adapter\n- Repo: https://github.com/Panniantong/Agent-Reach');
-  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(response) }] })); sdk(create);
+  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/Panniantong/Agent-Reach' } }) }] })); sdk(create);
   const { runResearch } = await import('../../src/agents/research.js');
   const result = await runResearch(extract, { memoryDir: dir });
   expect(result.links.github).toBe('https://github.com/Panniantong/Agent-Reach');
@@ -58,6 +58,14 @@ it('uses a repository URL visible in OCR as source-reported identity', async () 
   const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { github: 'https://github.com/acme/tool', docs: null, npm: null } }) }] })); sdk(create);
   const { runResearch } = await import('../../src/agents/research.js');
   const result = await runResearch({ ...extract, visual_text: 'Repo https://github.com/acme/tool' }, { memoryDir: dir });
+  expect(result.identity).toMatchObject({ repo: 'acme/tool', basis: 'source_reported' });
+});
+
+it('accepts source-backed enriched GitHub links as candidates without guessing a primary', async () => {
+  const dir = await memory();
+  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/acme/tool/blob/main/README.md#install' } }) }] })); sdk(create);
+  const { runResearch } = await import('../../src/agents/research.js');
+  const result = await runResearch({ ...extract, visual_text: '', enriched_links: { confirmed: { github: 'https://github.com/acme/tool', docs: null, npm: null }, candidates: [{ kind: 'github', url: 'https://github.com/acme/tool/blob/main/README.md', source: 'visual_text', confidence: 'confirmed', discovered_by: 'explicit' }], warnings: [] } }, { memoryDir: dir });
   expect(result.identity).toMatchObject({ repo: 'acme/tool', basis: 'source_reported' });
 });
 

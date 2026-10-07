@@ -1634,7 +1634,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
             </div>
             <aside class="side">
               <div class="panel"><div class="panel-head">Source check</div><div class="panel-body">
-                <div class="row"><div class="row-label">Confidence</div><div class="badge">\${f.quality.score}/100</div></div>
+                <div class="row"><div class="row-label">Evidence quality</div><div class="badge">\${f.quality.score}/100</div></div>
                 <div class="row"><div class="row-label">Caption</div><div class="badge">\${evidenceBadge(f.evidence.caption)}</div></div>
                 <div class="row"><div class="row-label">Transcript</div><div class="badge">\${evidenceBadge(f.evidence.transcript)}</div></div>
                 <div class="row"><div class="row-label">OCR</div><div class="badge">\${evidenceBadge(f.evidence.ocr, "captured", "not captured")}</div></div>

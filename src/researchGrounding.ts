@@ -13,9 +13,16 @@ export interface PriorIdentity {
 export function githubRepo(value: string): string | null {
   if (/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(value) && !value.includes('..') && !value.endsWith('/.')) return value;
   try {
-    const url = new URL(value);
-    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password || url.search || url.hash) return null;
-    return githubRepo(url.pathname.replace(/^\//, '').replace(/\/$/, ''));
+    const url = new URL(value.startsWith('github.com/') ? `https://${value}` : value);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password || url.search) return null;
+    // Reject raw traversal before URL parsing can silently normalize it away.
+    const rawPath = value.replace(/^(?:https:\/\/)?github\.com/i, '').split(/[?#]/, 1)[0];
+    if (rawPath.split('/').some(segment => segment === '.' || segment === '..' || /%2e|%2f|%5c/i.test(segment))) return null;
+    const match = url.pathname.match(/^\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([A-Za-z0-9_.-]{1,100})(?:\/(.*))?\/?$/);
+    if (!match || match[2].includes('..') || match[2] === '.') return null;
+    const tail = match[3] ?? '';
+    if (tail && !/^README\.md$/i.test(tail) && !/^blob\/(?:[^/]+\/)+[^/]+$/.test(tail)) return null;
+    return `${match[1]}/${match[2]}`;
   } catch { return null; }
 }
 
@@ -61,10 +68,9 @@ export interface GroundingContext {
 export function finalizeResearch(output: ResearchOutput, context: GroundingContext): ResearchOutput {
   const repos = [...new Map(context.prior.map(item => [item.repo.toLowerCase(), item.repo])).values()];
   const selected = output.links.github ? githubRepo(output.links.github) : null;
+  const archiveRepo = selected ? repos.find(candidate => candidate.toLowerCase() === selected.toLowerCase()) ?? null : null;
   const selectedCandidate = selected && context.candidateRepos?.some(candidate => candidate.toLowerCase() === selected.toLowerCase()) ? selected : null;
-  // A sole incidental link can be a dependency or comparison. Require explicit selection.
-  const archiveRepo = repos.length === 1 ? repos[0] : null;
-  const repo = context.sourceRepo ?? archiveRepo ?? selectedCandidate;
+  const repo = context.sourceRepo ?? selectedCandidate ?? archiveRepo;
   const evidence = context.evidence;
   const claims = (output.claims ?? [{ statement: output.what.slice(0, 2000), status: 'reported' as const, evidence_ids: [] }]).map(claim => {
     const ids = claim.evidence_ids.filter(id => evidence.some(item => item.id === id));
@@ -73,7 +79,7 @@ export function finalizeResearch(output: ResearchOutput, context: GroundingConte
   });
   return ResearchOutputSchema.parse({ ...output,
     links: { ...output.links, github: repo ? `https://github.com/${repo}` : null },
-    identity: { status: repo ? 'resolved' : 'unresolved', repo, basis: context.sourceRepo ? 'source_reported' : archiveRepo ? 'archive_reported' : selectedCandidate ? 'source_reported' : 'unresolved', finding_ids: context.prior.filter(item => item.repo.toLowerCase() === repo?.toLowerCase()).map(item => item.finding_id) },
+    identity: { status: repo ? 'resolved' : 'unresolved', repo, basis: context.sourceRepo || selectedCandidate ? 'source_reported' : archiveRepo ? 'archive_reported' : 'unresolved', finding_ids: context.prior.filter(item => item.repo.toLowerCase() === repo?.toLowerCase()).map(item => item.finding_id) },
     evidence, claims, grounding_warnings: (context.warnings ?? []).slice(0, 12), kickstarter_kind: 'pseudocode',
     viability_signals: repo && context.metrics?.repo.toLowerCase() === repo.toLowerCase() ? context.metrics.signals : { github_stars: null, open_issues: null, last_pushed: null, license: null, archived: null },
   });

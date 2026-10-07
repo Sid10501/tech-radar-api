@@ -64,7 +64,16 @@ export async function captureDiscussion(raw: string, read: Reader = readSourceJs
     title = clip(item.title, 500); body = clip(item.body, 16_000);
     const add = (row: any, parentId?: string) => {
       if (comments.length >= 20) { warnings.push("Comment limit reached; capture is partial"); return; }
-      if (typeof row.id !== "string" || typeof row.body !== "string" || typeof row.url !== "string" || !row.url.startsWith(target.url + "#")) { warnings.push("A malformed comment was omitted"); return; }
+      let sameDiscussion = false;
+      if (typeof row.url === 'string') {
+        try {
+          const url = new URL(row.url);
+          const parts = url.pathname.match(/^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/discussions\/([1-9]\d{0,9})$/);
+          sameDiscussion = url.protocol === 'https:' && url.hostname === 'github.com' && !url.port && !url.username && !url.password && !url.search && /^#discussioncomment-[1-9]\d*$/.test(url.hash)
+            && !!parts && parts[1].toLowerCase() === target.owner.toLowerCase() && parts[2].toLowerCase() === target.repo.toLowerCase() && Number(parts[3]) === target.number;
+        } catch { /* Invalid comment URL. */ }
+      }
+      if (typeof row.id !== "string" || typeof row.body !== "string" || !sameDiscussion) { warnings.push("A malformed comment was omitted"); return; }
       comments.push({ id: row.id.slice(0, 160), ...(parentId ? { parentId } : {}), body: clip(row.body, 4_000), author: clip(row.author?.login, 200), url: row.url });
     };
     if (item.comments?.pageInfo?.hasNextPage) warnings.push("More top-level comments exist; capture is partial");

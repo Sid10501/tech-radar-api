@@ -74,6 +74,22 @@ it('reports snapshot age and rejects future or impossible inspection dates', asy
 it('treats differently cased GitHub archive aliases as the same identity', async () => {
   const { finalizeResearch } = await import('../src/researchGrounding.js');
   const prior = [ { finding_id: 'june', repo: 'Panniantong/Agent-Reach', saved_at: null, title: 'Agent Reach', summary: '' }, { finding_id: 'august', repo: 'panniantong/agent-reach', saved_at: null, title: 'Agent Reach', summary: '' } ];
-  const result = finalizeResearch(legacy, { prior, sourceRepo: null, evidence: [] });
+  const result = finalizeResearch({ ...legacy, links: { ...legacy.links, github: 'https://github.com/panniantong/agent-reach' } }, { prior, sourceRepo: null, evidence: [] });
   expect(result.identity).toMatchObject({ status: 'resolved', finding_ids: ['june', 'august'] });
+});
+
+it('requires explicit archive selection and never replaces a direct source or a different selected candidate', async () => {
+  const { finalizeResearch } = await import('../src/researchGrounding.js');
+  const prior = [{ finding_id: 'old', repo: 'archive/Dependency', saved_at: null, title: 'Dependency', summary: '' }];
+  const context = { prior, sourceRepo: null, candidateRepos: ['acme/NewProduct'], evidence: [] };
+  expect(finalizeResearch(legacy, context).links.github).toBeNull();
+  expect(finalizeResearch({ ...legacy, links: { ...legacy.links, github: 'https://github.com/acme/NewProduct' } }, context).identity?.repo).toBe('acme/NewProduct');
+  expect(finalizeResearch({ ...legacy, links: { ...legacy.links, github: 'https://github.com/archive/Dependency' } }, context).identity?.basis).toBe('archive_reported');
+  expect(finalizeResearch(legacy, { ...context, sourceRepo: 'direct/Primary' }).identity?.repo).toBe('direct/Primary');
+});
+
+it('normalizes safe repository roots, README fragments, blobs, and bare OCR links without accepting host tricks', async () => {
+  const { githubRepo } = await import('../src/researchGrounding.js');
+  for (const link of ['github.com/acme/tool', 'https://github.com/acme/tool#readme', 'https://github.com/acme/tool/blob/main/README.md#install', 'https://github.com/acme/tool/blob/main/src/index.ts', 'https://github.com/acme/tool/README.md']) expect(githubRepo(link)).toBe('acme/tool');
+  for (const link of ['https://github.com.evil.test/acme/tool', 'https://user@github.com/acme/tool', 'http://github.com/acme/tool', 'https://github.com/acme/tool/../other', 'https://github.com/acme/tool/issues/1']) expect(githubRepo(link)).toBeNull();
 });

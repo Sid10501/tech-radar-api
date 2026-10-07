@@ -91,6 +91,7 @@ export async function reviewGithubSources(repoInput: string, options: FetchOptio
           warnings.push(`${kind}: entry ${index + 1} has no usable source text`);
           continue;
         }
+        if (excerpt.length > 12000) warnings.push(`${kind}: entry ${index + 1} excerpt truncated; source coverage is partial`);
         const item = SourceEvidenceSchema.parse({ id: `github-${kind}-${index}`, kind, url, retrieved_at: new Date().toISOString(), published_at: date(data.published_at ?? data.created_at), excerpt: excerpt.slice(0, 12000) });
         evidence.push(item);
       }

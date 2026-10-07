@@ -11,6 +11,29 @@ function runPythonSnippet(code: string): string {
 }
 
 describe("extract_post.py media helpers", () => {
+  it('invalidates old frame assets before every early sampling failure', () => {
+    const output = runPythonSnippet(`
+import json, tempfile
+from pathlib import Path
+from unittest.mock import patch
+from scripts.extract_post import sample_video_frames, ocr_frame_assets
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory)
+    frames = root / 'ocr-frames'
+    frames.mkdir()
+    video = root / 'video.mp4'
+    video.write_bytes(b'video')
+    results = []
+    for reason in ('ffmpeg', 'file', 'duration'):
+        (frames / 'frame-001.png').write_bytes(b'old')
+        (frames / 'index.json').write_text('[{"file":"frame-001.png","ocr_text":"old"}]')
+        with patch('scripts.extract_post.shutil.which', return_value=None if reason == 'ffmpeg' else '/usr/bin/ffmpeg'), patch('scripts.extract_post.probe_video_duration', return_value=1801 if reason == 'duration' else 5):
+            sample_video_frames(root / 'missing.mp4' if reason == 'file' else video, root)
+        results.append(ocr_frame_assets(root))
+    print(json.dumps(results))
+`);
+    expect(JSON.parse(output)).toEqual([[], [], []]);
+  });
   it("configures yt-dlp to reject known media over 30 minutes before download", () => {
     const source = fs.readFileSync("scripts/extract_post.py", "utf8");
     expect(source).toContain("match_filter");

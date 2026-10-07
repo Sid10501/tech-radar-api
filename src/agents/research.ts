@@ -26,7 +26,10 @@ export async function runResearch(extract: ExtractResult, options: ResearchOptio
   const query = [extract.title, extract.caption, extract.transcript, extract.visual_text, ...(extract.source_links ?? [])].filter(Boolean).join('\n').slice(0, 24000);
   const prior = await findPriorIdentities(query, options.memoryDir);
   const direct = githubRepo(extract.url);
-  const sourceUrls = [...(extract.source_links ?? []), ...(query.match(/https:\/\/github\.com\/[^\s<>"')]+/g) ?? [])];
+  const enriched = extract.enriched_links;
+  const sourceUrls = [...(extract.source_links ?? []), ...(query.match(/(?:https:\/\/)?github\.com\/[^\s<>"')]+/g) ?? []),
+    ...(enriched?.confirmed.github ? [enriched.confirmed.github] : []),
+    ...(enriched?.candidates.filter(candidate => candidate.kind === 'github' && (!candidate.discovered_by || candidate.discovered_by === 'explicit')).map(candidate => candidate.url) ?? [])];
   const linkedRepos = [...new Set(sourceUrls.map(githubRepo).filter((repo): repo is string => !!repo))];
   const context: GroundingContext = { prior, sourceRepo: direct, candidateRepos: linkedRepos, evidence: [], warnings: [] };
   const knownRepos = [...new Set([context.sourceRepo, ...linkedRepos, ...prior.map(item => item.repo)].filter((repo): repo is string => !!repo))];

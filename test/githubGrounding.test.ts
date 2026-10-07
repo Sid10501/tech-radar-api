@@ -87,3 +87,10 @@ it('rejects malformed, mismatched, or private metadata before creating a receipt
     await expect(lookupGithubGrounded('acme/tool', { fetcher: async () => new Response(JSON.stringify(data)) })).rejects.toThrow('matching public repository identity');
   }
 });
+
+it('warns when a GitHub source excerpt is partial', async () => {
+  const { reviewGithubSources } = await import('../src/githubGrounding.js');
+  const result = await reviewGithubSources('acme/tool', { fetcher: async url => new Response(JSON.stringify(String(url).endsWith('/readme') ? { html_url: 'https://github.com/acme/tool/blob/main/README.md', content: Buffer.from('x'.repeat(12001)).toString('base64'), encoding: 'base64' } : [])) });
+  expect(result.evidence[0].excerpt).toHaveLength(12000);
+  expect(result.warnings).toContain('readme: entry 1 excerpt truncated; source coverage is partial');
+});

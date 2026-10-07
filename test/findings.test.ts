@@ -857,7 +857,7 @@ describe("parseFindingMarkdown()", () => {
     expect(finding.recommendedAction).toBe("Skip");
   });
 
-  it("routes stale skip verdicts with a real public artifact back to review", () => {
+  it("keeps explicit skip verdicts even when a real public artifact exists", () => {
     const finding = parseFindingMarkdown(
       "20260705-stale-skip.md",
       SAMPLE_FINDING
@@ -867,8 +867,15 @@ describe("parseFindingMarkdown()", () => {
     );
 
     expect(finding.source.classification).toBe("public_artifact");
-    expect(finding.recommendedAction).toBe("Review");
+    expect(finding.recommendedAction).toBe("Skip");
   });
+});
+
+it('keeps explicit bookmark and skip decisions ahead of quality and project heuristics', () => {
+  const bookmark = parseFindingMarkdown('bookmark.md', SAMPLE_FINDING.replace('- Verdict: `#try-soon`', '- Verdict: `#bookmark`'));
+  const skip = parseFindingMarkdown('skip.md', SAMPLE_FINDING.replace('- Verdict: `#try-soon`', '- Verdict: `#skip`'));
+  expect(bookmark.recommendedAction).toBe('Backlog');
+  expect(skip.recommendedAction).toBe('Skip');
 });
 
 describe("public finding shape", () => {

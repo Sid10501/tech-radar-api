@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureDiscussion, parseDiscussionUrl, readSourceJson } from "../src/labSources.js";
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe("discussion capture", () => {
+  it('accepts differently cased owner/repo comments for the same discussion and rejects foreign links', async () => {
+    const row = (id: string, url: string) => ({ id, body: 'Reply', url, author: { login: 'dev' }, replies: { nodes: [] } });
+    const result = await captureDiscussion('https://github.com/Acme/Tool/discussions/12', async () => ({ data: { repository: { isPrivate: false, discussion: { title: 'Topic', body: 'Body', comments: { nodes: [row('a', 'https://github.com/acme/tool/discussions/12#discussioncomment-1'), row('bad', 'https://github.com/acme/other/discussions/12#discussioncomment-2'), { ...row('b', 'https://github.com/ACME/TOOL/discussions/12#discussioncomment-3'), replies: { nodes: [row('c', 'https://github.com/acme/tool/discussions/12#discussioncomment-4')] } }] } } } } }));
+    expect(result.comments.map(comment => comment.id)).toEqual(['a', 'b', 'c']);
+    expect(result.warnings).toContain('A malformed comment was omitted');
+  });
   it("accepts only canonical public discussion URLs and never accepts credentials or arbitrary hosts", () => {
     expect(parseDiscussionUrl("https://github.com/a/b/issues/12?ignored=1#comment").url).toBe("https://github.com/a/b/issues/12");
     for (const url of ["http://127.0.0.1", "https://github.com.evil.test/a/b/issues/1", "https://user:pass@github.com/a/b/issues/1", "https://github.com/a/b/blob/main/x", "https://news.ycombinator.com/item?id=-1"]) expect(() => parseDiscussionUrl(url)).toThrow();

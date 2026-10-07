@@ -377,6 +377,8 @@ function recommendedAction(
   directPublicArtifact: boolean,
   triage: FindingTriage,
 ): FindingSummary["recommendedAction"] {
+  if (verdict.includes('#skip')) return 'Skip';
+  if (verdict.includes('#bookmark')) return 'Backlog';
   if (classification === "dm_gated") return "Skip";
   if ((verdict.includes("#skip") || targetProject === "none") && !(directPublicArtifact && (evidence.repo || evidence.docs))) {
     return "Skip";

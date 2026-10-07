@@ -983,6 +983,13 @@ def frame_sample_interval(duration_sec: float | None, max_frames: int) -> float:
 
 def sample_video_frames(video_path: Path, out_dir: Path, duration_sec: float | None = None) -> tuple[list[dict], str | None]:
     """Seek to bounded uniform midpoints; record decoded PTS, never a guessed timestamp."""
+    frames_dir = out_dir / "ocr-frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    # Clear prior invocation assets even when validation exits before sampling.
+    for previous in frames_dir.glob("frame-*.png"):
+        previous.unlink()
+    index_path = frames_dir / "index.json"
+    index_path.write_text("[]")
     if not shutil.which("ffmpeg"):
         return [], "ocr skipped: ffmpeg not installed"
     if not video_path.exists():
@@ -996,13 +1003,6 @@ def sample_video_frames(video_path: Path, out_dir: Path, duration_sec: float | N
     times = [(i + 0.5) * interval for i in range(max_frames) if (i + 0.5) * interval < duration] if known_duration else [i * interval for i in range(max_frames)]
     if not times:
         times = [0.0]
-    frames_dir = out_dir / "ocr-frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
-    # A repeated extraction must never expose stale frames from an earlier attempt.
-    for previous in frames_dir.glob("frame-*.png"):
-        previous.unlink()
-    index_path = frames_dir / "index.json"
-    index_path.write_text("[]")
     frames: list[dict] = []
     warning = None if known_duration else "frame coverage limited: video duration unavailable"
     deadline = time.monotonic() + _float_env("OCR_FFMPEG_TIMEOUT_SEC", 30.0, 1.0, 180.0)
