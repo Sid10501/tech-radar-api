@@ -5,13 +5,15 @@ import {
   type GithubRepoInfo,
   type GithubRepoSearchResult,
 } from "./tools/github.js";
+import { githubRepo } from "./researchGrounding.js";
 
 type TextSource = EnrichedLinkCandidate["source"];
 type GithubLookup = (repo: string) => Promise<GithubRepoInfo>;
 type GithubSearch = (query: string, limit: number) => Promise<GithubRepoSearchResult[]>;
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
-const GITHUB_RE = /(?<![A-Za-z0-9_.\/-])(?:https?:\/\/)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/gi;
+const SCHEMED_URL_RE = /[a-z][a-z0-9+.-]*:\/\/[^\s<>"')\]]+/gi;
+const BARE_GITHUB_RE = /(?<![A-Za-z0-9_.\/@-])github\.com\/[^\s<>"')\]]+/gi;
 const NPM_PACKAGE_RE = /(?:npm\s+(?:install|i)\s+|pnpm\s+add\s+|yarn\s+add\s+)(@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+)/gi;
 
 interface CuratedProject {
@@ -176,8 +178,10 @@ function collectUrlCandidates(value: string, source: TextSource, candidates: Enr
 }
 
 function collectGithubTextCandidates(value: string, source: TextSource, candidates: EnrichedLinkCandidate[]): void {
-  for (const match of value.matchAll(GITHUB_RE)) {
-    const normalized = normalizeGithubUrl(`https://github.com/${match[1]}/${match[2]}`);
+  // Do not find a bare GitHub substring inside an HTTP URL with unsafe authority or query.
+  const bareText = value.replace(SCHEMED_URL_RE, match => ' '.repeat(match.length));
+  for (const match of bareText.matchAll(BARE_GITHUB_RE)) {
+    const normalized = normalizeGithubUrl(cleanUrl(match[0]));
     if (!normalized) continue;
     candidates.push({
       kind: "github",
@@ -349,12 +353,11 @@ function cleanUrl(url: string): string {
 }
 
 function normalizeGithubUrl(url: string): string | null {
-  try {
-    return `https://github.com/${githubRepoFromUrl(url)}`;
-  } catch {
-    // Profiles, homepages and navigation links are valid evidence, but not repos.
-    return null;
-  }
+  const repo = githubRepo(url);
+  if (!repo) return null;
+  const owner = repo.split('/')[0].toLowerCase();
+  const reservedOwners = new Set(["topics", "collections", "settings", "orgs", "users", "search", "marketplace", "features", "sponsors", "login", "signup", "about", "enterprise"]);
+  return reservedOwners.has(owner) ? null : `https://github.com/${repo}`;
 }
 
 function normalizeNpmUrl(url: string): string {

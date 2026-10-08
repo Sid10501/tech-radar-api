@@ -13,7 +13,9 @@ export interface PriorIdentity {
 export function githubRepo(value: string): string | null {
   if (/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(value) && !value.includes('..') && !value.endsWith('/.')) return value;
   try {
-    const url = new URL(value.startsWith('github.com/') ? `https://${value}` : value);
+    // Match the raw authority before URL parsing can erase a default port or credentials.
+    if (!/^(?:https:\/\/)?github\.com\//i.test(value)) return null;
+    const url = new URL(/^github\.com\//i.test(value) ? `https://${value}` : value);
     if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password || url.search) return null;
     // Reject raw traversal before URL parsing can silently normalize it away.
     const rawPath = value.replace(/^(?:https:\/\/)?github\.com/i, '').split(/[?#]/, 1)[0];

@@ -91,5 +91,5 @@ it('requires explicit archive selection and never replaces a direct source or a 
 it('normalizes safe repository roots, README fragments, blobs, and bare OCR links without accepting host tricks', async () => {
   const { githubRepo } = await import('../src/researchGrounding.js');
   for (const link of ['github.com/acme/tool', 'https://github.com/acme/tool#readme', 'https://github.com/acme/tool/blob/main/README.md#install', 'https://github.com/acme/tool/blob/main/src/index.ts', 'https://github.com/acme/tool/README.md']) expect(githubRepo(link)).toBe('acme/tool');
-  for (const link of ['https://github.com.evil.test/acme/tool', 'https://user@github.com/acme/tool', 'http://github.com/acme/tool', 'https://github.com/acme/tool/../other', 'https://github.com/acme/tool/issues/1']) expect(githubRepo(link)).toBeNull();
+  for (const link of ['https://github.com.evil.test/acme/tool', 'https://user@github.com/acme/tool', 'http://github.com/acme/tool', 'https://github.com:443/acme/tool', 'https://github.com/acme/tool?tab=readme', 'https://github.com/acme/tool/../other', 'https://github.com/acme/tool/issues/1']) expect(githubRepo(link)).toBeNull();
 });

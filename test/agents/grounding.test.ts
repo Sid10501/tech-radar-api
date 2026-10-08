@@ -108,6 +108,40 @@ it('accepts a production-enriched source link beyond the research query window',
   expect(result.identity).toMatchObject({ status: 'resolved', repo: 'acme/tool', basis: 'source_reported' });
 });
 
+it.each([
+  'http://github.com/acme/tool',
+  'https://user:pass@github.com/acme/tool',
+  'https://github.com:443/acme/tool',
+  'https://github.com/acme/tool?tab=readme',
+  'https://evilgithub.com/acme/tool',
+  'https://github.com/acme/tool/../other',
+])('rejects an unsafe raw GitHub token throughout production enrichment: %s', async unsafeUrl => {
+  const dir = await memory();
+  const { enrichLinksFromExtract } = await import('../../src/linkEnrichment.js');
+  const source = { ...extract, visual_text: '', caption: `${'x'.repeat(24_100)} Repo ${unsafeUrl}` };
+  const lookup = vi.fn(async () => ({ stars: 1, lastPushed: '2026-10-01', openIssues: 0, language: 'TypeScript', license: 'MIT', archived: false }));
+  const enriched = await enrichLinksFromExtract(source, lookup, async () => []);
+  expect(enriched.candidates.filter(candidate => candidate.kind === 'github')).toEqual([]);
+  expect(enriched.confirmed.github).toBeNull();
+  expect(lookup).not.toHaveBeenCalled();
+  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/acme/tool' } }) }] })); sdk(create);
+  const { runResearch } = await import('../../src/agents/research.js');
+  const result = await runResearch({ ...source, enriched_links: enriched }, { memoryDir: dir });
+  expect(result.identity).toMatchObject({ status: 'unresolved', repo: null });
+});
+
+it('accepts a production-enriched bare GitHub token beyond the research query window', async () => {
+  const dir = await memory();
+  const { enrichLinksFromExtract } = await import('../../src/linkEnrichment.js');
+  const source = { ...extract, visual_text: '', caption: `${'x'.repeat(24_100)} Repo github.com/acme/tool` };
+  const enriched = await enrichLinksFromExtract(source, async () => ({ stars: 1, lastPushed: '2026-10-01', openIssues: 0, language: 'TypeScript', license: 'MIT', archived: false }), async () => []);
+  expect(enriched.confirmed.github).toBe('https://github.com/acme/tool');
+  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/acme/tool' } }) }] })); sdk(create);
+  const { runResearch } = await import('../../src/agents/research.js');
+  const result = await runResearch({ ...source, enriched_links: enriched }, { memoryDir: dir });
+  expect(result.identity).toMatchObject({ status: 'resolved', repo: 'acme/tool', basis: 'source_reported' });
+});
+
 it('marks a curated alias separately from a link extracted from source text', async () => {
   const { extractLinkCandidates } = await import('../../src/linkEnrichment.js');
   const candidates = extractLinkCandidates({ ...extract, title: 'Agent Reach', caption: 'An AI agent reads Twitter, Reddit, YouTube and GitHub in real time with Agent Reach, past 20,000 stars.', visual_text: '' });
