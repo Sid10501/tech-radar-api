@@ -1,4 +1,5 @@
 import type { Run } from "./runner.js";
+import { SID_REVIEW_SCRIPT } from "./reviewWorkbench.js";
 
 export function dashboardReasonKey(reason: string): string {
   return reason.trim().replace(/^triage\s+/i, "").toLowerCase();
@@ -962,6 +963,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
+    ${SID_REVIEW_SCRIPT}
 
     function requestHeaders() {
       const currentToken = new URLSearchParams(location.search).get("token") || "";
@@ -1603,6 +1605,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         personal ? sectionPanel("Implementation idea", d.sections.implementation) : "",
         personal ? sectionPanel("Child artifact intake", d.sections.childArtifacts) : "",
         personal ? sectionPanel("Follow-ups", d.sections.followups) : "",
+        reviewPanel(f),
         sectionPanel("Retry history", d.sections.retryHistory),
         !state.privateUnlocked ? '<div class="panel"><div class="panel-head">Sid-specific layer</div><div class="panel-body">Unlock when you want to see project fit, recommended action, and implementation notes. The public research above stays open for everyone.</div></div>' : "",
       ].filter(Boolean).join("");
@@ -1662,6 +1665,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         event.preventDefault();
         selectFinding(link.dataset.workflowFinding, { openDetail: true, historyMode: "push" });
       }));
+      bindReviewPanel(f);
     }
 
     function detailCacheKey(id) {
@@ -1719,6 +1723,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       state.selectedId = id;
       if (options.openDetail && isMobileViewport()) setMobileDetailOpen(true);
       const requestId = ++state.requestSeq;
+      if (state.privateUnlocked) void loadReview(id);
       renderList();
       const cached = state.detailCache.get(detailCacheKey(id));
       if (cached) {

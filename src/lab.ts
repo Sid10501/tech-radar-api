@@ -9,6 +9,7 @@ export const LabUrlSchema = z.string().url().max(2_048).refine(value => {
   return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
 }, "Use an HTTP(S) URL without credentials");
 const strings = z.array(text).max(20);
+export const FindingIdSchema = z.string().regex(/^[a-zA-Z0-9_-]+\.md$/).max(160);
 export const LabEvidenceSchema = z.object({
   id: z.string().min(1).max(160), source: z.enum(["github", "hackernews"]),
   url: LabUrlSchema, title: text, body: z.string().max(16_000),
@@ -26,17 +27,34 @@ const ExperimentSchema = z.object({
     ctx.addIssue({ code: "custom", message: "Completed experiments require a result and evidence URL" });
   }
 });
-export const BriefInputSchema = z.object({
+const BriefFieldsSchema = z.object({
   title: z.string().trim().min(1).max(200), problem: text, workarounds: strings, disagreements: strings,
   existingSolutions: strings, projectSlug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/).nullable(),
-  findingIds: z.array(z.string().regex(/^[a-zA-Z0-9_-]+\.md$/)).max(20),
-  evidenceIds: z.array(z.string().min(1).max(160)).min(1).max(20),
+  findingIds: z.array(FindingIdSchema).max(20),
+  evidenceIds: z.array(z.string().min(1).max(160)).max(20),
   experiment: ExperimentSchema, visibility: z.enum(["private", "public"]),
 }).strict();
-export const LabBriefSchema = BriefInputSchema.extend({ id: z.string().uuid(), createdAt: z.string().datetime(), updatedAt: z.string().datetime() });
-const StateSchema = z.object({ schemaVersion: z.literal(1), evidence: z.array(LabEvidenceSchema).max(500), briefs: z.array(LabBriefSchema).max(500) }).strict();
+function validateBriefSources(value: z.infer<typeof BriefFieldsSchema>, ctx: z.RefinementCtx) {
+  if (!value.evidenceIds.length && (value.visibility === "public" || !value.findingIds.length))
+    ctx.addIssue({ code: "custom", message: "A public brief requires captured discussion evidence; private drafts require a captured discussion or finding" });
+}
+export const BriefInputSchema = BriefFieldsSchema.superRefine(validateBriefSources);
+export const LabBriefSchema = BriefFieldsSchema.extend({ id: z.string().uuid(), createdAt: z.string().datetime(), updatedAt: z.string().datetime() }).superRefine(validateBriefSources);
+export const ReviewInputSchema = z.object({
+  decision: z.enum(["Try", "Bookmark", "Dismiss"]), rationale: text,
+  projectSlug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/).nullable(),
+  expectedUpdatedAt: z.string().datetime().nullable(),
+}).strict();
+export const LabReviewSchema = ReviewInputSchema.omit({ expectedUpdatedAt: true }).extend({
+  findingId: FindingIdSchema, briefId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+}).strict();
+export const FindingExperimentInputSchema = z.object({ question: text, successCriteria: text,
+  title: z.string().trim().min(1).max(200), problem: text }).strict();
+const StateSchema = z.object({ schemaVersion: z.literal(1), evidence: z.array(LabEvidenceSchema).max(500), briefs: z.array(LabBriefSchema).max(500), reviews: z.array(LabReviewSchema).max(500).default([]) }).strict();
 export type LabEvidence = z.infer<typeof LabEvidenceSchema>;
 export type LabBrief = z.infer<typeof LabBriefSchema>;
+export type LabReview = z.infer<typeof LabReviewSchema>;
 export type LabState = z.infer<typeof StateSchema>;
 
 export class LabConflictError extends Error {}
@@ -46,7 +64,7 @@ export class LabStore {
   constructor(private readonly directory: string) { this.file = path.join(directory, "community-lab.json"); }
 
   read(): LabState {
-    if (!fs.existsSync(this.file)) return { schemaVersion: 1, evidence: [], briefs: [] };
+    if (!fs.existsSync(this.file)) return { schemaVersion: 1, evidence: [], briefs: [], reviews: [] };
     try {
       if (fs.statSync(this.file).size > 16 * 1024 * 1024) throw new Error("size limit");
       return StateSchema.parse(JSON.parse(fs.readFileSync(this.file, "utf8")));
@@ -86,6 +104,7 @@ export class LabStore {
 
   createBrief(input: unknown): LabBrief {
     const parsed = BriefInputSchema.parse(input); const state = this.read();
+    if (!parsed.evidenceIds.length) throw new Error("An ordinary brief requires captured discussion evidence");
     this.validateReferences(state, parsed.evidenceIds);
     const now = new Date().toISOString();
     const brief = { ...parsed, id: randomUUID(), createdAt: now, updatedAt: now };
@@ -97,9 +116,50 @@ export class LabStore {
     const i = state.briefs.findIndex(value => value.id === id);
     if (i < 0) throw new Error("Brief not found");
     if (state.briefs[i].updatedAt !== expectedUpdatedAt) throw new LabConflictError("Brief changed; reload before saving");
+    if (!parsed.evidenceIds.length && !state.reviews.some(review => review.briefId === id && parsed.findingIds.includes(review.findingId)))
+      throw new Error("A brief without captured discussion evidence must remain linked to its finding");
     this.validateReferences(state, parsed.evidenceIds);
     const updatedAt = new Date(Math.max(Date.now(), Date.parse(state.briefs[i].updatedAt) + 1)).toISOString();
     const brief = { ...state.briefs[i], ...parsed, updatedAt }; state.briefs[i] = brief;
+    this.write(state); return brief;
+  }
+
+  review(findingId: string): LabReview | null {
+    FindingIdSchema.parse(findingId);
+    return this.read().reviews.find(value => value.findingId === findingId) ?? null;
+  }
+
+  saveReview(findingId: string, input: unknown): LabReview {
+    FindingIdSchema.parse(findingId);
+    const parsed = ReviewInputSchema.parse(input); const state = this.read();
+    const index = state.reviews.findIndex(value => value.findingId === findingId);
+    const previous = state.reviews[index];
+    if ((previous?.updatedAt ?? null) !== parsed.expectedUpdatedAt) throw new LabConflictError("Review changed; reload before saving");
+    const now = new Date(Math.max(Date.now(), previous ? Date.parse(previous.updatedAt) + 1 : 0)).toISOString();
+    const review: LabReview = { findingId, decision: parsed.decision, rationale: parsed.rationale,
+      projectSlug: parsed.projectSlug, briefId: previous?.briefId ?? null, createdAt: previous?.createdAt ?? now, updatedAt: now };
+    if (index < 0) state.reviews.push(review); else state.reviews[index] = review;
+    this.write(state); return review;
+  }
+
+  createFindingExperiment(findingId: string, input: unknown): LabBrief {
+    FindingIdSchema.parse(findingId);
+    const parsed = FindingExperimentInputSchema.parse(input); const state = this.read();
+    const review = state.reviews.find(value => value.findingId === findingId);
+    if (!review || review.decision !== "Try") throw new Error("Save a Try review before creating an experiment");
+    if (review.briefId) {
+      const linked = state.briefs.find(value => value.id === review.briefId);
+      if (!linked) throw new Error("Linked experiment is missing");
+      return linked;
+    }
+    const now = new Date().toISOString();
+    const brief: LabBrief = { id: randomUUID(), createdAt: now, updatedAt: now,
+      title: parsed.title, problem: parsed.problem, workarounds: [], disagreements: [], existingSolutions: [],
+      projectSlug: review.projectSlug, findingIds: [findingId], evidenceIds: [], visibility: "private",
+      experiment: { question: parsed.question, successCriteria: parsed.successCriteria, status: "planned", result: null, evidenceUrls: [] } };
+    state.briefs.unshift(brief);
+    review.briefId = brief.id;
+    review.updatedAt = new Date(Math.max(Date.now(), Date.parse(review.updatedAt) + 1)).toISOString();
     this.write(state); return brief;
   }
 

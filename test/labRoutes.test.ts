@@ -4,9 +4,45 @@ import os from "node:os";
 import path from "node:path";
 import { buildServer } from "../src/server.js";
 import { LabStore } from "../src/lab.js";
+import Fastify from "fastify";
+import { registerLabRoutes } from "../src/labRoutes.js";
 const dirs: string[] = [];
 afterEach(() => { delete process.env.AUTH_TOKEN; dirs.splice(0).forEach(dir => fs.rmSync(dir, { recursive: true, force: true })); });
 describe("Community Lab route boundary", () => {
+  it("authenticates review routes, checks current findings, and deduplicates experiment requests", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-routes-")); dirs.push(dir);
+    const app = Fastify(); const store = new LabStore(dir);
+    registerLabRoutes(app, store, request => request.headers.authorization === "Bearer owner", async () => { throw new Error("capture unused"); },
+      async id => id === "signal.md" ? { title: "Real finding", summary: "Real observed problem" } : null);
+    const url = "/api/lab/reviews/signal.md"; const headers = { authorization: "Bearer owner" };
+    const review = { decision: "Try", rationale: "Useful to test", projectSlug: "radar", expectedUpdatedAt: null };
+    try {
+      expect((await app.inject({ url })).statusCode).toBe(401);
+      expect((await app.inject({ method: "PUT", url, payload: review })).statusCode).toBe(401);
+      expect((await app.inject({ method: "POST", url: url + "/experiment", payload: { question: "Q", successCriteria: "S" } })).statusCode).toBe(401);
+      expect((await app.inject({ method: "PUT", url: "/api/lab/reviews/unknown.md", headers, payload: review })).statusCode).toBe(404);
+      expect((await app.inject({ method: "PUT", url: "/api/lab/reviews/%2e%2e%2fsecret.md", headers, payload: review })).statusCode).toBe(400);
+      expect((await app.inject({ method: "POST", url: url + "/experiment", headers, payload: { question: "Q", successCriteria: "S" } })).statusCode).toBe(400);
+      const saved = await app.inject({ method: "PUT", url, headers, payload: review });
+      expect(saved.statusCode).toBe(200);
+      expect((await app.inject({ method: "PUT", url, headers, payload: review })).statusCode).toBe(409);
+      expect((await app.inject({ url, headers })).json().review.rationale).toBe("Useful to test");
+      const payload = { question: "Does it work?", successCriteria: "Demonstrate a real improvement" };
+      const responses = await Promise.all(Array.from({ length: 4 }, () => app.inject({ method: "POST", url: url + "/experiment", headers, payload })));
+      expect(new Set(responses.map(response => response.json().brief.id)).size).toBe(1);
+      expect(responses[0].json().brief).toMatchObject({ title: "Real finding", problem: "Real observed problem", visibility: "private", evidenceIds: [] });
+      const brief = responses[0].json().brief;
+      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...draftInput } = brief;
+      const updated = await app.inject({ method: "PATCH", url: `/api/lab/briefs/${brief.id}`, headers, payload: { ...draftInput, problem: "Refined problem", expectedUpdatedAt: brief.updatedAt } });
+      expect(updated.statusCode).toBe(200);
+      expect(updated.json().brief.problem).toBe("Refined problem");
+      const publish = await app.inject({ method: "PATCH", url: `/api/lab/briefs/${brief.id}`, headers, payload: { ...draftInput, visibility: "public", expectedUpdatedAt: updated.json().brief.updatedAt } });
+      expect(publish.statusCode).toBe(400);
+      expect(publish.json().error).toMatch(/captured discussion/i);
+      expect(store.read().briefs).toHaveLength(1);
+      expect((await app.inject({ url: "/api/public/lab" })).json()).toEqual({ schemaVersion: 1, briefs: [], evidence: [] });
+    } finally { await app.close(); }
+  });
   it("fails closed without an owner token, exposes no private records, and supports authorized capture", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-routes-")); dirs.push(dir);
     const evidence = { id: "github:1", source: "github" as const, url: "https://github.com/a/b/issues/1", title: "Reported issue", body: "private raw text", comments: [], retrievedAt: new Date().toISOString(), status: "ok" as const, warnings: [] };

@@ -280,7 +280,8 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
     }
   });
 
-  registerLabRoutes(app, dependencies.labStore ?? new LabStore(process.env["LAB_STATE_DIR"]?.trim() || path.join(process.env["RUN_STATE_DIR"] ?? os.tmpdir(), "lab")), isOwnerAuthorized, dependencies.captureDiscussion);
+  registerLabRoutes(app, dependencies.labStore ?? new LabStore(process.env["LAB_STATE_DIR"]?.trim() || path.join(process.env["RUN_STATE_DIR"] ?? os.tmpdir(), "lab")), isOwnerAuthorized, dependencies.captureDiscussion,
+    async id => { await ensureAiMemoryCheckout(); const detail = getFindingDetail(id); return detail ? { title: detail.finding.title, summary: detail.finding.summary } : null; });
 
   app.get("/healthz", async () => {
     return { ok: true };
