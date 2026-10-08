@@ -27,7 +27,7 @@ describe("link enrichment", () => {
       caption: "https://github.com https://github.com/acme https://github.com/topics/ai https://docs.github.com/en/pages https://github.com/acme/tool/blob/main/README.md",
     });
     expect(candidates.filter((candidate) => candidate.kind === "github")).toEqual([
-      { kind: "github", url: "https://github.com/acme/tool", source: "caption", confidence: "confirmed" },
+      { kind: "github", url: "https://github.com/acme/tool", source: "caption", confidence: "confirmed", discovered_by: "explicit" },
     ]);
   });
 
@@ -43,6 +43,7 @@ describe("link enrichment", () => {
       url: "https://github.com/acme/tool",
       source: "source_url",
       confidence: "confirmed",
+      discovered_by: "explicit",
     });
   });
 
@@ -57,9 +58,9 @@ describe("link enrichment", () => {
     });
 
     expect(candidates).toEqual([
-      { kind: "github", url: "https://github.com/marcosricopeng/palmier", source: "visual_text", confidence: "confirmed" },
-      { kind: "docs", url: "https://palmier.app/docs", source: "visual_text", confidence: "candidate" },
-      { kind: "npm", url: "https://www.npmjs.com/package/@palmier/mcp", source: "visual_text", confidence: "candidate" },
+      { kind: "github", url: "https://github.com/marcosricopeng/palmier", source: "visual_text", confidence: "confirmed", discovered_by: "explicit" },
+      { kind: "docs", url: "https://palmier.app/docs", source: "visual_text", confidence: "candidate", discovered_by: "explicit" },
+      { kind: "npm", url: "https://www.npmjs.com/package/@palmier/mcp", source: "visual_text", confidence: "candidate", discovered_by: "explicit" },
     ]);
   });
 
@@ -185,6 +186,7 @@ describe("link enrichment", () => {
       url: "https://github.com/Panniantong/Agent-Reach",
       source: "caption",
       confidence: "candidate",
+      discovered_by: "curated",
     });
     expect(enriched.warnings[0]).toContain("GitHub API returned 503");
   });

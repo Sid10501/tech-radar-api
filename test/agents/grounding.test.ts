@@ -95,6 +95,25 @@ it('accepts source-backed enriched GitHub links as candidates without guessing a
   expect(result.identity).toMatchObject({ repo: 'acme/tool', basis: 'source_reported' });
 });
 
+it('accepts a production-enriched source link beyond the research query window', async () => {
+  const dir = await memory();
+  const { enrichLinksFromExtract } = await import('../../src/linkEnrichment.js');
+  const source = { ...extract, visual_text: '', caption: `${'x'.repeat(24_100)} Repo https://github.com/acme/tool/blob/main/README.md#install` };
+  const enriched = await enrichLinksFromExtract(source, async () => ({ stars: 1, lastPushed: '2026-10-01', openIssues: 0, language: 'TypeScript', license: 'MIT', archived: false }), async () => []);
+  expect(enriched.confirmed.github).toBe('https://github.com/acme/tool');
+  expect(enriched.candidates.find(candidate => candidate.kind === 'github')?.discovered_by).toBe('explicit');
+  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/acme/tool' } }) }] })); sdk(create);
+  const { runResearch } = await import('../../src/agents/research.js');
+  const result = await runResearch({ ...source, enriched_links: enriched }, { memoryDir: dir });
+  expect(result.identity).toMatchObject({ status: 'resolved', repo: 'acme/tool', basis: 'source_reported' });
+});
+
+it('marks a curated alias separately from a link extracted from source text', async () => {
+  const { extractLinkCandidates } = await import('../../src/linkEnrichment.js');
+  const candidates = extractLinkCandidates({ ...extract, title: 'Agent Reach', caption: 'An AI agent reads Twitter, Reddit, YouTube and GitHub in real time with Agent Reach, past 20,000 stars.', visual_text: '' });
+  expect(candidates.find(candidate => candidate.kind === 'github')).toMatchObject({ discovered_by: 'curated' });
+});
+
 it('does not promote a sole dependency URL to the primary technology identity', async () => {
   const dir = await memory();
   const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, what: 'OpenSuperWhisper', links: { github: null, docs: null, npm: null } }) }] })); sdk(create);

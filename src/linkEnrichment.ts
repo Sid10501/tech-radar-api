@@ -170,6 +170,7 @@ function collectUrlCandidates(value: string, source: TextSource, candidates: Enr
       url: normalized,
       source,
       confidence: kind === "github" ? "confirmed" : "candidate",
+      discovered_by: "explicit",
     });
   }
 }
@@ -183,6 +184,7 @@ function collectGithubTextCandidates(value: string, source: TextSource, candidat
       url: normalized,
       source,
       confidence: "confirmed",
+      discovered_by: "explicit",
     });
   }
 }
@@ -194,6 +196,7 @@ function collectNpmInstallCandidates(value: string, source: TextSource, candidat
       url: `https://www.npmjs.com/package/${match[1]}`,
       source,
       confidence: "candidate",
+      discovered_by: "explicit",
     });
   }
 }
@@ -214,6 +217,7 @@ function collectCuratedProjectCandidates(extract: ExtractResult, candidates: Enr
       url: project.github,
       source: aliasSource,
       confidence: "candidate",
+      discovered_by: "curated",
     });
     if (project.docs) {
       candidates.push({
@@ -221,6 +225,7 @@ function collectCuratedProjectCandidates(extract: ExtractResult, candidates: Enr
         url: project.docs,
         source: aliasSource,
         confidence: "candidate",
+        discovered_by: "curated",
         requires_github: project.github,
       });
     }
