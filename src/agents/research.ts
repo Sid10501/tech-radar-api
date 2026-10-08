@@ -27,9 +27,14 @@ export async function runResearch(extract: ExtractResult, options: ResearchOptio
   const prior = await findPriorIdentities(query, options.memoryDir);
   const direct = githubRepo(extract.url);
   const enriched = extract.enriched_links;
-  const sourceUrls = [...(extract.source_links ?? []), ...(query.match(/(?:https:\/\/)?github\.com\/[^\s<>"')]+/g) ?? []),
-    ...(enriched?.confirmed.github ? [enriched.confirmed.github] : []),
-    ...(enriched?.candidates.filter(candidate => candidate.kind === 'github' && (!candidate.discovered_by || candidate.discovered_by === 'explicit')).map(candidate => candidate.url) ?? [])];
+  // Keep complete URL tokens so githubRepo can reject off-host and non-HTTPS links.
+  const sourceTokens = query.match(/[a-z][a-z0-9+.-]*:\/\/[^\s<>"')]+|(?<![a-z0-9_.-])github\.com\/[^\s<>"')]+/gi) ?? [];
+  const explicitEnriched = enriched?.candidates.filter(candidate => candidate.kind === 'github' && candidate.discovered_by === 'explicit') ?? [];
+  const confirmedRepo = enriched?.confirmed.github ? githubRepo(enriched.confirmed.github) : null;
+  const confirmedExplicit = confirmedRepo && explicitEnriched.some(candidate => githubRepo(candidate.url)?.toLowerCase() === confirmedRepo.toLowerCase());
+  const sourceUrls = [...(extract.source_links ?? []), ...sourceTokens,
+    ...explicitEnriched.map(candidate => candidate.url),
+    ...(confirmedExplicit && enriched?.confirmed.github ? [enriched.confirmed.github] : [])];
   const linkedRepos = [...new Set(sourceUrls.map(githubRepo).filter((repo): repo is string => !!repo))];
   const context: GroundingContext = { prior, sourceRepo: direct, candidateRepos: linkedRepos, evidence: [], warnings: [] };
   const knownRepos = [...new Set([context.sourceRepo, ...linkedRepos, ...prior.map(item => item.repo)].filter((repo): repo is string => !!repo))];

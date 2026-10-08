@@ -61,6 +61,32 @@ it('uses a repository URL visible in OCR as source-reported identity', async () 
   expect(result.identity).toMatchObject({ repo: 'acme/tool', basis: 'source_reported' });
 });
 
+it.each(['https://evilgithub.com/acme/tool', 'http://github.com/acme/tool'])('does not launder an unsafe source URL into a GitHub candidate: %s', async unsafeUrl => {
+  const dir = await memory();
+  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/acme/tool' } }) }] })); sdk(create);
+  const { runResearch } = await import('../../src/agents/research.js');
+  const result = await runResearch({ ...extract, visual_text: `Repo ${unsafeUrl}` }, { memoryDir: dir });
+  expect(result.identity).toMatchObject({ status: 'unresolved', repo: null });
+  expect(result.links.github).toBeNull();
+});
+
+it('keeps a standalone bare GitHub OCR link eligible for explicit selection', async () => {
+  const dir = await memory();
+  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/acme/tool' } }) }] })); sdk(create);
+  const { runResearch } = await import('../../src/agents/research.js');
+  const result = await runResearch({ ...extract, visual_text: 'Repo github.com/acme/tool' }, { memoryDir: dir });
+  expect(result.identity).toMatchObject({ status: 'resolved', repo: 'acme/tool', basis: 'source_reported' });
+});
+
+it('keeps a GitHub Search discovery out of the source-reported allowlist even after metadata confirmation', async () => {
+  const dir = await memory();
+  const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/acme/tool' } }) }] })); sdk(create);
+  const { runResearch } = await import('../../src/agents/research.js');
+  const result = await runResearch({ ...extract, visual_text: '', enriched_links: { confirmed: { github: 'https://github.com/acme/tool', docs: null, npm: null }, candidates: [{ kind: 'github', url: 'https://github.com/acme/tool', source: 'title', confidence: 'confirmed', discovered_by: 'github_search' }], warnings: [] } }, { memoryDir: dir });
+  expect(result.identity).toMatchObject({ status: 'unresolved', repo: null });
+  expect(result.links.github).toBeNull();
+});
+
 it('accepts source-backed enriched GitHub links as candidates without guessing a primary', async () => {
   const dir = await memory();
   const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ...response, links: { ...response.links, github: 'https://github.com/acme/tool/blob/main/README.md#install' } }) }] })); sdk(create);
