@@ -5,7 +5,63 @@ import { LAB_DASHBOARD_HTML } from "../src/labDashboard.js";
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
+function labHarness(requested = "") {
+  const script = LAB_DASHBOARD_HTML.match(/<script>([\s\S]*?)<\/script>/)![1];
+  const elements = new Map<string, any>();
+  for (const match of LAB_DASHBOARD_HTML.matchAll(/\sid="([^"]+)"/g)) elements.set(match[1], {
+    value: "", checked: false, hidden: false, disabled: false, textContent: "", classList: { toggle() {} },
+    replaceChildren() {}, append() {}, reset() {}, scrollIntoView() {}, focus() {}, addEventListener() {},
+  });
+  const brief = (id: string, title: string, updatedAt = "v1") => ({ id, title, updatedAt, problem: "Known problem", workarounds: [], disagreements: [], existingSolutions: [], projectSlug: null, findingIds: [], evidenceIds: [], visibility: "private", experiment: { question: "Question", successCriteria: "Criterion", status: "planned", result: null, evidenceUrls: [] } });
+  const requests: Array<{ url: string; options: any; pending: ReturnType<typeof deferred<any>> }> = [];
+  const document = { getElementById: (id: string) => elements.get(id), querySelectorAll: () => [], createElement: () => ({ append() {}, set textContent(_value: string) {}, className: "", onclick: null }), createTextNode: () => ({}) };
+  const context = vm.createContext({ document, location: { search: requested }, URLSearchParams,
+    fetch: (url: string, options: any) => { const pending = deferred<any>(); requests.push({ url, options, pending }); return pending.promise; } });
+  vm.runInContext(script, context);
+  const respond = async (index: number, value: any) => { requests[index].pending.resolve({ ok: true, json: async () => value }); for (let i = 0; i < 8; i++) await Promise.resolve(); };
+  return { elements, requests, context, brief, respond };
+}
+
 describe("owner review browser script", () => {
+  it("keeps text typed after save while updating the saved revision", async () => {
+    const h = labHarness();
+    await h.respond(0, { evidence: [], briefs: [h.brief("a", "First")] });
+    vm.runInContext("edit(state.briefs[0])", h.context);
+    h.elements.get("title").value = "Sent title";
+    const saving = h.elements.get("editor").onsubmit({ preventDefault() {} });
+    h.elements.get("title").value = "Later title";
+    await h.respond(1, { brief: h.brief("a", "Sent title", "v2") });
+    await h.respond(2, { evidence: [], briefs: [h.brief("a", "Sent title", "v2")] });
+    await saving;
+    expect(h.elements.get("title").value).toBe("Later title");
+    expect(vm.runInContext("editing.updatedAt", h.context)).toBe("v2");
+  });
+
+  it("does not replace a different draft after a delayed save and refresh", async () => {
+    const h = labHarness();
+    await h.respond(0, { evidence: [], briefs: [h.brief("a", "First"), h.brief("b", "Second")] });
+    vm.runInContext("edit(state.briefs[0])", h.context);
+    const saving = h.elements.get("editor").onsubmit({ preventDefault() {} });
+    vm.runInContext("edit(state.briefs[1])", h.context);
+    h.elements.get("title").value = "Second draft changes";
+    await h.respond(1, { brief: h.brief("a", "First", "v2") });
+    await h.respond(2, { evidence: [], briefs: [h.brief("a", "First", "v2"), h.brief("b", "Second")] });
+    await saving;
+    expect(h.elements.get("title").value).toBe("Second draft changes");
+    expect(vm.runInContext("editing.id", h.context)).toBe("b");
+  });
+
+  it("applies the linked brief only once before later New brief and capture refreshes", async () => {
+    const h = labHarness("?brief=a");
+    await h.respond(0, { evidence: [], briefs: [h.brief("a", "First")] });
+    expect(h.elements.get("title").value).toBe("First");
+    h.elements.get("newBrief").onclick();
+    h.elements.get("title").value = "New draft";
+    const refreshing = vm.runInContext("load()", h.context);
+    await h.respond(1, { evidence: [], briefs: [h.brief("a", "First")] });
+    await refreshing;
+    expect(h.elements.get("title").value).toBe("New draft");
+  });
   it("escapes saved owner and source text before building the finding panel", () => {
     const context = vm.createContext({ state: { privateUnlocked: true }, escapeHtml: (value: unknown) => String(value ?? "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" } as Record<string, string>)[character]) });
     vm.runInContext(SID_REVIEW_SCRIPT, context);

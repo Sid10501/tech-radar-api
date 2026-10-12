@@ -174,7 +174,7 @@ export interface PublicFindingDetail {
 
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 const TEMPLATE_SECTION_HEADING =
-  /^## (TL;DR|What the post showed|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Follow-ups|Retry history)\s*$/m;
+  /^## (TL;DR|What the post showed|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Follow-ups|Retry history|Correction — \d{4}-\d{2}-\d{2})\s*$/m;
 const PRIVATE_PROJECT_REFERENCE =
   /\b(Cross-Tax|StockBot|Finance Assistant|Kalkine Stocks Tracker|tech-radar-api|ai-video)\b/i;
 

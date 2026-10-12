@@ -1082,6 +1082,24 @@ describe("public finding shape", () => {
     expect(detail?.sections.research).toContain("reusable senior-dev prompt");
   });
 
+  it("publishes a dated factual correction after private follow-ups without exposing private sections", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-correction-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(path.join(findingsDir, "20260615-video-by-shawnchee.md"), SAMPLE_FINDING + [
+      "", "## Follow-ups", "", "- Private next step for Sid.", "",
+      "## Unlisted private notes", "", "- Keep this owner-only note hidden.", "",
+      "## Correction — 2026-09-12", "", "The verified project is Egonex-AI/Understand-Anything.", "",
+    ].join("\n"));
+    const detail = getPublicFindingDetail("20260615-video-by-shawnchee.md", dir);
+    expect(detail?.markdown).toContain("## Correction — 2026-09-12");
+    expect(detail?.markdown).toContain("Egonex-AI/Understand-Anything");
+    expect(detail?.markdown).not.toContain("Private next step");
+    expect(detail?.markdown).not.toContain("owner-only note");
+    expect(detail?.markdown).not.toContain("## Fit for Sid");
+    expect(detail?.markdown).not.toContain("## Implementation Idea");
+  });
+
   it("keeps public-safe retry and extraction diagnostics in public detail", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-diagnostics-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
