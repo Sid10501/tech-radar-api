@@ -1,0 +1,20 @@
+{
+  "status": "reconstructed_from_retained_pre_extraction_reference",
+  "historical_labels_sha256": "4b35d0f64285081c3f6aec3dfd31f0f5caaf6025faef4b23d1434b8e37a88d04",
+  "historical_serialization_available": false,
+  "identifiers": [
+    "Jitter",
+    "Rive",
+    ".riv",
+    "https://jitter.video/product/",
+    "https://rive.app/docs/editor/ai/mcp",
+    "StatusSM"
+  ],
+  "observation_notes": [
+    "Jitter and Rive are visible throughout the recording.",
+    ".riv appears after the navigation at approximately 16 seconds.",
+    "The two URLs and StatusSM are visible in the lower page from approximately 28 seconds to the end.",
+    "The filtered index is visible until approximately 15.533 seconds, navigation occurs around 15.533–16 seconds, the finding top is visible until approximately 27.533 seconds, and scrolling occurs around 27.533–28 seconds.",
+    "These intervals are approximate observations, not frame-accurate event labels."
+  ]
+}

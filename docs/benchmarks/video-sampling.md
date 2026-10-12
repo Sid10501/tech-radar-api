@@ -2,6 +2,8 @@
 
 The full-duration sampler fixes a demonstrated temporal coverage gap. Semantic recall, identifier accuracy, source access success, and paid-provider quality remain unmeasured. The twelve-source evaluation below is a template, not a completed benchmark.
 
+An additional [one-source screen-recording comparison](real-video-2026-10-07.md) records actual eight-frame OCR results for both samplers. Both recovered the same five of six literal identifiers on that short clip, so it does not establish a semantic recall improvement.
+
 ## Locally tested synthetic comparison — September 12, 2026
 
 Run from `tech-radar-api`:

@@ -1,0 +1,652 @@
+{
+  "source": {
+    "local_media_path": "creative-media/buildwithsid/public/project-demos/radar-capture.mp4",
+    "sha256": "c2592b3e8aa653c937f8211da79298323c7fd5daa1b2137fcfc7e777eb016d12",
+    "duration_seconds": 40.533333,
+    "width": 1000,
+    "height": 1300,
+    "nominal_fps": 15,
+    "audio": false
+  },
+  "labels_sha256": "4b35d0f64285081c3f6aec3dfd31f0f5caaf6025faef4b23d1434b8e37a88d04",
+  "scope": "one silent raw screen recording; exploratory local sampling/OCR, not a scraper/provider benchmark",
+  "controls": {
+    "frames": 8,
+    "width": 960,
+    "ocr_psm": 6,
+    "repeats": 3,
+    "network": false,
+    "paid_api_calls": 0
+  },
+  "versions": {
+    "python": "3.14.7",
+    "ffmpeg": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+    "tesseract": "tesseract 5.5.3"
+  },
+  "modes": {
+    "baseline": {
+      "attempts": [
+        {
+          "sampling_seconds": 0.15743383299559355,
+          "ocr_seconds": 7.2250371249974705,
+          "warning": null,
+          "frame_count": 8,
+          "matched_identifiers": [
+            ".riv",
+            "Jitter",
+            "Rive",
+            "https://jitter.video/product/",
+            "https://rive.app/docs/editor/ai/mcp"
+          ],
+          "identifier_recall": 0.8333333333333334,
+          "frames": [
+            {
+              "file": "frame-001.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 2533,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nof 70 findings Clear filters Subscribe via RSS.\nJuL 6, 2826 [Instagram | REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-002.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 7600,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS.\nJul 6, 2826 [Instagram |REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvyus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-003.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 12667,
+              "ocr_text": "= e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS\nJuL 6, 2626 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-004.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 17733,
+              "ocr_text": "= e = |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n* Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-005.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 22800,
+              "ocr_text": "= e = |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 jinstagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n\u00ab Rive provides interactive graphics and a React runtime for rendering *.riv*\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-006.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 27867,
+              "ocr_text": "= e e)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n\u00ab For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n* Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n\u00a2 Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-007.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 32933,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-008.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 38000,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n* Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            }
+          ]
+        },
+        {
+          "sampling_seconds": 0.16922595800133422,
+          "ocr_seconds": 7.267367833999742,
+          "warning": null,
+          "frame_count": 8,
+          "matched_identifiers": [
+            ".riv",
+            "Jitter",
+            "Rive",
+            "https://jitter.video/product/",
+            "https://rive.app/docs/editor/ai/mcp"
+          ],
+          "identifier_recall": 0.8333333333333334,
+          "frames": [
+            {
+              "file": "frame-001.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 2533,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nof 70 findings Clear filters Subscribe via RSS.\nJuL 6, 2826 [Instagram | REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-002.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 7600,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS.\nJul 6, 2826 [Instagram |REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvyus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-003.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 12667,
+              "ocr_text": "= e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS\nJuL 6, 2626 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-004.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 17733,
+              "ocr_text": "= e = |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n* Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-005.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 22800,
+              "ocr_text": "= e = |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 jinstagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n\u00ab Rive provides interactive graphics and a React runtime for rendering *.riv*\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-006.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 27867,
+              "ocr_text": "= e e)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n\u00ab For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n* Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n\u00a2 Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-007.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 32933,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-008.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 38000,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n* Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            }
+          ]
+        },
+        {
+          "sampling_seconds": 0.14117570799862733,
+          "ocr_seconds": 7.310691874998156,
+          "warning": null,
+          "frame_count": 8,
+          "matched_identifiers": [
+            ".riv",
+            "Jitter",
+            "Rive",
+            "https://jitter.video/product/",
+            "https://rive.app/docs/editor/ai/mcp"
+          ],
+          "identifier_recall": 0.8333333333333334,
+          "frames": [
+            {
+              "file": "frame-001.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 2533,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nof 70 findings Clear filters Subscribe via RSS.\nJuL 6, 2826 [Instagram | REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-002.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 7600,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS.\nJul 6, 2826 [Instagram |REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvyus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-003.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 12667,
+              "ocr_text": "= e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS\nJuL 6, 2626 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-004.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 17733,
+              "ocr_text": "= e = |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n* Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-005.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 22800,
+              "ocr_text": "= e = |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 jinstagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n\u00ab Rive provides interactive graphics and a React runtime for rendering *.riv*\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-006.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 27867,
+              "ocr_text": "= e e)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n\u00ab For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n* Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n\u00a2 Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-007.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 32933,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-008.png",
+              "timestamp_ms": null,
+              "nominal_interval_midpoint_ms": 38000,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n* Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            }
+          ]
+        }
+      ],
+      "median_sampling_seconds": 0.15743383299559355,
+      "median_ocr_seconds": 7.267367833999742
+    },
+    "current": {
+      "attempts": [
+        {
+          "sampling_seconds": 0.7060762920009438,
+          "ocr_seconds": 7.316213166996022,
+          "warning": null,
+          "frame_count": 8,
+          "matched_identifiers": [
+            ".riv",
+            "Jitter",
+            "Rive",
+            "https://jitter.video/product/",
+            "https://rive.app/docs/editor/ai/mcp"
+          ],
+          "identifier_recall": 0.8333333333333334,
+          "frames": [
+            {
+              "file": "frame-001.png",
+              "timestamp_ms": 2533,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nlof 70 findings Clearfilters Subscribe via RSS\nJuL 6, 2826 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-002.png",
+              "timestamp_ms": 7600,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS\nJuL 6, 2826 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-003.png",
+              "timestamp_ms": 12667,
+              "ocr_text": "= e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools x All sources - All evidence levels a\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nof 70 findings Clear filters Subscribe via RSS\nJuL 6, 2826 linstagram) |REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-004.png",
+              "timestamp_ms": 17733,
+              "ocr_text": "= e a |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\nJitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ >)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-005.png",
+              "timestamp_ms": 22800,
+              "ocr_text": "= e a |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 |instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\nJitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n\u00ab Rive provides interactive graphics and a React runtime for rendering *.riv*\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-006.png",
+              "timestamp_ms": 27867,
+              "ocr_text": "= e e)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n* For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\" are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter. video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n\u00a2 Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-007.png",
+              "timestamp_ms": 32933,
+              "ocr_text": "=| e LK)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u2122\nassets and controlling them from application state. React documentation\n\n\u00ab For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-008.png",
+              "timestamp_ms": 38000,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            }
+          ]
+        },
+        {
+          "sampling_seconds": 0.7265665420054574,
+          "ocr_seconds": 7.207606374999159,
+          "warning": null,
+          "frame_count": 8,
+          "matched_identifiers": [
+            ".riv",
+            "Jitter",
+            "Rive",
+            "https://jitter.video/product/",
+            "https://rive.app/docs/editor/ai/mcp"
+          ],
+          "identifier_recall": 0.8333333333333334,
+          "frames": [
+            {
+              "file": "frame-001.png",
+              "timestamp_ms": 2533,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nlof 70 findings Clearfilters Subscribe via RSS\nJuL 6, 2826 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-002.png",
+              "timestamp_ms": 7600,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS\nJuL 6, 2826 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-003.png",
+              "timestamp_ms": 12667,
+              "ocr_text": "= e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools x All sources - All evidence levels a\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nof 70 findings Clear filters Subscribe via RSS\nJuL 6, 2826 linstagram) |REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-004.png",
+              "timestamp_ms": 17733,
+              "ocr_text": "= e a |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\nJitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ >)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-005.png",
+              "timestamp_ms": 22800,
+              "ocr_text": "= e a |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 |instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\nJitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n\u00ab Rive provides interactive graphics and a React runtime for rendering *.riv*\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-006.png",
+              "timestamp_ms": 27867,
+              "ocr_text": "= e e)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n* For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\" are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter. video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n\u00a2 Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-007.png",
+              "timestamp_ms": 32933,
+              "ocr_text": "=| e LK)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u2122\nassets and controlling them from application state. React documentation\n\n\u00ab For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-008.png",
+              "timestamp_ms": 38000,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            }
+          ]
+        },
+        {
+          "sampling_seconds": 0.7079764579975745,
+          "ocr_seconds": 7.20200304199534,
+          "warning": null,
+          "frame_count": 8,
+          "matched_identifiers": [
+            ".riv",
+            "Jitter",
+            "Rive",
+            "https://jitter.video/product/",
+            "https://rive.app/docs/editor/ai/mcp"
+          ],
+          "identifier_recall": 0.8333333333333334,
+          "frames": [
+            {
+              "file": "frame-001.png",
+              "timestamp_ms": 2533,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nlof 70 findings Clearfilters Subscribe via RSS\nJuL 6, 2826 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-002.png",
+              "timestamp_ms": 7600,
+              "ocr_text": "al e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools| x All sources v All evidence levels v\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\n1of 70 findings Clear filters Subscribe via RSS\nJuL 6, 2826 linstagram) REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-003.png",
+              "timestamp_ms": 12667,
+              "ocr_text": "= e \u00a9)\nLive from the radar\nEvery Al tool that crosses my feed gets pipelined: transcript, research agent, verdict.\nThese are the latest findings, published straight from the pipeline.\nSearch findings Source Evidence\nAnimation tools x All sources - All evidence levels a\nEvidence labels reflect the available source material, not a product endorsement. Strong: better-supported findings.\nReview: needs further checking. Weak: limited evidence. Unrated: not yet scored\nof 70 findings Clear filters Subscribe via RSS\nJuL 6, 2826 linstagram) |REVIEW\nAnimation tools: Jitter and Rive\nA partial deviog capture, supplemented with official animation and React integration docs.\nbwg> Copyright \u00a9 2026 Sidharth Grover. All Rights Reserved. oyvus\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive"
+              ]
+            },
+            {
+              "file": "frame-004.png",
+              "timestamp_ms": 17733,
+              "ocr_text": "= e a |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\nJitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ >)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-005.png",
+              "timestamp_ms": 22800,
+              "ocr_text": "= e a |\n\u20ac Back to the radar\n\nAnimation tools: Jitter and Rive\n\nJuL 6, 2926 |instagram) REVIEW\n\nOriginal post &\n\nTL;DR\n\nThe captured devlog introduces animation options and names Jitter before the\n\ntranscript cuts off. Official documentation separately confirms Jitter's Figma\n\nimport/export workflow and Rive's interactive animation tooling. The original\nfinding overstated what the captured video established and included an untested\nintegration recipe. Treat this as a reference for a small prototype, not a ready-to-\nship dashboard change.\n\nWhat it actually is\n\nReviewed against'primary sources on 2026-09-27. The original caption,\n\ntranscript excerpt, and OCR above are preserved; this review did not recover the\n\nfull video.\n\nJitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n\u00ab Rive provides interactive graphics and a React runtime for rendering *.riv*\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n+ The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n+ Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00a2 Primary: https://jitter.video/product/ =)\n\n\u00a2 Docs: https://rive.app/docs/runtimes/react/react\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://jitter.video/product/"
+              ]
+            },
+            {
+              "file": "frame-006.png",
+              "timestamp_ms": 27867,
+              "ocr_text": "= e e)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n* For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\" are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter. video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n\u00a2 Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-007.png",
+              "timestamp_ms": 32933,
+              "ocr_text": "=| e LK)\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u2122\nassets and controlling them from application state. React documentation\n\n\u00ab For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/Jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            },
+            {
+              "file": "frame-008.png",
+              "timestamp_ms": 38000,
+              "ocr_text": "=| e )\ntun viucu.\n\n+ Jitter is a motion-design product with Figma import and video, GIF, and Lottie\nexport. These capabilities are documented by Jitter, rather than inferred from\nthe incomplete transcript. Product documentation\n\n+ Rive provides interactive graphics and a React runtime for rendering *.riv\u00ae\nassets and controlling them from application state. React documentation\n\n+ For new Rive integrations, the vendor recommends data binding; existing\nstate-machine inputs remain supported. The previous recipe mixed booleans\nwith triggers and asserted a runtime size without measurement. Those\ninstructions have been removed. Migration guide\n\n* The exact four-tool list and the phrase \u201cFigma Motion/LottieFiles\u201d are not\nestablished by the retained transcript. No claim about that plugin's identity or\ncapabilities is made here.\n\n* Repository popularity and an open-source license are not applicable to the\ndeviog itself; the previous zero-star placeholder was not a measured\nrepository fact.\n\nLinks\n\n\u00ab Primary: https:/jjitter.video/product/\n\n* Docs: https://rive.app/docs/runtimes/react/react\n\n\u00a2 Docs: https://rive.app/docs/editor/ai/mcp\n\n\u00a2 Docs: https://rive.app/docs/editor/data-binding/migration-guide\n\n* Docs: https://help.jitter.video/en/articles/6498727-create-a-new-file\n\nKickstarter guide\n\n1. For an exported motion graphic, import one Figma design into Jitter and try its\n\ntimeline workflow. Check the export format and plan restrictions before adopting\n\nit. 2. For an interactive in-app graphic, create one Rive asset in the editor. MCP is\noptional; follow the official desktop setup if using it, then inspect the resulting\nasset and export it for runtime use. 3. Follow the current React quickstart and\nrenderer guidance. Bind application state using the asset's actual view-model\nproperty names. Do not copy the removed hard-coded \u201cstatussh\u201d recipe into an\napp without an asset implementing it. 4. Check visual states, asset-load failure,\nreduced-motion behavior, and actual transfer size in a local prototype. No asset,\nintegration, or performance test was completed during this research review.\n",
+              "matched_identifiers": [
+                "Jitter",
+                "Rive",
+                ".riv",
+                "https://rive.app/docs/editor/ai/mcp"
+              ]
+            }
+          ]
+        }
+      ],
+      "median_sampling_seconds": 0.7079764579975745,
+      "median_ocr_seconds": 7.207606374999159
+    }
+  }
+}
