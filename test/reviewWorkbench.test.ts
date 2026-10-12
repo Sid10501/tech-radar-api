@@ -61,6 +61,83 @@ describe("owner review browser script", () => {
     expect(fields.get("[data-review-status]").textContent).toMatch(/Reload the finding/);
   });
 
+  it("keeps newer rationale typing when an earlier save is acknowledged", async () => {
+    const pending = deferred<any>();
+    const fields = new Map<string, any>();
+    for (const selector of ["decision", "rationale", "project", "status", "save", "question", "success", "create"]) {
+      fields.set(`[data-review-${selector}]`, { value: "", textContent: "", disabled: false, handlers: {} as Record<string, () => Promise<void> | void>, addEventListener(event: string, handler: () => Promise<void> | void) { this.handlers[event] = handler; } });
+    }
+    fields.get("[data-review-decision]").value = "Try";
+    fields.get("[data-review-rationale]").value = "Sent rationale";
+    const context = vm.createContext({ state: { privateUnlocked: true, selectedId: "signal.md" },
+      document: { getElementById: () => ({ querySelector: (selector: string) => fields.get(selector) ?? null }) },
+      requestHeaders: () => ({}), escapeHtml: String, fetch: async () => pending.promise,
+      renderDetail: () => { context.lastHtml = vm.runInContext("reviewPanel({ id: 'signal.md' })", context); } });
+    vm.runInContext(SID_REVIEW_SCRIPT, context);
+    vm.runInContext("reviewState.byId.set('signal.md', { review: { decision: 'Try', rationale: 'Old', projectSlug: null, updatedAt: '2026-10-01T00:00:00.000Z' }, brief: null }); bindReviewPanel({ id: 'signal.md' })", context);
+    const saving = fields.get("[data-review-save]").handlers.click();
+    fields.get("[data-review-rationale]").value = "New work typed during save";
+    fields.get("[data-review-rationale]").handlers.input();
+    pending.resolve({ ok: true, json: async () => ({ review: { decision: "Try", rationale: "Sent rationale", projectSlug: null, updatedAt: "2026-10-01T00:00:01.000Z" } }) });
+    await saving;
+    expect(context.lastHtml).toContain("New work typed during save");
+    expect(context.lastHtml).toContain("Unsaved changes");
+    expect(vm.runInContext("reviewState.byId.get('signal.md').review.rationale", context)).toBe("Sent rationale");
+  });
+
+  it("keeps question and criteria drafts through a late detail render and review refresh", async () => {
+    const pending = deferred<any>();
+    const fields = new Map<string, any>();
+    for (const selector of ["decision", "rationale", "project", "status", "save", "question", "success", "create"]) {
+      fields.set(`[data-review-${selector}]`, { value: "", textContent: "", disabled: false, handlers: {} as Record<string, () => Promise<void> | void>, addEventListener(event: string, handler: () => Promise<void> | void) { this.handlers[event] = handler; } });
+    }
+    const context = vm.createContext({ state: { privateUnlocked: true, selectedId: "signal.md" },
+      document: { getElementById: () => ({ querySelector: (selector: string) => fields.get(selector) ?? null }) },
+      requestHeaders: () => ({}), escapeHtml: String, fetch: async () => pending.promise,
+      renderDetail: () => { context.lastHtml = vm.runInContext("reviewPanel({ id: 'signal.md' })", context); } });
+    vm.runInContext(SID_REVIEW_SCRIPT, context);
+    vm.runInContext("reviewState.byId.set('signal.md', { review: { decision: 'Try', rationale: 'Test', projectSlug: null, updatedAt: '2026-10-01T00:00:00.000Z' }, brief: null }); bindReviewPanel({ id: 'signal.md' })", context);
+    fields.get("[data-review-question]").value = "Does the late frame survive?";
+    fields.get("[data-review-question]").handlers.input();
+    fields.get("[data-review-success]").value = "Find 90 percent";
+    fields.get("[data-review-success]").handlers.input();
+    vm.runInContext("renderDetail()", context); // the finding detail request completes after the owner starts typing
+    expect(context.lastHtml).toContain("Does the late frame survive?");
+    const refreshing = vm.runInContext("loadReview('signal.md')", context);
+    pending.resolve({ ok: true, json: async () => ({ review: { decision: "Try", rationale: "Test", projectSlug: null, updatedAt: "2026-10-01T00:00:00.000Z" }, brief: null }) });
+    await refreshing;
+    expect(context.lastHtml).toContain("Does the late frame survive?");
+    expect(context.lastHtml).toContain("Find 90 percent");
+  });
+
+  it("keeps newer question text visible when a pending experiment creation completes", async () => {
+    const created = deferred<any>();
+    const refreshed = deferred<any>();
+    const fields = new Map<string, any>();
+    for (const selector of ["decision", "rationale", "project", "status", "save", "question", "success", "create"]) {
+      fields.set(`[data-review-${selector}]`, { value: "", textContent: "", disabled: false, handlers: {} as Record<string, () => Promise<void> | void>, addEventListener(event: string, handler: () => Promise<void> | void) { this.handlers[event] = handler; } });
+    }
+    fields.get("[data-review-question]").value = "Original question";
+    fields.get("[data-review-success]").value = "Original criterion";
+    const context = vm.createContext({ state: { privateUnlocked: true, selectedId: "signal.md" },
+      document: { getElementById: () => ({ querySelector: (selector: string) => fields.get(selector) ?? null }) },
+      requestHeaders: () => ({}), escapeHtml: String,
+      fetch: async (url: string) => url.endsWith("/experiment") ? created.promise : refreshed.promise,
+      renderDetail: () => { context.lastHtml = vm.runInContext("reviewPanel({ id: 'signal.md' })", context); } });
+    vm.runInContext(SID_REVIEW_SCRIPT, context);
+    vm.runInContext("reviewState.byId.set('signal.md', { review: { decision: 'Try', rationale: 'Test', projectSlug: null, updatedAt: '2026-10-01T00:00:00.000Z' }, brief: null }); bindReviewPanel({ id: 'signal.md' })", context);
+    const creating = fields.get("[data-review-create]").handlers.click();
+    fields.get("[data-review-question]").value = "Newer question";
+    fields.get("[data-review-question]").handlers.input();
+    const brief = { id: "brief-1", experiment: { status: "planned", result: null } };
+    created.resolve({ ok: true, json: async () => ({ brief }) });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    refreshed.resolve({ ok: true, json: async () => ({ review: { decision: "Try", rationale: "Test", projectSlug: null, updatedAt: "2026-10-01T00:00:01.000Z" }, brief }) });
+    await creating;
+    expect(context.lastHtml).toContain("Newer question");
+    expect(context.lastHtml).toContain("not in the saved experiment");
+  });
+
   it("opens and focuses the linked Lab brief after loading the owner workspace", async () => {
     const script = LAB_DASHBOARD_HTML.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     expect(script).toBeTruthy();
