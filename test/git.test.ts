@@ -36,6 +36,29 @@ afterAll(() => {
 });
 
 describe("AiMemoryRepo", () => {
+  it("clones and reads a local repo with production Git app variables and configured SSH key", async () => {
+    const names = ["GIT_DEPLOY_KEY_B64", "GIT_APP_SETTING", "GIT_PAGER", "PAGER", "VISUAL", "EDITOR", "PREFIX", "SSH_ASKPASS"] as const;
+    const previous = names.map((name) => process.env[name]);
+    process.env.GIT_DEPLOY_KEY_B64 = "dummy-key-not-for-git";
+    process.env.GIT_APP_SETTING = "dummy-app-value";
+    for (const name of names.slice(2)) delete process.env[name];
+    process.env.PAGER = "dummy-pager";
+    process.env.VISUAL = "dummy-editor";
+    try {
+      const localDir = path.join(workDir, "production-env-clone");
+      const underTest = new AiMemoryRepo({
+        remoteUrl: bareRepoDir,
+        localDir,
+        gitAuthor: { name: "Test Bot", email: "bot@test.com" },
+        sshKeyPath: path.join(workDir, "unused-test-key"),
+      });
+      await underTest.init();
+      await underTest.pullLatest();
+      expect(fs.existsSync(path.join(localDir, "tech-radar", "INBOX.md"))).toBe(true);
+    } finally {
+      names.forEach((name, index) => { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; });
+    }
+  });
   it("serializes checkout mutations through one shared async queue", async () => {
     const events: string[] = [];
     let release!: () => void;

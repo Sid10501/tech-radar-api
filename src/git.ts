@@ -69,7 +69,12 @@ export class AiMemoryRepo {
   async init(): Promise<void> {
     const { remoteUrl, localDir, gitAuthor, sshKeyPath } = this.opts;
 
-    const env: Record<string, string> = { ...process.env as Record<string, string> };
+    // simple-git 4 guards Git control variables supplied through .env(). Keep
+    // app-only GIT_* secrets and editor/askpass hooks out of Git subprocesses.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([key, value]) =>
+        value !== undefined && !/^GIT_/i.test(key) && !/^(EDITOR|VISUAL|PAGER|PREFIX|SSH_ASKPASS)$/i.test(key)),
+    ) as Record<string, string>;
     if (sshKeyPath) {
       env["GIT_SSH_COMMAND"] = `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no`;
     }
@@ -80,6 +85,7 @@ export class AiMemoryRepo {
         baseDir: path.dirname(localDir),
         config: [],
         unsafe: { allowUnsafeSshCommand: true },
+        allowEnvironment: ["GIT_SSH_COMMAND"],
       });
       if (sshKeyPath) parentGit.env(env);
       const branch = this.opts.branch ?? "master";
@@ -93,6 +99,7 @@ export class AiMemoryRepo {
         `user.email=${gitAuthor.email}`,
       ],
       unsafe: { allowUnsafeSshCommand: true },
+      allowEnvironment: ["GIT_SSH_COMMAND"],
     });
     if (sshKeyPath) this.git.env(env);
   }
