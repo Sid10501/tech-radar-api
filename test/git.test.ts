@@ -87,6 +87,15 @@ describe("AiMemoryRepo", () => {
     expect(fs.existsSync(path.join(workDir, "clone", "tech-radar", "INBOX.md"))).toBe(true);
   });
 
+  it("links findings relative to the index and keeps titles in one table cell", async () => {
+    const index = path.join(workDir, "clone", "tech-radar", "INDEX.md");
+    fs.appendFileSync(index, "<!-- new rows inserted above this line -->\n");
+    await repo.updateIndex({ date: "2026-11-26", title: "A | B\n$&", finding: "sample.md", targetProject: "Radar | Lab" });
+    const body = fs.readFileSync(index, "utf8");
+    expect(body).toContain("| 2026-11-26 | A &#124; B $& | [sample.md](findings/sample.md) | Radar &#124; Lab |");
+    expect(body.match(/<!-- new rows inserted/g)).toHaveLength(1);
+  });
+
   it("writes a finding file and commits + pushes", async () => {
     await repo.writeFinding("2026-04-28-test-tool.md", "# Test Tool\n\nContent here.\n");
     await repo.commitAndPush("tech-radar: test-tool — 2026-04-28");
