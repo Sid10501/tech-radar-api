@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
+import { measuredCoverage, needsCaptureReview } from "./lib/captureCoverage.js";
 import { extract } from "./extract.js";
 import { runResearch } from "./agents/research.js";
 import { runImplementation } from "./agents/implementation.js";
@@ -606,7 +607,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const noRoutedBranch = ["other", "needs_review"].includes(routed.classification.category);
     const hasFinance = Boolean(routed.finance);
     const terminalFinanceStatus = routed.finance ? stockBotTerminalRunStatus(routed.finance, run.id) : undefined;
-    const pipelineStatus = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : "processed");
+    const captureReview = Boolean(routed.technology) && !requestedFinance && needsCaptureReview(measuredCoverage(enrichedExtract.instagram_capture));
+    const pipelineStatus = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : captureReview ? "needs_review" : "processed");
     run.status = mergeRunStatus(run.status, pipelineStatus);
     run.error = branchErrors.length ? branchErrors.join("; ").slice(0, 1_000) : undefined;
     run.finishedAt = run.status === "downstream_pending" ? undefined : new Date().toISOString();
@@ -626,6 +628,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
       sendTelegram(run.deduplicatedToRunId
         ? `⏭️ *Stock analysis deduplicated*\nReusing run ${run.deduplicatedToRunId}${link}`
         : `${terminalFinanceStatus === "processed" ? "✅" : "⚠️"} *Stock analysis ${routed.finance!.status}*${link}`);
+    } else if (captureReview && !branchErrors.length) {
+      sendTelegram(`⚠️ *Finding saved for review*\n\nInstagram slide evidence is incomplete.\n${url.slice(0, 80)}`);
     } else if (noRoutedBranch) {
       sendTelegram(`⚠️ *Needs review*\n\n${url.slice(0, 80)}\n\n${routed.classification.reasons.join("; ").slice(0, 300)}`);
     } else if (branchErrors.length) {

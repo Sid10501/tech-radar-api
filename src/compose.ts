@@ -1,3 +1,4 @@
+import { measuredCoverage, needsCaptureReview } from "./lib/captureCoverage.js";
 import { findingFilename } from "./lib/slug.js";
 import { buildWorkflowAuditBlock, linkedArtifactsForExtract } from "./lib/linkedArtifacts.js";
 import type { ExtractResult } from "./extract.js";
@@ -55,7 +56,7 @@ export function composeFinding(input: {
     "Problem: " + singleLine(idea.problem), "Prototype: " + singleLine(idea.prototype),
     "Question: " + singleLine(idea.question), "Success criteria: " + singleLine(idea.successCriteria),
   ].join("\n\n") : "";
-  const verdict = capture && !capture.slides.some(slide => slide.text) ? "#review" : implementation.target_project === "none" ? "#skip" : "#try-soon";
+  const verdict = needsCaptureReview(measuredCoverage(capture)) ? "#review" : implementation.target_project === "none" ? "#skip" : "#try-soon";
   const visualTextBlock = extract.visual_text?.trim()
     ? `\nOn-screen text / OCR:\n${extract.visual_text.slice(0, 400)}\n`
     : "";
@@ -163,20 +164,20 @@ ${research.kickstarter}
 
 ## Fit for ${OWNER_NAME}
 
-- Target project: ${implementation.target_project}
-- ${implementation.fit_for_owner}
+- Target project: ${singleLine(implementation.target_project)}
+- ${singleLine(implementation.fit_for_owner)}
 - Verdict: \`${verdict}\`
 
 ## Implementation Idea
 
 Pseudocode / untested proposal; no local execution was performed by the recommendation agent.
 
-${implementation.implementation_idea_markdown.trim()}
+${implementation.implementation_idea_markdown.trim().replace(/^#{1,2}(?=\s)/gm, "###")}
 ${ideaBlock}
 
 ## Follow-ups
 
-${implementation.follow_ups.map((f) => `- [ ] ${f}`).join("\n")}
+${implementation.follow_ups.map((f) => `- [ ] ${singleLine(f)}`).join("\n")}
 `;
 
   return { filename, body };

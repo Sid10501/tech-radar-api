@@ -83,6 +83,7 @@ describe("finding audit helpers", () => {
       missingTranscript: 2,
       missingRepoOrDocs: 1,
       enrichmentReasons: {
+        incomplete_capture: 0,
         weak_quality: 1,
         missing_repo_or_docs: 1,
         missing_transcript: 2,
@@ -120,6 +121,7 @@ describe("finding audit helpers", () => {
       missingTranscript: 2,
       missingRepoOrDocs: 1,
       enrichmentReasons: {
+        incomplete_capture: 0,
         weak_quality: 1,
         missing_repo_or_docs: 1,
         missing_transcript: 2,

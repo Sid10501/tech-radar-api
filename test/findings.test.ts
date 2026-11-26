@@ -1082,6 +1082,23 @@ describe("public finding shape", () => {
     expect(detail?.sections.research).toContain("reusable senior-dev prompt");
   });
 
+  it("keeps nested public-named headings and standalone proposals inside the owner block", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-owner-boundary-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    const body = SAMPLE_FINDING.replace("## What the post showed", "## Source coverage\n\nOCR returned text for 1 of 3 listed media items.\n\n## What the post showed")
+      + "\n## Links\nOwner-only reference.\n## Source coverage\nOwner-only notes.\n### Standalone build idea (brainstorm)\nBuild: private prototype.\n## Follow-ups\nOwner-only question.";
+    fs.writeFileSync(path.join(findingsDir, "example.md"), body);
+    const detail = getPublicFindingDetail("example.md", dir);
+    expect(JSON.stringify(detail)).not.toMatch(/Owner-only|private prototype/);
+    expect(detail?.finding.captureCoverage).toEqual({ listed: 3, withText: 1 });
+    expect(detail?.finding.publicStatus.state).toBe("needs_verification");
+    expect(detail?.finding.triage.retryable).toBe(true);
+    expect(parseFindingMarkdown("example.md", body).recommendedAction).toBe("Retry");
+    const recovered = body.replace("OCR returned text for 1 of 3 listed media items.", "On November 26 the extractor listed 3 media items and returned OCR text for 1.");
+    expect(parseFindingMarkdown("example.md", recovered).captureCoverage).toEqual({ listed: 3, withText: 1 });
+  });
+
   it("publishes a dated factual correction after private follow-ups without exposing private sections", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "public-correction-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
