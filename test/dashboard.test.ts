@@ -1,6 +1,6 @@
 import vm from "node:vm";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   DASHBOARD_HTML,
@@ -70,6 +70,7 @@ function detailFixture(finding: ReturnType<typeof findingFixture>) {
 
 function createDashboardHarness(options: {
   initialHistoryState?: unknown;
+  queryString?: string;
   mobile?: boolean;
   findingsResponse?: Promise<unknown>;
   detailResponse?: (id: string) => Promise<unknown>;
@@ -219,7 +220,7 @@ function createDashboardHarness(options: {
     console,
     document,
     history,
-    location: { href: "http://dashboard.test/", search: "" },
+    location: { href: "http://dashboard.test/" + (options.queryString ?? ""), search: options.queryString ?? "" },
     navigator: {},
     URLSearchParams,
     fetch: options.fetch || defaultFetch,
@@ -282,6 +283,14 @@ describe("dashboard reason presentation", () => {
 });
 
 describe("dashboard HTML", () => {
+  it("advertises the public feed and opens a linked finding on mobile", async () => {
+    const html = DASHBOARD_HTML([]);
+    expect(html).toContain('rel="alternate" type="application/rss+xml"');
+    expect(html).toContain('href="/api/public/findings/rss" aria-label="Subscribe');
+    const harness = createDashboardHarness({ queryString: "?finding=child.md" });
+    await vi.waitFor(async () => expect(await harness.evaluate("state.selectedId")).toBe("child.md"));
+    expect(await harness.evaluate("state.mobileDetailOpen")).toBe(true);
+  });
   it("renders desktop filters in the detail toolbar instead of permanent sidebar chrome", () => {
     const html = DASHBOARD_HTML([]);
 

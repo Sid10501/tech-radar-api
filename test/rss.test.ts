@@ -66,6 +66,15 @@ describe("buildRssXml()", () => {
     expect(xml).toContain("</rss>");
   });
 
+  it("includes measured and unknown slide coverage while keeping legacy descriptions intact", () => {
+    const xml = buildRssXml([
+      publicFinding({ captureCoverage: { listed: 8, withText: 7 } }),
+      publicFinding({ captureCoverage: { listed: null, withText: 0 } }),
+    ], { siteBase: BASE });
+    expect(xml).toContain("OCR returned text for 7 of 8 listed media items.</description>");
+    expect(xml).toContain("Slide coverage unknown.</description>");
+  });
+
   it("escapes XML-sensitive characters in text fields", () => {
     const xml = buildRssXml(
       [
@@ -189,7 +198,8 @@ describe("GET /api/public/findings/rss", () => {
     const res = await app.inject({ method: "GET", url: "/api/public/findings/rss", headers: { host: "radar.example.com" } });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("<link>http://radar.example.com/sample</link>");
+    expect(res.body).toContain("<link>http://radar.example.com/?finding=sample.md</link>");
+    expect(res.body).toContain('<guid isPermaLink="false">http://radar.example.com/sample</guid>');
   });
 
   it("returns 200 with an empty channel when there are no findings", async () => {

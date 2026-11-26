@@ -533,8 +533,9 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
 
   app.get("/api/public/findings/rss", async (request, reply) => {
     await ensureAiMemoryCheckout();
-    const siteBase = process.env["PUBLIC_SITE_RADAR_BASE"] || `${request.protocol}://${request.headers.host}`;
-    const xml = buildRssXml(listPublicFindings(), { siteBase });
+    const portfolioBase = process.env["PUBLIC_SITE_RADAR_BASE"];
+    const siteBase = portfolioBase || `${request.protocol}://${request.headers.host}`;
+    const xml = buildRssXml(listPublicFindings(), { siteBase, dashboardLinks: !portfolioBase });
     reply.header("Content-Type", "application/rss+xml; charset=utf-8");
     setPublicReadCache(reply);
     return xml;

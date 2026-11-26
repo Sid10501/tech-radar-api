@@ -22,6 +22,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>Tech Radar</title>
+  <link rel="alternate" type="application/rss+xml" title="Tech Radar findings" href="/api/public/findings/rss">
   <style>
     :root {
       color-scheme: light;
@@ -938,6 +939,8 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
             <span id="mode-note-compact" class="mode-note-compact">Public view</span>
             <span aria-hidden="true">·</span>
             <span id="active-filter-label">All</span>
+            <span aria-hidden="true">·</span>
+            <a href="/api/public/findings/rss" aria-label="Subscribe to public findings via RSS">RSS</a>
           </div>
           <div id="queue-filter-summary" class="queue-filter-summary" aria-label="Finding quality summary">
             <span><strong id="strong-count">0</strong> Strong</span>
@@ -1162,6 +1165,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       educational_post: "Educational",
       no_artifact_expected: "No artifact expected",
       repo_found_source_weak: "Repo weak",
+      incomplete_capture: "Incomplete capture",
       shortlink_unresolved: "Shortlink unresolved",
       dm_gated_no_link: "DM gated",
     };
@@ -1317,6 +1321,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       ["educational_post", "Educational"],
       ["no_artifact_expected", "No artifact expected"],
       ["repo_found_source_weak", "Repo weak"],
+      ["incomplete_capture", "Incomplete capture"],
       ["shortlink_unresolved", "Shortlink unresolved"],
       ["dm_gated_no_link", "DM gated"],
     ];
@@ -1790,7 +1795,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         renderDetail();
         return;
       }
-      if (state.selectedId) await selectFinding(state.selectedId);
+      const entry = options.linkedFinding;
+      if (entry && state.findings.some(finding => finding.id === entry)) {
+        await selectFinding(entry, { openDetail: true, historyMode: "push" });
+      } else if (state.selectedId) await selectFinding(state.selectedId);
       else renderDetail();
     }
 
@@ -1901,7 +1909,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     renderDetail();
     syncSession().finally(async () => {
       await loadRuns();
-      await loadFindings({ preserveView: true });
+      await loadFindings({ preserveView: true, linkedFinding: new URLSearchParams(location.search).get("finding") });
     });
   </script>
 </body>
