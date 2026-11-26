@@ -1,3 +1,4 @@
+import { parseCaptureCoverage, needsCaptureReview, type CaptureCoverage } from "./lib/captureCoverage.js";
 import fs from "node:fs";
 import path from "node:path";
 import { loadAppliedMap, type AppliedEntry, type AppliedMap } from "./applied.js";
@@ -27,6 +28,7 @@ export type FindingTriageKind =
   | "unknown_tool";
 
 export type FindingTriageReason =
+  | "incomplete_capture"
   | "concept_only"
   | "educational_post"
   | "no_artifact_expected"
@@ -85,6 +87,7 @@ export interface FindingWorkflow {
 }
 
 export interface FindingSummary {
+  captureCoverage?: CaptureCoverage;
   id: string;
   filename: string;
   path: string;
@@ -118,6 +121,7 @@ export type PublicFindingStatusState =
   | "duplicate_of";
 
 export type PublicFindingStatusReason =
+  | "incomplete_capture"
   | "weak_signal"
   | "weak_retryable"
   | "unresolved_capture"
@@ -143,6 +147,7 @@ export interface FindingDetail {
   sections: {
     tldr: string;
     shown: string;
+    coverage?: string;
     workflow: string;
     research: string;
     links: string;
@@ -162,6 +167,7 @@ export interface PublicFindingDetail {
   sections: {
     tldr: string;
     shown: string;
+    coverage?: string;
     workflow: string;
     research: string;
     links: string;
@@ -174,7 +180,7 @@ export interface PublicFindingDetail {
 
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 const TEMPLATE_SECTION_HEADING =
-  /^## (TL;DR|What the post showed|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Follow-ups|Retry history|Correction — \d{4}-\d{2}-\d{2})\s*$/m;
+  /^## (TL;DR|What the post showed|Source coverage|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Follow-ups|Retry history|Correction — \d{4}-\d{2}-\d{2})\s*$/m;
 const PRIVATE_PROJECT_REFERENCE =
   /\b(Cross-Tax|StockBot|Finance Assistant|Kalkine Stocks Tracker|tech-radar-api|ai-video)\b/i;
 
@@ -377,6 +383,7 @@ function recommendedAction(
   directPublicArtifact: boolean,
   triage: FindingTriage,
 ): FindingSummary["recommendedAction"] {
+  if (triage.reasons.includes("incomplete_capture")) return "Retry";
   if (verdict.includes('#skip')) return 'Skip';
   if (verdict.includes('#bookmark')) return 'Backlog';
   if (classification === "dm_gated") return "Skip";
@@ -585,6 +592,16 @@ function hasCapturedText(value: string, unavailable: RegExp): boolean {
 }
 
 function withoutPrivateSections(markdown: string): string {
+  // Public appendices can follow owner notes in old findings. Inside the owner
+  // block a generated heading such as "Links" still belongs to the owner.
+  const ownerStart = /^## Fit for .+$/m.exec(markdown) ?? /^## Implementation Idea\s*$/m.exec(markdown);
+  if (ownerStart) {
+    const tail = markdown.slice(ownerStart.index);
+    const lastFollowups = [...tail.matchAll(/^## Follow-ups\s*$/gm)].at(-1);
+    const boundary = lastFollowups?.index ?? 0;
+    const appendix = /^## (?:Retry history|Child Artifact Intake Status|Correction — \d{4}-\d{2}-\d{2})\s*$/m.exec(tail.slice(boundary));
+    markdown = markdown.slice(0, ownerStart.index) + (appendix ? tail.slice(boundary + appendix.index) : "");
+  }
   const withoutSections = removeTemplateSections(
     removeTemplateSections(removeTemplateSections(markdown, "Fit for .+"), "Implementation Idea"),
     "Follow-ups",
@@ -642,6 +659,10 @@ export function toPublicFinding(finding: FindingSummary, appliedMap: AppliedMap 
   const { targetProject: _targetProject, verdict: _verdict, recommendedAction: _recommendedAction, triage: _triage, ...rest } = finding;
   const quality = publicQuality(finding);
   const triage = publicTriage(finding, quality);
+  if (needsCaptureReview(finding.captureCoverage)) {
+    triage.retryable = true;
+    triage.reasons.push("incomplete_capture");
+  }
   return {
     ...rest,
     quality,
@@ -671,6 +692,10 @@ function publicStatusFor(finding: FindingSummary, quality: FindingQuality, triag
       publishable: false,
       reason: "unresolved_capture",
     };
+  }
+
+  if (needsCaptureReview(finding.captureCoverage)) {
+    return { state: "needs_verification", publishable: true, reason: "incomplete_capture" };
   }
 
   if (quality.level === "weak") {
@@ -807,12 +832,18 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const displaySummary = displayHeader?.summary || deriveDisplaySummary(tldr) || summary;
   const retry = parseRetryHistory(markdown);
   const scoredQuality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
+  const captureCoverage = parseCaptureCoverage(textBetween(withoutPrivateSections(markdown), "Source coverage"));
   const triage = triageFinding(markdown, evidence, sourceUrl, classification, directPublicArtifact, scoredQuality);
+  if (needsCaptureReview(captureCoverage)) {
+    triage.retryable = true;
+    triage.reasons.push("incomplete_capture");
+  }
   const action = recommendedAction(scoredQuality, targetProject, verdict, evidence, classification, directPublicArtifact, triage);
   const quality = qualityWithTriageReasons(scoredQuality, action, retry);
   const workflow = workflowFromMarkdown(markdown);
 
   return {
+    ...(captureCoverage ? { captureCoverage } : {}),
     id: filename,
     filename,
     path: `tech-radar/findings/${filename}`,
@@ -1024,6 +1055,10 @@ function compareDuplicateCanonical(a: FindingSummary, b: FindingSummary): number
 function duplicateCanonicalScore(finding: FindingSummary): number {
   const quality = publicQuality(finding);
   const triage = publicTriage(finding, quality);
+  if (needsCaptureReview(finding.captureCoverage)) {
+    triage.retryable = true;
+    triage.reasons.push("incomplete_capture");
+  }
   if (isUnresolvedPublicCapture(finding, quality, triage)) return 0;
   if (quality.level === "strong") return 3;
   if (quality.level === "review") return 2;
@@ -1188,6 +1223,7 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
     sections: {
       tldr: textBetween(markdown, "TL;DR"),
       shown: textBetween(markdown, "What the post showed"),
+      coverage: textBetween(markdown, "Source coverage"),
       workflow: textBetween(markdown, "Workflow Audit"),
       research: textBetween(markdown, "What it actually is"),
       links: textBetween(markdown, "Links"),
@@ -1215,6 +1251,7 @@ export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemo
     sections: {
       tldr: textBetween(publicMarkdown, "TL;DR"),
       shown: textBetween(publicMarkdown, "What the post showed"),
+      coverage: textBetween(publicMarkdown, "Source coverage"),
       workflow: textBetween(publicMarkdown, "Workflow Audit"),
       research: textBetween(publicMarkdown, "What it actually is"),
       links: textBetween(publicMarkdown, "Links"),

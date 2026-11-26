@@ -35,6 +35,7 @@ export type PublicFindingFilterCounts = Omit<FindingFilterCounts, "project" | "s
 export type EnrichmentStatus = "ready" | "needs-enrichment" | "skip";
 export type PublicEnrichmentStatus = "ready" | "needs-enrichment";
 export type EnrichmentReason =
+  | "incomplete_capture"
   | "weak_quality"
   | "missing_repo_or_docs"
   | "missing_transcript"
@@ -77,6 +78,7 @@ function emptyActionCounts(): Record<Action, number> {
 
 function emptyReasonCounts(): Record<EnrichmentReason, number> {
   return {
+    incomplete_capture: 0,
     weak_quality: 0,
     missing_repo_or_docs: 0,
     missing_transcript: 0,
@@ -111,7 +113,7 @@ export function enrichmentProfile(finding: FindingSummary): EnrichmentProfile {
   if (finding.verdict.includes("#skip")) privateReasons.push("skip_verdict");
   if (finding.recommendedAction === "Skip") privateReasons.push("recommended_skip");
   const blocked = hasEnrichmentBlockingReason(reasons, finding);
-  const status = privateReasons.length ? "skip" : blocked ? "needs-enrichment" : "ready";
+  const status = reasons.includes("incomplete_capture") ? "needs-enrichment" : privateReasons.length ? "skip" : blocked ? "needs-enrichment" : "ready";
   return {
     status,
     publicStatus: blocked ? "needs-enrichment" : "ready",
@@ -146,6 +148,7 @@ function enrichmentReasonsFor(finding: FindingSummary | PublicFindingSummary): E
 function hasEnrichmentBlockingReason(reasons: EnrichmentReason[], finding?: FindingSummary | PublicFindingSummary): boolean {
   if (finding?.triage && !finding.triage.retryable) return false;
   return reasons.some((reason) =>
+    reason === "incomplete_capture" ||
     reason === "weak_quality" ||
     reason === "missing_repo_or_docs" ||
     reason === "source_uncertainty" ||

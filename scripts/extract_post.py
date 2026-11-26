@@ -330,7 +330,7 @@ def try_html_meta(url: str) -> dict | None:
         return None
     meta: dict[str, str] = {}
     for m in META_RE.finditer(body):
-        meta.setdefault(m.group("prop").lower(), m.group("val"))
+        meta.setdefault(m.group("prop").lower(), html.unescape(m.group("val")))
     return meta or None
 
 
@@ -525,7 +525,11 @@ def run_ytdlp_json_cli(url: str, max_comments: int) -> tuple[dict | None, str | 
         return None, "metadata fallback blocked: unsafe URL"
     if not shutil.which("yt-dlp"):
         return None, "metadata fallback skipped: yt-dlp CLI not installed"
-    args = ["yt-dlp", "--skip-download", "--dump-json"]
+    args = ["yt-dlp", "--skip-download"]
+    if detect_platform(url) == "instagram":
+        args.extend(["--dump-single-json", "--ignore-no-formats-error", "--compat-options", "no-certifi"])
+    else:
+        args.append("--dump-json")
     if max_comments > 0:
         args.extend([
             "--write-comments",
@@ -938,6 +942,7 @@ def extract_image_text(image_paths: list[Path]) -> tuple[str | None, str | None]
         try:
             result = subprocess.run(
                 ["tesseract", str(image_path), "stdout", "--psm", "6"],
+                env={**os.environ, "OMP_THREAD_LIMIT": os.environ.get("OMP_THREAD_LIMIT", "1")},
                 check=False,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -1195,7 +1200,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
     errors: list[str] = []
     metadata_from_cli = False
 
-    if platform == "youtube" and not info:
+    if not info and (platform == "youtube" or (platform == "instagram" and urlparse(url).path.startswith("/p/"))):
         cli_info, cli_err = run_ytdlp_json_cli(url, 0)
         info = merge_cli_info(info, cli_info)
         metadata_from_cli = bool(cli_info)
@@ -1340,20 +1345,45 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         if ocr_err:
             errors.append(ocr_err)
 
-    if do_ocr:
+    post = re.fullmatch(r"/p/([A-Za-z0-9_-]+)/?", urlparse(url).path) if platform == "instagram" else None
+    children = (info or {}).get("entries") if post else None
+    if post and isinstance(children, list) and children:
+        slides = []
+        limit = _int_env("OCR_MAX_IMAGES", 20, 1, 20)
+        for index, child in enumerate(children, 1):
+            slide = {"index": index, "status": "unavailable", "text": None}
+            slides.append(slide)
+            if not do_ocr or index > limit:
+                slide["status"] = "skipped"
+                continue
+            candidates = collect_image_urls(child if isinstance(child, dict) else None)
+            if not candidates:
+                continue
+            paths, assets, warnings = download_image_assets(candidates[:1], out_dir / f"slide-{index}")
+            errors.extend(warnings)
+            if paths:
+                text, warning = extract_image_text(paths)
+                slide.update(status="ocr" if text else "no text", text=text)
+                assets[0]["ocr_text"] = text
+                result["media_assets"].extend(assets)
+                visual_blocks.append(text)
+                if warning and warning not in errors:
+                    errors.append(warning)
+        result["instagram_capture"] = {"kind": "enumerated", "slides": slides}
+    elif do_ocr:
         image_urls = collect_image_urls(info, html_meta)
         image_paths, image_assets, image_warnings = download_image_assets(image_urls, out_dir)
         result["media_assets"].extend(image_assets)
         errors.extend(image_warnings)
-        if image_paths:
-            image_text, image_ocr_err = extract_image_text(image_paths)
+        for image_path, asset in zip(image_paths, image_assets):
+            image_text, image_ocr_err = extract_image_text([image_path])
             if image_text:
                 visual_blocks.append(image_text)
-                for asset in result["media_assets"]:
-                    if asset.get("type") == "image" and not asset.get("ocr_text"):
-                        asset["ocr_text"] = image_text
-            elif image_ocr_err:
+                asset["ocr_text"] = image_text
+            if image_ocr_err and image_ocr_err not in errors:
                 errors.append(image_ocr_err)
+    if post and not children and not video_path and not result["transcript"]:
+        result["instagram_capture"] = {"kind": "unverified", "slides": []}
 
     merged_visual_text = merge_text_blocks(visual_blocks)
     if merged_visual_text:

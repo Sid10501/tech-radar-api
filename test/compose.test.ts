@@ -231,3 +231,15 @@ it('persists unknown metrics, evidence provenance, and pseudocode labels without
   expect(body).toContain('source_verified'); expect(body).toContain('retrieved 2026-09-12');
   expect(body).toContain('Pseudocode / untested proposal'); expect(body).toContain('General descriptions are reported');
 });
+
+it("preserves ordered slide evidence and a separate private brainstorm", async () => {
+  const { composeFinding } = await import("../src/compose.js");
+  const { body } = composeFinding({
+    extract: { ...extractFixture, platform: "instagram", url: "https://www.instagram.com/p/example/?img_index=7",
+      instagram_capture: { kind: "enumerated", slides: [{ index: 1, status: "ocr", text: "Humanizer" }, { index: 2, status: "unavailable", text: null }] } },
+    research: researchFixture, implementation: { ...implementationFixture, standalone_idea: { title: "Compare edits", problem: "Draft reviews take time.", prototype: "Review one draft", question: "Does it save time?", successCriteria: "Save five minutes." } },
+  });
+  expect(body).toContain("1 of 2 listed media items");
+  expect(body).toContain("[Slide 2](https://www.instagram.com/p/example/?img_index=2)");
+  expect(body).toContain("### Standalone build idea");
+});

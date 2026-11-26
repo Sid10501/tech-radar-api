@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
+import { measuredCoverage, needsCaptureReview } from "./lib/captureCoverage.js";
 import { extract } from "./extract.js";
 import { runResearch } from "./agents/research.js";
 import { runImplementation } from "./agents/implementation.js";
@@ -48,6 +49,7 @@ export interface Run {
   extractionWorkDir?: string;
   submissionIdempotencyKey?: string;
   originalName?: string;
+  requestedSlide?: number;
   deduplicatedToRunId?: string;
 }
 
@@ -346,6 +348,8 @@ export class DuplicateRunError extends Error {
 
 export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}): Run {
   const canonicalUrl = canonicalizeSocialUrl(url);
+  const rawIndex = canonicalUrl.startsWith("https://www.instagram.com/p/") ? new URL(url).searchParams.get("img_index") : null;
+  const requestedSlide = rawIndex && /^[1-9]\d?$/.test(rawIndex) ? Number(rawIndex) : undefined;
   const requestedIntent = opts.intent ?? "technology";
   const candidates = [...runs.values()].reverse().filter((candidate) => canonicalizeIfPossible(candidate.url) === canonicalUrl
     && (candidate.intent ?? "technology") === requestedIntent);
@@ -365,6 +369,7 @@ export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}):
   const run: Run = {
     id: randomUUID(),
     url: canonicalUrl,
+    requestedSlide,
     status: "pending",
     intent: opts.intent ?? "technology",
     origin: opts.origin ?? { channel: "api" },
@@ -503,6 +508,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const extractResult = run.mediaPath
       ? await extractLocalMedia({ runId, mediaPath: run.mediaPath, workDir: extractionWorkDir })
       : await extract(url, { outDir: extractionWorkDir });
+    if (run.requestedSlide && extractResult.instagram_capture) extractResult.instagram_capture.requested_index = run.requestedSlide;
     if (run.originalName) extractResult.title = run.originalName;
 
     // Bail early if the post has no usable content — skip agents entirely
@@ -601,7 +607,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const noRoutedBranch = ["other", "needs_review"].includes(routed.classification.category);
     const hasFinance = Boolean(routed.finance);
     const terminalFinanceStatus = routed.finance ? stockBotTerminalRunStatus(routed.finance, run.id) : undefined;
-    const pipelineStatus = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : "processed");
+    const captureReview = Boolean(routed.technology) && !requestedFinance && needsCaptureReview(measuredCoverage(enrichedExtract.instagram_capture));
+    const pipelineStatus = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : captureReview ? "needs_review" : "processed");
     run.status = mergeRunStatus(run.status, pipelineStatus);
     run.error = branchErrors.length ? branchErrors.join("; ").slice(0, 1_000) : undefined;
     run.finishedAt = run.status === "downstream_pending" ? undefined : new Date().toISOString();
@@ -621,6 +628,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
       sendTelegram(run.deduplicatedToRunId
         ? `⏭️ *Stock analysis deduplicated*\nReusing run ${run.deduplicatedToRunId}${link}`
         : `${terminalFinanceStatus === "processed" ? "✅" : "⚠️"} *Stock analysis ${routed.finance!.status}*${link}`);
+    } else if (captureReview && !branchErrors.length) {
+      sendTelegram(`⚠️ *Finding saved for review*\n\nInstagram slide evidence is incomplete.\n${url.slice(0, 80)}`);
     } else if (noRoutedBranch) {
       sendTelegram(`⚠️ *Needs review*\n\n${url.slice(0, 80)}\n\n${routed.classification.reasons.join("; ").slice(0, 300)}`);
     } else if (branchErrors.length) {

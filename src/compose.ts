@@ -1,3 +1,4 @@
+import { measuredCoverage, needsCaptureReview } from "./lib/captureCoverage.js";
 import { findingFilename } from "./lib/slug.js";
 import { buildWorkflowAuditBlock, linkedArtifactsForExtract } from "./lib/linkedArtifacts.js";
 import type { ExtractResult } from "./extract.js";
@@ -39,7 +40,23 @@ export function composeFinding(input: {
     ? research.comparisons.map((c) => `  - ${c}`).join("\n")
     : "  - (none identified)";
 
-  const verdict = implementation.target_project === "none" ? "#skip" : "#try-soon";
+  const capture = extract.instagram_capture;
+  const coverage = capture?.kind === "enumerated"
+    ? `OCR returned text for ${capture.slides.filter(slide => slide.text).length} of ${capture.slides.length} listed media items.`
+    : capture ? "Slide coverage unknown. The extractor could not enumerate the post’s media." : "";
+  const captureSection = coverage ? `\n## Source coverage\n\n${coverage}${capture?.requested_index ? ` The submitted link pointed to slide ${capture.requested_index}.` : ""}\n${(capture?.slides ?? []).map(slide => {
+    const url = new URL(extract.url);
+    url.search = new URLSearchParams({ img_index: String(slide.index) }).toString();
+    return `- [Slide ${slide.index}](${url.href}) · ${slide.status}: ${slide.text?.slice(0, 1800).replace(/\s+/g, " ") ?? "No text captured"}`;
+  }).join("\n")}\n` : "";
+  const idea = implementation.standalone_idea;
+  const singleLine = (value: string) => value.replace(/\s+/g, " ").trim();
+  const ideaBlock = idea ? [
+    "### Standalone build idea (brainstorm)", "", "Build: " + singleLine(idea.title),
+    "Problem: " + singleLine(idea.problem), "Prototype: " + singleLine(idea.prototype),
+    "Question: " + singleLine(idea.question), "Success criteria: " + singleLine(idea.successCriteria),
+  ].join("\n\n") : "";
+  const verdict = needsCaptureReview(measuredCoverage(capture)) ? "#review" : implementation.target_project === "none" ? "#skip" : "#try-soon";
   const visualTextBlock = extract.visual_text?.trim()
     ? `\nOn-screen text / OCR:\n${extract.visual_text.slice(0, 400)}\n`
     : "";
@@ -113,6 +130,7 @@ ${linkedArtifactsBlock}
 ${topCommentsBlock}
 ${extractionWarningsBlock}
 
+${captureSection}
 ${workflowAuditSection}
 ## What it actually is
 
@@ -146,19 +164,20 @@ ${research.kickstarter}
 
 ## Fit for ${OWNER_NAME}
 
-- Target project: ${implementation.target_project}
-- ${implementation.fit_for_owner}
+- Target project: ${singleLine(implementation.target_project)}
+- ${singleLine(implementation.fit_for_owner)}
 - Verdict: \`${verdict}\`
 
 ## Implementation Idea
 
 Pseudocode / untested proposal; no local execution was performed by the recommendation agent.
 
-${implementation.implementation_idea_markdown.trim()}
+${implementation.implementation_idea_markdown.trim().replace(/^#{1,2}(?=\s)/gm, "###")}
+${ideaBlock}
 
 ## Follow-ups
 
-${implementation.follow_ups.map((f) => `- [ ] ${f}`).join("\n")}
+${implementation.follow_ups.map((f) => `- [ ] ${singleLine(f)}`).join("\n")}
 `;
 
   return { filename, body };

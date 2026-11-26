@@ -42,7 +42,10 @@ describe("runPipeline()", () => {
     fs.rmSync(workDir, { recursive: true, force: true });
   });
 
-  it("runs end-to-end: extract → research → implementation → compose → git push", async () => {
+  it.each([
+    { name: "complete source", capture: undefined, status: "processed" },
+    { name: "incomplete carousel", capture: { kind: "enumerated", slides: [{ index: 1, status: "ocr", text: "Cover" }, { index: 2, status: "skipped", text: null }] }, status: "needs_review" },
+  ])("runs end-to-end for $name", async ({ capture, status }) => {
     const extractFixture = JSON.parse(
       fs.readFileSync(path.join(FIXTURE_DIR, "extract_youtube.json"), "utf8"),
     );
@@ -52,7 +55,7 @@ describe("runPipeline()", () => {
       extract: vi.fn(async (_url: string, options: { outDir?: string }) => {
         extractionOutDir = options.outDir!;
         fs.writeFileSync(path.join(extractionOutDir, "frame.jpg"), "temporary frame");
-        return extractFixture;
+        return { ...extractFixture, instagram_capture: capture };
       }),
       ExtractError: class ExtractError extends Error {},
     }));
@@ -133,7 +136,7 @@ describe("runPipeline()", () => {
 
     const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-local-"));
     try {
-      const { runPipeline, getRun, listRuns } = await import("../src/runner.js");
+      const { runPipeline, registerPipelineRun, getRun, listRuns } = await import("../src/runner.js");
 
       const { runId, findingPath } = await runPipeline(
         "https://www.youtube.com/shorts/dQw4w9WgXcQ",
@@ -150,7 +153,10 @@ describe("runPipeline()", () => {
 
       const run = getRun(runId);
       expect(run).toBeDefined();
-      expect(run?.status).toBe("processed");
+      expect(run?.status).toBe(status);
+      if (capture) {
+        expect(registerPipelineRun(run!.url, { force: true }).status).toBe("pending");
+      }
 
       const runs = listRuns();
       expect(runs.some((r) => r.id === runId)).toBe(true);

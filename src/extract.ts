@@ -47,6 +47,7 @@ export interface ExtractResult {
   visual_text_source: "ocr" | "browser_ocr" | "vision_ocr" | null;
   upload_date: string | null;
   raw_metadata_keys: string[];
+  instagram_capture?: { kind: "enumerated" | "unverified"; requested_index?: number; slides: Array<{ index: number; status: string; text: string | null }> };
   media_assets?: ExtractedMediaAsset[];
   extraction_warnings?: string[];
   enriched_links?: EnrichedLinks | null;
