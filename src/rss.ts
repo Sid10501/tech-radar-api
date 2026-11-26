@@ -2,6 +2,7 @@ import type { PublicFindingSummary } from "./findings.js";
 
 export interface RssOptions {
   siteBase: string;
+  dashboardLinks?: boolean;
 }
 
 const MAX_RSS_ITEMS = 20;
@@ -21,15 +22,20 @@ function rfc822Date(saved: string): string | null {
   return date.toUTCString();
 }
 
-function rssItem(finding: PublicFindingSummary, siteBase: string): string {
-  const link = `${siteBase}/${finding.filename.replace(/\.md$/, "")}`;
+function rssItem(finding: PublicFindingSummary, siteBase: string, dashboardLinks: boolean): string {
+  const guid = `${siteBase}/${finding.filename.replace(/\.md$/, "")}`;
+  const link = dashboardLinks ? `${siteBase}/?finding=${encodeURIComponent(finding.filename)}` : guid;
+  const coverage = finding.captureCoverage;
+  const description = coverage
+    ? [finding.displaySummary, coverage.listed === null ? "Slide coverage unknown." : `OCR returned text for ${coverage.withText} of ${coverage.listed} listed media items.`].join(" ")
+    : finding.displaySummary;
   const pubDate = finding.saved ? rfc822Date(finding.saved) : null;
   return [
     "    <item>",
     `      <title>${xmlEscape(finding.displayTitle)}</title>`,
     `      <link>${xmlEscape(link)}</link>`,
-    `      <guid>${xmlEscape(link)}</guid>`,
-    `      <description>${xmlEscape(finding.displaySummary)}</description>`,
+    `      <guid${dashboardLinks ? ' isPermaLink="false"' : ""}>${xmlEscape(guid)}</guid>`,
+    `      <description>${xmlEscape(description)}</description>`,
     ...(pubDate ? [`      <pubDate>${pubDate}</pubDate>`] : []),
     "    </item>",
   ].join("\n");
@@ -40,7 +46,7 @@ export function buildRssXml(findings: PublicFindingSummary[], opts: RssOptions):
   const items = findings
     .filter((finding) => finding.publicStatus.publishable)
     .slice(0, MAX_RSS_ITEMS)
-    .map((finding) => rssItem(finding, siteBase));
+    .map((finding) => rssItem(finding, siteBase, opts.dashboardLinks === true));
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<rss version="2.0">`,

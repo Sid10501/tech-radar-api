@@ -285,7 +285,7 @@ Returns a single run by ID.
 Public, sanitized finding summaries — no auth. Each item includes `applied: null | { appliedAt, link, note? }` sourced from `tech-radar/applied.json`.
 
 ### `GET /api/public/findings/rss`
-RSS 2.0 feed of the 20 newest public findings (`application/rss+xml`). Item links use `PUBLIC_SITE_RADAR_BASE`.
+RSS 2.0 feed of the 20 newest public findings (`application/rss+xml`). Descriptions include measured carousel coverage when available. Item links use `PUBLIC_SITE_RADAR_BASE` when configured and open the finding in the radar dashboard otherwise. Corrections keep the original finding GUID.
 
 ### `GET /api/public/findings/:id`
 Public, sanitized markdown detail for one finding — private sections are removed.
