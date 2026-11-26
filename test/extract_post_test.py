@@ -265,3 +265,48 @@ def test_jpeg_thumbnail_remains_preferred_when_heif_also_exists():
     alias = "https://example.com/full.heic"
     jpeg = "https://example.com/fallback.jpg"
     assert extract_post.collect_image_urls({"thumbnail": alias, "thumbnails": [{"url": jpeg}]}) == [jpeg, alias]
+
+
+def test_tiktok_photo_shortlink_retains_missing_child_and_bounds_media(monkeypatch, tmp_path):
+    import json
+    source = "https://vt.tiktok.com/example"
+    post_id = "7677607825593355533"
+    short_target = f"https://www.tiktok.com/@/photo/{post_id}?tracking=omit"
+    body = {"itemInfo": {"itemStruct": {
+        "id": post_id, "desc": "Three tools #workflow", "author": {"uniqueId": "creator"},
+        "imagePost": {"images": [{"imageURL": {"urlList": [url]}} for url in [
+            "https://p16.tiktokcdn.com/one.jpeg?token=one",
+            "https://p16.tiktokcdn.com.invalid/two.jpeg",
+            "https://p16.tiktokcdn.com/three.jpeg"]]},
+    }}, "statusCode": 0}
+    requests = []
+    def fetch(url, *, media, max_bytes):
+        requests.append((url, media, max_bytes))
+        if url == source:
+            return short_target, b""
+        if not media:
+            assert url == f"https://www.tiktok.com/@/video/{post_id}"
+            state = json.dumps({"__DEFAULT_SCOPE__": {"webapp.video-detail": body}})
+            return url, f'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__">{state}</script>'.encode()
+        return url, b"image"
+    monkeypatch.setenv("OCR_MAX_IMAGES", "2")
+    monkeypatch.setattr(extract_post, "is_allowed_fetch_url", lambda url: True)
+    monkeypatch.setattr(extract_post, "fetch_tiktok_asset", fetch)
+    monkeypatch.setattr(extract_post, "run_ytdlp", lambda *a, **kw: (None, None, None, None))
+    monkeypatch.setattr(extract_post, "extract_image_text", lambda paths: ("First item", None))
+    result = extract_post.extract(source, tmp_path, do_transcribe=False, do_ocr=True)
+    assert result["creator"] == "creator" and result["caption"] == "Three tools #workflow"
+    assert [s["status"] for s in result["photo_capture"]["slides"]] == ["ocr", "unavailable", "skipped"]
+    assert [s["index"] for s in result["photo_capture"]["slides"]] == [1, 2, 3]
+    assert result["media_assets"][0]["url"] is None
+    assert len(requests) == 3 and requests[2][2] > 0
+    body["itemInfo"]["itemStruct"]["id"] = "9999999999999999999"
+    assert extract_post.tiktok_photo_manifest(source)["entries"] == []
+
+
+def test_tiktok_photo_scope_rejects_foreign_hosts_and_credentials():
+    for url in ["https://example.com/video/123", "http://www.tiktok.com/",
+                "https://www.tiktok.com:8443/", "https://user@example.com/",
+                "https://user@www.tiktok.com/"]:
+        assert not extract_post.tiktok_url_allowed(url)
+    assert not extract_post.tiktok_url_allowed("https://www.tiktok.com/", media=True)

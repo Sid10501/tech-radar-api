@@ -1,11 +1,15 @@
-import type { ExtractResult } from "../extract.js";
+import type { ExtractResult, PhotoCapture } from "../extract.js";
 
 export interface CaptureCoverage {
   listed: number | null;
   withText: number;
 }
 
-export function measuredCoverage(capture: ExtractResult["instagram_capture"]): CaptureCoverage | undefined {
+export function photoCapture(extract: ExtractResult): PhotoCapture | undefined {
+  return extract.photo_capture ?? extract.instagram_capture;
+}
+
+export function measuredCoverage(capture: PhotoCapture | undefined): CaptureCoverage | undefined {
   if (!capture) return undefined;
   if (capture.kind === "unverified") return { listed: null, withText: 0 };
   return { listed: capture.slides.length, withText: capture.slides.filter(slide => slide.text?.trim()).length };

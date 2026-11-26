@@ -1,4 +1,4 @@
-import { measuredCoverage, needsCaptureReview } from "./lib/captureCoverage.js";
+import { photoCapture, measuredCoverage, needsCaptureReview } from "./lib/captureCoverage.js";
 import { findingFilename } from "./lib/slug.js";
 import { buildWorkflowAuditBlock, linkedArtifactsForExtract } from "./lib/linkedArtifacts.js";
 import type { ExtractResult } from "./extract.js";
@@ -40,14 +40,19 @@ export function composeFinding(input: {
     ? research.comparisons.map((c) => `  - ${c}`).join("\n")
     : "  - (none identified)";
 
-  const capture = extract.instagram_capture;
+  const capture = photoCapture(extract);
   const coverage = capture?.kind === "enumerated"
     ? `OCR returned text for ${capture.slides.filter(slide => slide.text).length} of ${capture.slides.length} listed media items.`
     : capture ? "Slide coverage unknown. The extractor could not enumerate the post’s media." : "";
   const captureSection = coverage ? `\n## Source coverage\n\n${coverage}${capture?.requested_index ? ` The submitted link pointed to slide ${capture.requested_index}.` : ""}\n${(capture?.slides ?? []).map(slide => {
-    const url = new URL(extract.url);
-    url.search = new URLSearchParams({ img_index: String(slide.index) }).toString();
-    return `- [Slide ${slide.index}](${url.href}) · ${slide.status}: ${slide.text?.slice(0, 1800).replace(/\s+/g, " ") ?? "No text captured"}`;
+    const label = `Slide ${slide.index}`;
+    let reference = label;
+    if (extract.platform === "instagram") {
+      const url = new URL(extract.url);
+      url.search = new URLSearchParams({ img_index: String(slide.index) }).toString();
+      reference = `[${label}](${url.href})`;
+    }
+    return `- ${reference} · ${slide.status}: ${slide.text?.slice(0, 1800).replace(/\s+/g, " ") ?? "No text captured"}`;
   }).join("\n")}\n` : "";
   const idea = implementation.standalone_idea;
   const singleLine = (value: string) => value.replace(/\s+/g, " ").trim();

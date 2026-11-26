@@ -243,3 +243,15 @@ it("preserves ordered slide evidence and a separate private brainstorm", async (
   expect(body).toContain("[Slide 2](https://www.instagram.com/p/example/?img_index=2)");
   expect(body).toContain("### Standalone build idea");
 });
+
+it("renders TikTok photo ordinals without inventing Instagram-style slide links", async () => {
+  const { composeFinding } = await import("../src/compose.js");
+  const { body } = composeFinding({
+    extract: { ...extractFixture, platform: "tiktok", url: "https://vt.tiktok.com/example",
+      photo_capture: { kind: "enumerated", slides: [{ index: 1, status: "ocr", text: "ERPNext" }] } },
+    research: researchFixture, implementation: implementationFixture,
+  });
+  expect(body).toContain("OCR returned text for 1 of 1 listed media items.");
+  expect(body).toContain("- Slide 1 · ocr: ERPNext");
+  expect(body).not.toContain("img_index");
+});
