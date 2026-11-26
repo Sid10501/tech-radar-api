@@ -1,3 +1,4 @@
+import { photoCapture } from "./captureCoverage.js";
 import type { ExtractResult } from "../extract.js";
 import { buildWorkflowAuditBlock, linkedArtifactsForExtract } from "./linkedArtifacts.js";
 import { wrapAsUntrusted } from "./untrustedContent.js";
@@ -78,6 +79,7 @@ export function llmEnrichedLinksBlock(extract: ExtractResult): string {
 }
 
 export function buildResearchUserMessage(extract: ExtractResult): string {
+  const capture = photoCapture(extract);
   const caption = llmCaptionBlock(extract);
   const transcript = llmTranscriptBlock(extract);
   const visualText = llmVisualTextBlock(extract);
@@ -98,8 +100,8 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
     "",
     `URL (reference only): ${extract.url}`,
     `Platform: ${extract.platform}`,
-    ...(extract.instagram_capture ? [
-      wrapAsUntrusted(JSON.stringify(extract.instagram_capture), { label: "ordered Instagram slide evidence", maxChars: 18000 }),
+    ...(capture ? [
+      wrapAsUntrusted(JSON.stringify(capture), { label: "ordered photo slide evidence", maxChars: 18000 }),
       "Identify each recovered item and cite its slide number. State which promised items cannot be identified. Preview OCR cannot establish carousel coverage.",
     ] : []),
     `Creator (metadata): ${extract.creator ?? "unknown"}`,

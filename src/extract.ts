@@ -30,6 +30,12 @@ export interface LinkedArtifact {
   role: string;
 }
 
+export interface PhotoCapture {
+  kind: "enumerated" | "unverified";
+  requested_index?: number;
+  slides: Array<{ index: number; status: string; text: string | null }>;
+}
+
 export interface ExtractResult {
   url: string;
   platform: "tiktok" | "instagram" | "youtube" | "google_drive" | "other";
@@ -47,7 +53,8 @@ export interface ExtractResult {
   visual_text_source: "ocr" | "browser_ocr" | "vision_ocr" | null;
   upload_date: string | null;
   raw_metadata_keys: string[];
-  instagram_capture?: { kind: "enumerated" | "unverified"; requested_index?: number; slides: Array<{ index: number; status: string; text: string | null }> };
+  instagram_capture?: PhotoCapture;
+  photo_capture?: PhotoCapture;
   media_assets?: ExtractedMediaAsset[];
   extraction_warnings?: string[];
   enriched_links?: EnrichedLinks | null;

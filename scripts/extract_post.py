@@ -59,7 +59,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse, quote
 
 # stdlib only on purpose — the fallback has to work even when pip is useless.
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from urllib.error import URLError, HTTPError
 
 
@@ -303,6 +303,81 @@ def _http_get(url: str, timeout: int = 10) -> str | None:
             return _read_limited_response(r, max_bytes).decode("utf-8", errors="replace")
     except (DownloadLimitExceeded, URLError, HTTPError, TimeoutError, OSError):
         return None
+
+
+_TIKTOK_PAGE_HOSTS = {"www.tiktok.com", "tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}
+_TIKTOK_POST = re.compile(r"/(@[A-Za-z0-9._-]*)/(photo|video)/([0-9]{10,22})/?")
+_TIKTOK_STATE = re.compile(r"""<script\b[^>]*\bid=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>(.*?)</script>""", re.S)
+
+
+def tiktok_url_allowed(url: str, media: bool = False) -> bool:
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        allowed = host.endswith((".tiktokcdn.com", ".tiktokcdn-us.com")) if media else host in _TIKTOK_PAGE_HOSTS
+        return bool(allowed and parsed.scheme == "https" and parsed.port in (None, 443)
+                    and parsed.username is None and parsed.password is None)
+    except ValueError:
+        return False
+
+
+def fetch_tiktok_asset(url: str, *, media: bool, max_bytes: int) -> tuple[str, bytes] | None:
+    if not tiktok_url_allowed(url, media) or not is_allowed_fetch_url(url):
+        return None
+
+    class ScopedRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if not tiktok_url_allowed(newurl, media) or not is_allowed_fetch_url(newurl):
+                raise URLError("TikTok redirect outside expected origin")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    try:
+        with build_opener(ScopedRedirect()).open(Request(url, headers={"User-Agent": _UA}), timeout=12) as response:
+            return response.geturl(), _read_limited_response(response, max_bytes) if max_bytes else b""
+    except (DownloadLimitExceeded, URLError, HTTPError, TimeoutError, OSError, ValueError):
+        return None
+
+
+def tiktok_photo_manifest(url: str) -> dict | None:
+    parsed = urlparse(url)
+    post = _TIKTOK_POST.fullmatch(parsed.path)
+    if not post and (parsed.hostname in {"vt.tiktok.com", "vm.tiktok.com"} or parsed.path.startswith("/t/")):
+        resolved = fetch_tiktok_asset(url, media=False, max_bytes=0)
+        post = _TIKTOK_POST.fullmatch(urlparse(resolved[0]).path) if resolved else None
+    if not post or parsed.hostname not in _TIKTOK_PAGE_HOSTS:
+        return None
+    author, kind, post_id = post.groups()
+    unavailable = {"entries": [], "caption": None, "creator": None} if kind == "photo" else None
+    # TikTok serves the public photo manifest on the video rendering of the same post ID.
+    page = fetch_tiktok_asset(f"https://www.tiktok.com/{author}/video/{post_id}", media=False,
+                              max_bytes=_int_env("HTTP_TEXT_MAX_BYTES", 2 * 1024**2, 1024, 10 * 1024**2))
+    if not page:
+        return unavailable
+    match = _TIKTOK_STATE.search(page[1].decode("utf-8", errors="replace"))
+    if not match:
+        return unavailable
+    try:
+        detail = json.loads(match[1])["__DEFAULT_SCOPE__"]["webapp.video-detail"]
+        item = detail["itemInfo"]["itemStruct"]
+        photos = item["imagePost"]["images"]
+        if detail.get("statusCode") != 0 or item.get("id") != post_id or not isinstance(photos, list) or not 1 <= len(photos) <= 100:
+            return unavailable
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError):
+        return unavailable
+    children = []
+    for photo in photos:
+        image = photo.get("imageURL") if isinstance(photo, dict) else None
+        urls = image.get("urlList") if isinstance(image, dict) else None
+        candidates = urls[:5] if isinstance(urls, list) else []
+        first = next((u for u in candidates if isinstance(u, str) and tiktok_url_allowed(u, media=True)), None)
+        children.append({"thumbnail": first})
+    account = item.get("author")
+    handle = account.get("uniqueId") if isinstance(account, dict) else None
+    return {
+        "entries": children,
+        "creator": handle if isinstance(handle, str) and handle else author[1:] or None,
+        "caption": item.get("desc") if isinstance(item.get("desc"), str) else None,
+    }
 
 
 def try_oembed(url: str, platform: str) -> dict | None:
@@ -900,7 +975,7 @@ def collect_image_urls(info: dict | None, meta: dict | None = None) -> list[str]
     return sorted(urls, key=lambda url: urlparse(url).path.rsplit(".", 1)[-1].lower() in HEIF_URL_EXTENSIONS)
 
 
-def download_image_assets(urls: list[str], out_dir: Path) -> tuple[list[Path], list[dict], list[str]]:
+def download_image_assets(urls: list[str], out_dir: Path, *, tiktok: bool = False) -> tuple[list[Path], list[dict], list[str]]:
     max_images = _int_env("OCR_MAX_IMAGES", 8, 1, 20)
     images_dir = out_dir / "ocr-images"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -910,9 +985,13 @@ def download_image_assets(urls: list[str], out_dir: Path) -> tuple[list[Path], l
 
     for index, url in enumerate(urls[:max_images], start=1):
         ext = url.split("?", 1)[0].rsplit(".", 1)[-1].lower()
-        body = _http_get_bytes(url, timeout=15)
+        if tiktok:
+            reply = fetch_tiktok_asset(url, media=True, max_bytes=_int_env("OCR_IMAGE_MAX_BYTES", 5 * 1024**2, 1024, 25 * 1024**2))
+            body = reply[1] if reply else None
+        else:
+            body = _http_get_bytes(url, timeout=15)
         if body is None:
-            warnings.append(f"image download failed: {url}")
+            warnings.append("TikTok image download failed" if tiktok else f"image download failed: {url}")
             continue
         if ext in HEIF_URL_EXTENSIONS:
             negotiated = negotiated_image_extension(body)
@@ -931,8 +1010,8 @@ def download_image_assets(urls: list[str], out_dir: Path) -> tuple[list[Path], l
         paths.append(path)
         assets.append({
             "type": "image",
-            "source": "metadata",
-            "url": url,
+            "source": "tiktok:photo-manifest" if tiktok else "metadata",
+            "url": None if tiktok else url,
             "path": str(path),
             "ocr_text": None,
             "confidence": "medium",
@@ -1319,6 +1398,17 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         if retry_err:
             errors.append(retry_err)
 
+    tiktok_photos = tiktok_photo_manifest(url) if platform == "tiktok" and not video_path else None
+    if tiktok_photos and tiktok_photos["entries"]:
+        result["creator"] = tiktok_photos["creator"] or result["creator"]
+        if tiktok_photos["caption"]:
+            result["caption"] = tiktok_photos["caption"]
+            result["hashtags"] = pull_hashtags(result["caption"])
+            result["source_links"] = pull_links(result["caption"])
+            result["linked_artifacts"] = classify_linked_artifacts(result["source_links"])
+        result["title"] = result["title"] or (result["caption"] or "").split("\n")[0][:160] or "TikTok photo post"
+        result["extraction_methods"].append("tiktok:photo-manifest")
+
     if not result["caption"] and not result["title"]:
         oembed = try_oembed(url, platform)
         if oembed:
@@ -1368,7 +1458,9 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
 
     post = re.fullmatch(r"/p/([A-Za-z0-9_-]+)/?", urlparse(url).path) if platform == "instagram" else None
     children = (info or {}).get("entries") if post else None
-    if post and isinstance(children, list) and children:
+    if tiktok_photos:
+        children = tiktok_photos["entries"]
+    if isinstance(children, list) and children:
         slides = []
         limit = _int_env("OCR_MAX_IMAGES", 20, 1, 20)
         for index, child in enumerate(children, 1):
@@ -1377,10 +1469,13 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
             if not do_ocr or index > limit:
                 slide["status"] = "skipped"
                 continue
-            candidates = collect_image_urls(child if isinstance(child, dict) else None)
+            if tiktok_photos:
+                candidates = [child["thumbnail"]] if child["thumbnail"] else []
+            else:
+                candidates = collect_image_urls(child if isinstance(child, dict) else None)
             if not candidates:
                 continue
-            paths, assets, warnings = download_image_assets(candidates[:1], out_dir / f"slide-{index}")
+            paths, assets, warnings = download_image_assets(candidates[:1], out_dir / f"slide-{index}", tiktok=bool(tiktok_photos))
             errors.extend(warnings)
             if paths:
                 text, warning = extract_image_text(paths)
@@ -1390,7 +1485,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 visual_blocks.append(text)
                 if warning and warning not in errors:
                     errors.append(warning)
-        result["instagram_capture"] = {"kind": "enumerated", "slides": slides}
+        result["photo_capture" if tiktok_photos else "instagram_capture"] = {"kind": "enumerated", "slides": slides}
     elif do_ocr:
         image_urls = collect_image_urls(info, html_meta)
         image_paths, image_assets, image_warnings = download_image_assets(image_urls, out_dir)
@@ -1403,6 +1498,8 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 asset["ocr_text"] = image_text
             if image_ocr_err and image_ocr_err not in errors:
                 errors.append(image_ocr_err)
+    if tiktok_photos is not None and not children:
+        result["photo_capture"] = {"kind": "unverified", "slides": []}
     if post and not children and not video_path and not result["transcript"]:
         result["instagram_capture"] = {"kind": "unverified", "slides": []}
 

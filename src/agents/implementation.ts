@@ -1,3 +1,4 @@
+import { photoCapture } from "../lib/captureCoverage.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { readAiMemory, listRecentSessions, readProjectManifests, defaultMemoryDir } from "../tools/ai_memory.js";
 import { wrapAsUntrusted } from "../lib/untrustedContent.js";
@@ -105,7 +106,7 @@ function buildImplementationUserMessage(
     title,
     "",
     researchSummary,
-    wrapAsUntrusted(JSON.stringify({ capture: extract.instagram_capture, claims: research.claims, evidence: research.evidence }), { label: "capture coverage and retrieved evidence" }),
+    wrapAsUntrusted(JSON.stringify({ capture: photoCapture(extract), claims: research.claims, evidence: research.evidence }), { label: "capture coverage and retrieved evidence" }),
     "If the source does not identify the promised tools or skills, explain the evidence gap and defer recommendations that depend on their identity. Distinguish an independent brainstorm from advice attributed to this post.",
     "",
     wrapAsUntrusted(JSON.stringify(manifests), { label: "dated project source snapshots, with age in days; not proof of current or deployed state" }),
