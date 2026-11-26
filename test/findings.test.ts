@@ -1472,6 +1472,23 @@ describe("listFindings()", () => {
     expect(listFindings(dir).map((finding) => finding.diagnostics.duplicateGroup)).toEqual([undefined, undefined]);
   });
 
+  it("keeps a multi-repository collection visible alongside a single-repo finding", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "collection-dedupe-"));
+    const findingsDir = path.join(dir, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(path.join(findingsDir, "single.md"), SAMPLE_FINDING);
+    fs.writeFileSync(path.join(findingsDir, "collection.md"), SAMPLE_FINDING
+      .replace("Ponytail agent rubric", "Three open-source resources")
+      .replace("DZmyMFoqCRm", "collection")
+      .replace("- Repo: https://github.com/example/ponytail",
+        "- [First](https://github.com/example/ponytail)\n- [Second](https://github.com/example/two)\n- [Third](https://github.com/example/three)"));
+    fs.writeFileSync(path.join(findingsDir, "slides.md"), SAMPLE_FINDING
+      .replace("Ponytail agent rubric", "Two tools featured in slides")
+      .replace("DZmyMFoqCRm", "carousel")
+      .replace("## Links", "## Source coverage\n\n- Slide 1: https://github.com/example/ponytail\n- Slide 2: https://github.com/example/other\n\n## Links"));
+    expect(listPublicFindings(dir).map(finding => finding.filename).sort()).toEqual(["collection.md", "single.md", "slides.md"]);
+  });
+
   it("clusters distinct source posts that resolve to the same public artifact", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duplicate-artifact-findings-"));
     const findingsDir = path.join(dir, "tech-radar", "findings");
