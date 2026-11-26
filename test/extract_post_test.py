@@ -243,3 +243,25 @@ def test_instagram_children_keep_ocr_and_positions(monkeypatch, tmp_path):
     assert [slide["text"] for slide in slides] == ["one.jpg", None, "three.jpg"]
     assert [asset["ocr_text"] for asset in result["media_assets"] if asset["type"] == "image"] == ["one.jpg", "three.jpg"]
     assert slides[1]["status"] == "unavailable"
+
+
+def test_heif_url_uses_returned_image_format(monkeypatch, tmp_path):
+    urls = extract_post.collect_image_urls({"entries": [
+        {"thumbnail": "https://example.com/one.HEIC?signed=one"},
+        {"ext": "heif", "url": "https://example.com/two.heif"},
+        {"thumbnail": "https://example.com/three.heic"},
+    ]})
+    assert len(urls) == 3
+    bodies = dict(zip(urls, [b"\xff\xd8\xff\xe0jpeg", b"\0\0\0\x18ftypheic", b"RIFF1234WEBPbytes"]))
+    monkeypatch.setattr(extract_post, "_http_get_bytes", lambda url, timeout: bodies[url])
+    paths, assets, warnings = extract_post.download_image_assets(urls, tmp_path)
+    assert [p.name for p in paths] == ["image-001.jpg", "image-003.webp"]
+    assert [p.read_bytes() for p in paths] == [bodies[urls[0]], bodies[urls[2]]]
+    assert [asset["url"] for asset in assets] == [urls[0], urls[2]]
+    assert len(warnings) == 1 and "unsupported image format" in warnings[0]
+
+
+def test_jpeg_thumbnail_remains_preferred_when_heif_also_exists():
+    alias = "https://example.com/full.heic"
+    jpeg = "https://example.com/fallback.jpg"
+    assert extract_post.collect_image_urls({"thumbnail": alias, "thumbnails": [{"url": jpeg}]}) == [jpeg, alias]
