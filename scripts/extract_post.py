@@ -792,6 +792,20 @@ def transcribe(audio_path: Path) -> tuple[str | None, list[dict], str | None]:
 # --- On-screen text OCR ------------------------------------------------------
 
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "avif"}
+HEIF_URL_EXTENSIONS = {"heic", "heif"}
+IMAGE_URL_EXTENSIONS = IMAGE_EXTENSIONS | HEIF_URL_EXTENSIONS
+
+
+def negotiated_image_extension(body: bytes) -> str | None:
+    """Instagram may serve JPEG from a HEIC URL after content negotiation."""
+    if body.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if body.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if body.startswith(b"RIFF") and body[8:12] == b"WEBP":
+        return "webp"
+    return None
+
 
 def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:
     try:
@@ -856,7 +870,7 @@ def collect_image_urls(info: dict | None, meta: dict | None = None) -> list[str]
         if clean in seen:
             return
         lowered = clean.split("?", 1)[0].rsplit(".", 1)[-1].lower()
-        if lowered not in IMAGE_EXTENSIONS:
+        if lowered not in IMAGE_URL_EXTENSIONS:
             return
         seen.add(clean)
         urls.append(clean)
@@ -871,7 +885,7 @@ def collect_image_urls(info: dict | None, meta: dict | None = None) -> list[str]
         add(node.get("thumbnail"))
         add(node.get("display_url"))
         ext = str(node.get("ext") or "").lower()
-        if ext in IMAGE_EXTENSIONS:
+        if ext in IMAGE_URL_EXTENSIONS:
             add(node.get("url"))
         for thumb in node.get("thumbnails") or []:
             if isinstance(thumb, dict):
@@ -882,7 +896,8 @@ def collect_image_urls(info: dict | None, meta: dict | None = None) -> list[str]
     walk(info or {})
     if meta:
         add(meta.get("og:image") or meta.get("twitter:image"))
-    return urls
+    # Keep directly supported thumbnails ahead of aliases that may contain genuine HEIF.
+    return sorted(urls, key=lambda url: urlparse(url).path.rsplit(".", 1)[-1].lower() in HEIF_URL_EXTENSIONS)
 
 
 def download_image_assets(urls: list[str], out_dir: Path) -> tuple[list[Path], list[dict], list[str]]:
@@ -895,13 +910,19 @@ def download_image_assets(urls: list[str], out_dir: Path) -> tuple[list[Path], l
 
     for index, url in enumerate(urls[:max_images], start=1):
         ext = url.split("?", 1)[0].rsplit(".", 1)[-1].lower()
-        if ext not in IMAGE_EXTENSIONS:
-            ext = "jpg"
-        path = images_dir / f"image-{index:03d}.{ext}"
         body = _http_get_bytes(url, timeout=15)
         if body is None:
             warnings.append(f"image download failed: {url}")
             continue
+        if ext in HEIF_URL_EXTENSIONS:
+            negotiated = negotiated_image_extension(body)
+            if negotiated is None:
+                warnings.append(f"image {index}: HEIF URL returned an unsupported image format")
+                continue
+            ext = negotiated
+        elif ext not in IMAGE_EXTENSIONS:
+            ext = "jpg"
+        path = images_dir / f"image-{index:03d}.{ext}"
         try:
             path.write_bytes(body)
         except OSError as e:
