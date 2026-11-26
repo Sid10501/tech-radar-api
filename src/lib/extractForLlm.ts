@@ -98,6 +98,10 @@ export function buildResearchUserMessage(extract: ExtractResult): string {
     "",
     `URL (reference only): ${extract.url}`,
     `Platform: ${extract.platform}`,
+    ...(extract.instagram_capture ? [
+      wrapAsUntrusted(JSON.stringify(extract.instagram_capture), { label: "ordered Instagram slide evidence", maxChars: 18000 }),
+      "Identify each recovered item and cite its slide number. State which promised items cannot be identified. Preview OCR cannot establish carousel coverage.",
+    ] : []),
     `Creator (metadata): ${extract.creator ?? "unknown"}`,
     `Hashtags (metadata): ${hashtags}`,
     "",

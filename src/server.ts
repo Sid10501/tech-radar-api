@@ -343,7 +343,8 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
       try {
         const idempotencyKey = request.headers["idempotency-key"];
         if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 300)) return reply.code(400).send({ error: "Idempotency-Key must be 1-300 characters" });
-        const completion = runPipeline(canonicalUrl, { intent, origin: { channel: "api" }, idempotencyKey, force });
+        const submitted = canonicalUrl.startsWith("https://www.instagram.com/p/") && new URL(url).searchParams.has("img_index") ? url : canonicalUrl;
+        const completion = runPipeline(submitted, { intent, origin: { channel: "api" }, idempotencyKey, force });
         completion.catch(() => {});
         return reply.code(202).send({ runId: completion.runId, status: getRun(completion.runId)?.status ?? "pending", deduplicated: false });
       } catch (err) {

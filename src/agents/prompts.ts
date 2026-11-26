@@ -56,6 +56,13 @@ Your output MUST be a single JSON object matching this exact schema (no markdown
   "fit_for_owner": "1-2 sentences on whether/how this technology fits their context",
   "target_project": "${TARGET_PROJECTS_LIST}",
   "implementation_idea_markdown": "Markdown section (2-4 paragraphs) with a concrete implementation idea grounded in their stack and projects. Include a code snippet if helpful.",
+  "standalone_idea": {
+    "title": "A standalone build even when an existing project fits",
+    "problem": "Identify the user and problem, citing supplied research evidence IDs when available. Label unsupported demand as a hypothesis.",
+    "prototype": "Smallest build the developer can try",
+    "question": "One question the prototype can test",
+    "successCriteria": "Observable and measurable threshold"
+  },
   "follow_ups": ["array", "of", "follow-up", "questions", "or", "actions"]
 }
 

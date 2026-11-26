@@ -39,7 +39,23 @@ export function composeFinding(input: {
     ? research.comparisons.map((c) => `  - ${c}`).join("\n")
     : "  - (none identified)";
 
-  const verdict = implementation.target_project === "none" ? "#skip" : "#try-soon";
+  const capture = extract.instagram_capture;
+  const coverage = capture?.kind === "enumerated"
+    ? `OCR returned text for ${capture.slides.filter(slide => slide.text).length} of ${capture.slides.length} listed media items.`
+    : capture ? "Slide coverage unknown. The extractor could not enumerate the post’s media." : "";
+  const captureSection = coverage ? `\n## Source coverage\n\n${coverage}${capture?.requested_index ? ` The submitted link pointed to slide ${capture.requested_index}.` : ""}\n${(capture?.slides ?? []).map(slide => {
+    const url = new URL(extract.url);
+    url.search = new URLSearchParams({ img_index: String(slide.index) }).toString();
+    return `- [Slide ${slide.index}](${url.href}) · ${slide.status}: ${slide.text?.slice(0, 1800).replace(/\s+/g, " ") ?? "No text captured"}`;
+  }).join("\n")}\n` : "";
+  const idea = implementation.standalone_idea;
+  const singleLine = (value: string) => value.replace(/\s+/g, " ").trim();
+  const ideaBlock = idea ? [
+    "### Standalone build idea (brainstorm)", "", "Build: " + singleLine(idea.title),
+    "Problem: " + singleLine(idea.problem), "Prototype: " + singleLine(idea.prototype),
+    "Question: " + singleLine(idea.question), "Success criteria: " + singleLine(idea.successCriteria),
+  ].join("\n\n") : "";
+  const verdict = capture && !capture.slides.some(slide => slide.text) ? "#review" : implementation.target_project === "none" ? "#skip" : "#try-soon";
   const visualTextBlock = extract.visual_text?.trim()
     ? `\nOn-screen text / OCR:\n${extract.visual_text.slice(0, 400)}\n`
     : "";
@@ -113,6 +129,7 @@ ${linkedArtifactsBlock}
 ${topCommentsBlock}
 ${extractionWarningsBlock}
 
+${captureSection}
 ${workflowAuditSection}
 ## What it actually is
 
@@ -155,6 +172,7 @@ ${research.kickstarter}
 Pseudocode / untested proposal; no local execution was performed by the recommendation agent.
 
 ${implementation.implementation_idea_markdown.trim()}
+${ideaBlock}
 
 ## Follow-ups
 

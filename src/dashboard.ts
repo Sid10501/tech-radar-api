@@ -1602,6 +1602,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         sectionPanel("Links", d.sections.links),
         sectionPanel("How to try it", d.sections.kickstarter),
         personal ? sectionPanel("Fit for Sid", d.sections.fit) : "",
+        sectionPanel("Source coverage", d.sections.coverage || ""),
         personal ? sectionPanel("Implementation idea", d.sections.implementation) : "",
         personal ? sectionPanel("Child artifact intake", d.sections.childArtifacts) : "",
         personal ? sectionPanel("Follow-ups", d.sections.followups) : "",

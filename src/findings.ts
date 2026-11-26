@@ -143,6 +143,7 @@ export interface FindingDetail {
   sections: {
     tldr: string;
     shown: string;
+    coverage?: string;
     workflow: string;
     research: string;
     links: string;
@@ -162,6 +163,7 @@ export interface PublicFindingDetail {
   sections: {
     tldr: string;
     shown: string;
+    coverage?: string;
     workflow: string;
     research: string;
     links: string;
@@ -174,7 +176,7 @@ export interface PublicFindingDetail {
 
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 const TEMPLATE_SECTION_HEADING =
-  /^## (TL;DR|What the post showed|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Follow-ups|Retry history|Correction — \d{4}-\d{2}-\d{2})\s*$/m;
+  /^## (TL;DR|What the post showed|Source coverage|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Follow-ups|Retry history|Correction — \d{4}-\d{2}-\d{2})\s*$/m;
 const PRIVATE_PROJECT_REFERENCE =
   /\b(Cross-Tax|StockBot|Finance Assistant|Kalkine Stocks Tracker|tech-radar-api|ai-video)\b/i;
 
@@ -1188,6 +1190,7 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
     sections: {
       tldr: textBetween(markdown, "TL;DR"),
       shown: textBetween(markdown, "What the post showed"),
+      coverage: textBetween(markdown, "Source coverage"),
       workflow: textBetween(markdown, "Workflow Audit"),
       research: textBetween(markdown, "What it actually is"),
       links: textBetween(markdown, "Links"),
@@ -1215,6 +1218,7 @@ export function getPublicFindingDetail(filename: string, aiMemoryDir = getAiMemo
     sections: {
       tldr: textBetween(publicMarkdown, "TL;DR"),
       shown: textBetween(publicMarkdown, "What the post showed"),
+      coverage: textBetween(publicMarkdown, "Source coverage"),
       workflow: textBetween(publicMarkdown, "Workflow Audit"),
       research: textBetween(publicMarkdown, "What it actually is"),
       links: textBetween(publicMarkdown, "Links"),

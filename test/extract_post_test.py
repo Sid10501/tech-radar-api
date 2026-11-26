@@ -226,3 +226,20 @@ def test_classify_linked_artifacts_from_source_links():
             "role": "creator/profile link",
         },
     ]
+
+
+def test_instagram_children_keep_ocr_and_positions(monkeypatch, tmp_path):
+    url = "https://www.instagram.com/p/example/?img_index=3"
+    info = {"description": "Three tools", "entries": [
+        {"thumbnail": "https://example.com/one.jpg"}, None,
+        {"thumbnail": "https://example.com/three.jpg"}]}
+    monkeypatch.setattr(extract_post, "run_ytdlp", lambda *a, **kw: (None, None, None, "No video formats"))
+    monkeypatch.setattr(extract_post, "run_ytdlp_json_cli", lambda *a: (info, None))
+    monkeypatch.setattr(extract_post, "_http_get_bytes", lambda url, timeout: url.encode())
+    monkeypatch.setattr(extract_post, "extract_image_text", lambda paths: (paths[0].read_text().split("/")[-1], None))
+    monkeypatch.setattr(extract_post, "is_allowed_fetch_url", lambda url: True)
+    result = extract_post.extract(url, tmp_path, do_transcribe=False, do_ocr=True)
+    slides = result["instagram_capture"]["slides"]
+    assert [slide["text"] for slide in slides] == ["one.jpg", None, "three.jpg"]
+    assert [asset["ocr_text"] for asset in result["media_assets"] if asset["type"] == "image"] == ["one.jpg", "three.jpg"]
+    assert slides[1]["status"] == "unavailable"

@@ -5,8 +5,12 @@ function reviewDraft(id) {
   let draft = reviewState.drafts.get(id);
   if (!draft) {
     const review = reviewState.byId.get(id)?.review;
-    draft = { decision: review?.decision || '', rationale: review?.rationale || '', projectSlug: review?.projectSlug || '',
-      question: '', successCriteria: '', reviewGeneration: 0, experimentGeneration: 0,
+    const proposal = state.detail?.finding?.id === id
+      ? (state.detail.sections?.implementation || '').split('### Standalone build idea (brainstorm)').pop() : '';
+    const hasProposal = state.detail?.sections?.implementation?.includes('### Standalone build idea (brainstorm)');
+    const field = label => hasProposal && proposal ? (proposal.split('\n').find(line => line.startsWith(label + ': ')) || '').slice(label.length + 2) : '';
+    draft = { title: field('Build'), problem: field('Problem'), decision: review?.decision || '', rationale: review?.rationale || '', projectSlug: review?.projectSlug || '',
+      question: field('Question'), successCriteria: field('Success criteria'), reviewGeneration: 0, experimentGeneration: 0,
       reviewDirty: false, experimentDirty: false, savingReview: false, creatingExperiment: false, message: '' };
     reviewState.drafts.set(id, draft);
   }
@@ -88,7 +92,7 @@ function bindReviewPanel(f) {
     const sentGeneration = draft.experimentGeneration;
     create.disabled = true; draft.creatingExperiment = true;
     try {
-      const response = await fetch('/api/lab/reviews/' + encodeURIComponent(selectedId) + '/experiment', { method: 'POST', credentials: 'same-origin', headers: { ...requestHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ question, successCriteria }) });
+      const response = await fetch('/api/lab/reviews/' + encodeURIComponent(selectedId) + '/experiment', { method: 'POST', credentials: 'same-origin', headers: { ...requestHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ question, successCriteria, title: draft.title || undefined, problem: draft.problem || undefined }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Experiment save failed');
       reviewState.byId.set(selectedId, { ...reviewState.byId.get(selectedId), brief: data.brief });

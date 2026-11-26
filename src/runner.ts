@@ -48,6 +48,7 @@ export interface Run {
   extractionWorkDir?: string;
   submissionIdempotencyKey?: string;
   originalName?: string;
+  requestedSlide?: number;
   deduplicatedToRunId?: string;
 }
 
@@ -346,6 +347,8 @@ export class DuplicateRunError extends Error {
 
 export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}): Run {
   const canonicalUrl = canonicalizeSocialUrl(url);
+  const rawIndex = canonicalUrl.startsWith("https://www.instagram.com/p/") ? new URL(url).searchParams.get("img_index") : null;
+  const requestedSlide = rawIndex && /^[1-9]\d?$/.test(rawIndex) ? Number(rawIndex) : undefined;
   const requestedIntent = opts.intent ?? "technology";
   const candidates = [...runs.values()].reverse().filter((candidate) => canonicalizeIfPossible(candidate.url) === canonicalUrl
     && (candidate.intent ?? "technology") === requestedIntent);
@@ -365,6 +368,7 @@ export function registerPipelineRun(url: string, opts: RunPipelineOptions = {}):
   const run: Run = {
     id: randomUUID(),
     url: canonicalUrl,
+    requestedSlide,
     status: "pending",
     intent: opts.intent ?? "technology",
     origin: opts.origin ?? { channel: "api" },
@@ -503,6 +507,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const extractResult = run.mediaPath
       ? await extractLocalMedia({ runId, mediaPath: run.mediaPath, workDir: extractionWorkDir })
       : await extract(url, { outDir: extractionWorkDir });
+    if (run.requestedSlide && extractResult.instagram_capture) extractResult.instagram_capture.requested_index = run.requestedSlide;
     if (run.originalName) extractResult.title = run.originalName;
 
     // Bail early if the post has no usable content — skip agents entirely
