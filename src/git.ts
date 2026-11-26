@@ -203,12 +203,13 @@ export class AiMemoryRepo {
 
   async updateIndex(row: IndexRow): Promise<void> {
     const indexPath = path.join(this.opts.localDir, "tech-radar", "INDEX.md");
-    const newRow = `| ${row.date} | ${row.title} | [${row.finding}](tech-radar/findings/${row.finding}) | ${row.targetProject} |`;
+    const cell = (value: string) => value.replace(/\s+/g, " ").trim().replace(/\|/g, "&#124;");
+    const newRow = `| ${row.date} | ${cell(row.title)} | [${row.finding}](findings/${encodeURIComponent(row.finding)}) | ${cell(row.targetProject)} |`;
 
     let content = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
     const sentinel = "<!-- new rows inserted above this line -->";
     if (content.includes(sentinel)) {
-      content = content.replace(sentinel, `${newRow}\n${sentinel}`);
+      content = content.replace(sentinel, () => `${newRow}\n${sentinel}`);
     } else {
       content += `\n${newRow}`;
     }
