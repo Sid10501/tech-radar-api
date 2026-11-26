@@ -1074,12 +1074,16 @@ function fallbackDuplicateGroupKey(finding: FindingSummary): string | null {
 }
 
 function publicArtifactDuplicateKey(markdown: string, sourceUrl: string | null): string | null {
-  const candidates = [sourceUrl, ...githubUrls(markdown)].filter((url): url is string => Boolean(url));
-  for (const candidate of candidates) {
-    const key = normalizeGithubArtifactKey(candidate);
-    if (key) return key;
-  }
-  return curatedPublicArtifactKey(markdown);
+  const sourceKey = sourceUrl && normalizeGithubArtifactKey(sourceUrl);
+  if (sourceKey) return sourceKey;
+
+  const publicText = withoutPrivateSections(markdown);
+  const links = textBetween(publicText, "Links");
+  const listed = [...githubUrls(links), ...githubUrls(textBetween(publicText, "Source coverage"))];
+  const candidates = listed.length ? listed : githubUrls(publicText);
+  const keys = new Set(candidates.map(normalizeGithubArtifactKey).filter((key): key is string => !!key));
+  if (keys.size > 1) return null;
+  return [...keys][0] ?? curatedPublicArtifactKey(publicText);
 }
 
 function normalizeGithubArtifactKey(rawUrl: string): string | null {
