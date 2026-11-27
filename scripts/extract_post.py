@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import queue
 import html
+from html.parser import HTMLParser
 import ipaddress
 import json
 import math
@@ -393,20 +394,32 @@ def try_oembed(url: str, platform: str) -> dict | None:
         return None
 
 
-META_RE = re.compile(
-    r'<meta[^>]+(?:property|name)=["\'](?P<prop>og:title|og:description|og:image|twitter:title|twitter:description|description)["\'][^>]+content=["\'](?P<val>[^"\']+)["\']',
-    re.IGNORECASE,
-)
+class PostMetaParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.meta: dict[str, str] = {}
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "meta":
+            return
+        values = dict(attrs)
+        key = (values.get("property") or values.get("name") or "").lower()
+        content = (values.get("content") or "").strip()
+        if content and key in {"og:title", "og:description", "og:image", "twitter:title", "twitter:description", "description"}:
+            self.meta.setdefault(key, content)
 
 
 def try_html_meta(url: str) -> dict | None:
     body = _http_get(url, timeout=12)
     if not body:
         return None
-    meta: dict[str, str] = {}
-    for m in META_RE.finditer(body):
-        meta.setdefault(m.group("prop").lower(), html.unescape(m.group("val")))
-    return meta or None
+    parser = PostMetaParser()
+    try:
+        parser.feed(body)
+        parser.close()
+    except (ValueError, AssertionError):
+        pass  # Malformed markup may follow usable head metadata.
+    return parser.meta or None
 
 
 # --- yt-dlp extraction -------------------------------------------------------
@@ -554,32 +567,74 @@ def parse_vtt_segments(path: Path) -> list[dict]:
     return out
 
 
-def find_subtitle_text(out_dir: Path, video_id: str | None) -> tuple[str | None, list[dict]]:
+def find_subtitle_text(out_dir: Path, video_id: str | None) -> tuple[str | None, list[dict], str | None]:
     patterns = [f"{video_id}*.vtt"] if video_id else ["*.vtt"]
     for pattern in patterns:
         for path in sorted(out_dir.glob(pattern), key=lambda p: p.stat().st_size):
             text = parse_vtt_text(path)
             if text:
-                return text, parse_vtt_segments(path)
-    return None, []
+                name = path.stem.rpartition(".")[2]
+                return text, parse_vtt_segments(path), valid_track_language(name) if "." in path.stem else None
+    return None, [], None
 
 
-def download_subtitles_cli(url: str, out_dir: Path) -> str | None:
+def valid_track_language(value: object) -> str | None:
+    return value if isinstance(value, str) and re.fullmatch(r"[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{1,8})*", value) else None
+
+
+def track_rank(language: str, kind: str, source_language: str | None) -> tuple:
+    # Keep original-language speech aligned with the frames. Within that language prefer manual text.
+    code = language.lower().removesuffix("-orig")
+    source = (source_language or "").lower()
+    match = bool(source and code.split("-")[0] == source.split("-")[0])
+    return (not match if source else False, kind != "manual", code != source,
+            not language.endswith("-orig"), code.split("-")[0] != "en", language)
+
+
+def youtube_source_language(info: dict | None) -> str | None:
+    info = info or {}
+    reported = valid_track_language(info.get("language"))
+    if reported:
+        return reported
+    # yt-dlp marks original auto-caption tracks with "-orig"; translations can have many codes.
+    originals = {code[:-5] for code in info.get("automatic_captions") or {}
+                 if valid_track_language(code) and code.endswith("-orig")}
+    return originals.pop() if len(originals) == 1 else None
+
+
+def preferred_cli_track(info: dict | None) -> tuple[str | None, str]:
+    info = info or {}
+    tracks = []
+    for field, kind in (("subtitles", "manual"), ("automatic_captions", "generated")):
+        for code, formats in (info.get(field) or {}).items():
+            if not valid_track_language(code) or not formats:
+                continue
+            # yt-dlp lists machine translations alongside original ASR tracks.
+            if kind == "generated" and all("tlang=" in str(f.get("url", "")) for f in formats if isinstance(f, dict)):
+                continue
+            tracks.append((code, kind))
+    source_language = youtube_source_language(info)
+    return min(tracks, key=lambda track: track_rank(*track, source_language)) if tracks else (None, "unknown")
+
+
+def download_subtitles_cli(url: str, out_dir: Path, code: str | None = None, kind: str = "unknown") -> str | None:
     if not is_allowed_fetch_url(url):
         return "subtitle fallback blocked: unsafe URL"
     if not shutil.which("yt-dlp"):
         return "subtitle fallback skipped: yt-dlp CLI not installed"
+    flags = {"manual": ["--write-subs"], "generated": ["--write-auto-subs"]}.get(kind, ["--write-subs", "--write-auto-subs"])
     try:
         subprocess.run(
             [
                 "yt-dlp",
                 "--skip-download",
-                "--write-subs",
-                "--write-auto-subs",
+                *flags,
                 "--sub-langs",
-                "en.*",
+                code or "en.*",
                 "--sub-format",
                 "vtt/srv3/best",
+                "--convert-subs",
+                "vtt",
                 "-o",
                 str(out_dir / "%(id)s.%(ext)s"),
                 url,
@@ -674,19 +729,29 @@ def transcript_snippets_to_segments(snippets) -> list[dict]:
     return out
 
 
-def fetch_youtube_transcript_api(video_id: str | None) -> tuple[str | None, list[dict], str | None]:
+def fetch_youtube_transcript_api(video_id: str | None, source_language: str | None) -> tuple[str | None, list[dict], dict | None, str | None]:
     if not video_id:
-        return None, [], "youtube-transcript-api skipped: missing video id"
+        return None, [], None, "youtube-transcript-api skipped: missing video id"
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
-    except ImportError as e:
-        return None, [], f"youtube-transcript-api not installed: {e}"
-    try:
-        fetched = YouTubeTranscriptApi().fetch(video_id, languages=["en", "en-US", "en-GB"])
-        raw = fetched.to_raw_data() if hasattr(fetched, "to_raw_data") else fetched
-        return transcript_snippets_to_text(raw), transcript_snippets_to_segments(raw), None
+        tracks = [track for track in YouTubeTranscriptApi().list(video_id) if valid_track_language(track.language_code)]
+        ordered = sorted(tracks, key=lambda track: track_rank(track.language_code, "generated" if track.is_generated else "manual", source_language))
+        failure = None
+        for track in ordered[:2]:
+            try:
+                raw = track.fetch().to_raw_data()
+            except Exception as exc:
+                failure = exc
+                continue
+            text = transcript_snippets_to_text(raw)
+            if text:
+                provenance = {"language": track.language_code, "kind": "generated" if track.is_generated else "manual"}
+                return text, transcript_snippets_to_segments(raw), provenance, None
+        if failure:
+            raise failure
+        return None, [], None, "youtube-transcript-api: no usable caption track"
     except Exception as e:
-        return None, [], f"youtube-transcript-api error: {e.__class__.__name__}: {e}"
+        return None, [], None, f"youtube-transcript-api error: {e.__class__.__name__}: {e}"
 
 
 def collect_chapters(info: dict | None) -> list[dict]:
@@ -859,7 +924,7 @@ def transcribe(audio_path: Path) -> tuple[str | None, list[dict], str | None]:
         items = list(segments)
         text = " ".join(seg.text.strip() for seg in items).strip()
         timed = [{"start_ms": round(seg.start * 1000), "end_ms": round(seg.end * 1000), "text": seg.text.strip()} for seg in items if seg.text.strip()]
-        return text or None, timed, None
+        return text or None, timed, None if text else "whisper: no speech text returned"
     except Exception as e:
         return None, [], f"whisper error: {e.__class__.__name__}: {e}"
 
@@ -1032,28 +1097,58 @@ def _http_get_bytes(url: str, timeout: int = 10) -> bytes | None:
         return None
 
 
+def ocr_still_image(path: Path, mode: int, timeout: float) -> tuple[str, float, int]:
+    """Read text and word confidence from the same Tesseract invocation."""
+    result = subprocess.run(
+        ["tesseract", str(path), "stdout", "--psm", str(mode), "tsv"],
+        env={**os.environ, "OMP_THREAD_LIMIT": os.environ.get("OMP_THREAD_LIMIT", "1")},
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=timeout,
+    )
+    lines: dict[tuple[str, ...], list[str]] = {}
+    scores = []
+    confident_chars = 0
+    for row in result.stdout.splitlines():
+        fields = row.split("\t", 11)
+        if len(fields) != 12 or fields[0] != "5" or not fields[11].strip():
+            continue
+        word = fields[11].strip()
+        score = float(fields[10])
+        lines.setdefault(tuple(fields[1:5]), []).append(word)
+        scores.append(score)
+        if score >= 65:
+            confident_chars += sum(char.isalnum() for char in word)
+    text = "\n".join(" ".join(words) for words in lines.values())
+    return text, sum(scores) / len(scores) if scores else 0.0, confident_chars
+
+
 def extract_image_text(image_paths: list[Path]) -> tuple[str | None, str | None]:
     if not shutil.which("tesseract"):
         return None, "ocr skipped: tesseract not installed"
     blocks: list[str] = []
+    failures = []
     for image_path in image_paths:
         if not image_path.exists():
+            failures.append("ocr: image unavailable")
             continue
+        budget = _float_env("OCR_TESSERACT_TIMEOUT_SEC", 20.0, 1.0, 120.0)
+        deadline = time.monotonic() + budget
         try:
-            result = subprocess.run(
-                ["tesseract", str(image_path), "stdout", "--psm", "6"],
-                env={**os.environ, "OMP_THREAD_LIMIT": os.environ.get("OMP_THREAD_LIMIT", "1")},
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=_float_env("OCR_TESSERACT_TIMEOUT_SEC", 20.0, 1.0, 120.0),
-            )
-        except Exception:
+            text, confidence, reliable_chars = ocr_still_image(image_path, 6, budget)
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            failures.append(f"ocr: {type(exc).__name__}")
             continue
-        blocks.append(result.stdout)
+        remaining = deadline - time.monotonic()
+        # One sparse-layout pass for weak screenshots, sharing the original image timeout.
+        if (confidence < 80 or reliable_chars < 12) and remaining >= 0.25:
+            try:
+                sparse, sparse_confidence, sparse_chars = ocr_still_image(image_path, 11, remaining)
+                if sparse_chars > 0 and sparse_confidence > confidence and sparse_chars >= 0.85 * reliable_chars:
+                    text = sparse
+            except (OSError, subprocess.SubprocessError, ValueError):
+                pass
+        blocks.append(text)
     text = merge_text_blocks(blocks)
-    return text or None, None
+    return text or None, ", ".join(dict.fromkeys(failures)) or None
 
 
 def probe_video_duration(video_path: Path) -> float | None:
@@ -1317,7 +1412,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         result["raw_metadata_keys"] = sorted(info.keys())
         result["title"] = info.get("title") or info.get("fulltitle")
         result["creator"] = info.get("uploader") or info.get("channel") or info.get("uploader_id")
-        caption = info.get("description") or info.get("title")
+        caption = info.get("description") or (None if platform in {"instagram", "tiktok", "youtube"} else info.get("title"))
         result["caption"] = caption
         result["hashtags"] = pull_hashtags(caption)
         result["source_links"] = pull_links(caption)
@@ -1353,34 +1448,28 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 elif cli_err:
                     errors.append(cli_err)
 
-        if prefer_subtitles and not result["transcript"]:
-            transcript_api_text, transcript_api_segments, transcript_api_err = fetch_youtube_transcript_api(video_id or info.get("id"))
-            if transcript_api_text:
-                result["transcript"] = transcript_api_text
-                result["transcript_source"] = "subs"
-                result["transcript_segments"] = transcript_api_segments
-                result["extraction_methods"].append("youtube-transcript-api")
-            elif transcript_api_err:
-                errors.append(transcript_api_err)
-
-        if prefer_subtitles and not result["transcript"]:
-            subtitle_text, subtitle_segments = find_subtitle_text(out_dir, info.get("id"))
-            if subtitle_text:
-                result["transcript"] = subtitle_text
-                result["transcript_segments"] = subtitle_segments
-                result["transcript_source"] = "subs"
-                result["extraction_methods"].append("yt-dlp:subtitles")
-
-    if prefer_subtitles and not result["transcript"]:
-        sub_err = download_subtitles_cli(url, out_dir)
-        subtitle_text, subtitle_segments = find_subtitle_text(out_dir, info.get("id") if info else video_id)
-        if subtitle_text:
-            result["transcript"] = subtitle_text
-            result["transcript_segments"] = subtitle_segments
-            result["transcript_source"] = "subs"
-            result["extraction_methods"].append("yt-dlp-cli:subtitles")
-        elif sub_err:
-            errors.append(sub_err)
+    if prefer_subtitles:
+        caption_id = video_id or (info or {}).get("id")
+        source_language = youtube_source_language(info)
+        text, segments, track, warning = fetch_youtube_transcript_api(caption_id, source_language)
+        method = "youtube-transcript-api"
+        if warning:
+            errors.append(warning)
+        if not text:
+            text, segments, language = find_subtitle_text(out_dir, caption_id)
+            method = "yt-dlp:subtitles"
+            track = {"language": language, "kind": "unknown"}
+        if not text:
+            code, kind = preferred_cli_track(info)
+            warning = download_subtitles_cli(url, out_dir, code, kind)
+            text, segments, language = find_subtitle_text(out_dir, caption_id)
+            method = "yt-dlp-cli:subtitles"
+            track = {"language": language.removesuffix("-orig") if language else None, "kind": kind if language == code else "unknown"}
+            if warning and not text:
+                errors.append(warning)
+        if text and track:
+            result.update(transcript=text, transcript_segments=segments, transcript_source="subs", transcript_track=track)
+            result["extraction_methods"].extend([method, f"captions:{track['kind']}:{track['language'] or 'unknown'}"])
 
     if do_transcribe and not result["transcript"] and platform == "youtube" and not audio_path:
         retry_info, retry_audio, _retry_video, retry_err = run_ytdlp(
@@ -1409,13 +1498,11 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         result["title"] = result["title"] or (result["caption"] or "").split("\n")[0][:160] or "TikTok photo post"
         result["extraction_methods"].append("tiktok:photo-manifest")
 
-    if not result["caption"] and not result["title"]:
-        oembed = try_oembed(url, platform)
+    if not result["caption"]:
+        oembed = try_oembed(url, platform) if not result["title"] else None
         if oembed:
             result["title"] = result["title"] or oembed.get("title")
             result["creator"] = result["creator"] or oembed.get("author_name")
-            result["caption"] = result["caption"] or oembed.get("title")
-            result["hashtags"] = result["hashtags"] or pull_hashtags(oembed.get("title"))
             result["extraction_methods"].append("oembed")
         html_meta = try_html_meta(url)
         if html_meta:
@@ -1426,7 +1513,15 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 result["hashtags"] = result["hashtags"] or pull_hashtags(cap)
                 result["source_links"] = result["source_links"] or pull_links(cap)
                 result["linked_artifacts"] = result["linked_artifacts"] or classify_linked_artifacts(result["source_links"])
-                result["extraction_methods"].append("html-meta")
+                result["extraction_methods"].append("html-meta:description")
+
+        # TikTok's oEmbed title carries the creator's video description.
+        if platform == "tiktok" and not result["caption"] and oembed and oembed.get("title"):
+            result["caption"] = oembed["title"]
+            result["hashtags"] = pull_hashtags(result["caption"])
+            result["source_links"] = pull_links(result["caption"])
+            result["linked_artifacts"] = classify_linked_artifacts(result["source_links"])
+            result["extraction_methods"].append("tiktok:oembed-title")
 
     if do_transcribe and not result["transcript"] and audio_path and audio_path.exists():
         transcript, segments, w_err = transcribe(audio_path)
@@ -1479,7 +1574,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
             errors.extend(warnings)
             if paths:
                 text, warning = extract_image_text(paths)
-                slide.update(status="ocr" if text else "no text", text=text)
+                slide.update(status="ocr" if text else "ocr unavailable" if warning else "no text", text=text)
                 assets[0]["ocr_text"] = text
                 result["media_assets"].extend(assets)
                 visual_blocks.append(text)
@@ -1510,7 +1605,7 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
 
     if result["caption"] or result["transcript"] or result["visual_text"]:
         result["status"] = "ok"
-    elif info:
+    elif info or result["title"]:
         result["status"] = "partial"
     else:
         result["status"] = "failed"

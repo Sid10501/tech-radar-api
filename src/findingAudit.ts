@@ -1,5 +1,46 @@
 import type { FindingSummary, PublicFindingSummary } from "./findings.js";
 
+import type { LabReview } from "./lab.js";
+import type { CaptureCoverage } from "./lib/captureCoverage.js";
+
+function describeSlideCounts(coverage?: CaptureCoverage): string {
+  if (!coverage) return "No slide counts recorded.";
+  if (coverage.listed === null) return "The extractor could not enumerate the slides.";
+  return `${coverage.withText} of ${coverage.listed} listed media items returned OCR text.`;
+}
+
+// The queue uses the complete canonical archive. It is a read-only view of evidence and owner decisions.
+export function recoveryQueue(findings: FindingSummary[], reviews: Pick<LabReview, "findingId" | "decision">[]) {
+  const dismissed = new Set(reviews.filter(review => review.decision === "Dismiss").map(review => review.findingId));
+  return findings.flatMap(finding => {
+    const duplicate = finding.diagnostics.duplicateGroup;
+    if (dismissed.has(finding.id) || (duplicate && duplicate.canonicalFindingId !== finding.id)) return [];
+    const { status, reasons } = enrichmentProfile(finding);
+    if (status !== "needs-enrichment") return [];
+    let priority = 3;
+    let reason = "Source evidence is weak";
+    let nextAction = "Compare the saved claims with the original source and check for a first-party reference.";
+    if (reasons.includes("incomplete_capture")) {
+      priority = 0;
+      reason = "Incomplete slide capture";
+      nextAction = "Check the listed slides against the source and record which slides still need text or visual review.";
+    } else if (reasons.includes("shortlink_unresolved")) {
+      priority = 1;
+      reason = "Unresolved source link";
+      nextAction = "Open the original source and verify the destination before retrying extraction.";
+    } else if (reasons.includes("missing_repo_or_docs")) {
+      priority = 2;
+      reason = "Missing repository or documentation";
+      nextAction = "Check the original post for the named project's first-party repository or documentation.";
+    }
+    if (!finding.source.url) nextAction = "Recover the original source URL before checking this finding.";
+    return [{ id: finding.id, priority, reason, nextAction,
+      currentSlides: describeSlideCounts(finding.captureCoverage),
+      previousSlides: describeSlideCounts(finding.retry?.previousCoverage),
+      capturedSignals: evidenceKeys.filter(key => finding.evidence[key]) }];
+  }).sort((a, b) => a.priority - b.priority);
+}
+
 type QualityLevel = FindingSummary["quality"]["level"];
 type EvidenceKey = keyof FindingSummary["evidence"];
 type Action = FindingSummary["recommendedAction"];

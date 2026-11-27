@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FindingSummary, PublicFindingSummary } from "../src/findings.js";
-import { auditFindings, auditPublicFindings, enrichmentProfile, enrichmentStatus, filterCounts, filterCountsFromPublic, publicEnrichmentProfile } from "../src/findingAudit.js";
+import { auditFindings, auditPublicFindings, enrichmentProfile, enrichmentStatus, filterCounts, filterCountsFromPublic, recoveryQueue, publicEnrichmentProfile } from "../src/findingAudit.js";
 
 function finding(overrides: Partial<FindingSummary> = {}): FindingSummary {
   return {
@@ -53,6 +53,25 @@ function publicFinding(overrides: Partial<PublicFindingSummary> = {}): PublicFin
 }
 
 describe("finding audit helpers", () => {
+  it("orders the entire recovery queue by evidence gap, omitting dismissed, duplicate and non-retryable items", () => {
+    const weak = finding();
+    const partial = finding({
+      id: "older",
+      triage: { kind: "unknown_tool", retryable: true, reasons: ["incomplete_capture"] },
+      captureCoverage: { withText: 3, listed: 5 },
+      retry: { updated: "2026-07-02", previousFilename: "older", generatedFilename: "new", previousCoverage: { withText: 1, listed: 5 } },
+    });
+    const duplicate = finding({ id: "copy", diagnostics: { extractionWarnings: [],
+      duplicateGroup: { id: "source", reason: "same source URL", canonicalFindingId: "older", count: 2 } } });
+    const ready = finding({ triage: { kind: "unknown_tool", retryable: false, reasons: [] } });
+    const rows = recoveryQueue([weak, duplicate, finding({ id: "dismissed" }), ...Array(16).fill(ready), partial],
+      [{ findingId: "dismissed", decision: "Dismiss" }, { findingId: "older", decision: "Bookmark" }]);
+    expect(rows.map(row => row.id)).toEqual(["older", weak.id]);
+    expect(rows[0]).toMatchObject({ reason: "Incomplete slide capture", currentSlides: "3 of 5 listed media items returned OCR text.",
+      previousSlides: "1 of 5 listed media items returned OCR text.", capturedSignals: ["caption"] });
+    expect(rows[1]?.previousSlides).toBe("No slide counts recorded.");
+  });
+
   it("computes latest batch health and evidence counts for FindingSummary rows", () => {
     const rows = [
       finding({

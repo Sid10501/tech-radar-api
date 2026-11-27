@@ -110,6 +110,15 @@ export function composeFinding(input: {
       ? `\n**Display:** ${research.display_name.trim()} — ${research.display_summary.trim()}`
       : "";
 
+  const extendedEvidence = [
+    ["Transcript", extract.transcript_source, extract.transcript],
+    ["On-screen text", extract.visual_text_source, extract.visual_text],
+  ].flatMap(([label, method, raw]) => {
+    if (!raw || raw.length <= 400) return [];
+    const limit = 16000;
+    return [`${label} (${method || "method unrecorded"}, ${Math.min(raw.length, limit)} of ${raw.length} characters saved)\n\n> ${singleLine(raw.slice(0, limit))}`];
+  }).join("\n\n");
+
   const body = `# ${title}
 
 **Source:** ${extract.platform} · [${extract.creator ?? "unknown"}](${extract.url})
@@ -179,7 +188,7 @@ Pseudocode / untested proposal; no local execution was performed by the recommen
 
 ${implementation.implementation_idea_markdown.trim().replace(/^#{1,2}(?=\s)/gm, "###")}
 ${ideaBlock}
-
+${extendedEvidence ? "\n## Extended capture\n\n" + extendedEvidence + "\n" : ""}
 ## Follow-ups
 
 ${implementation.follow_ups.map((f) => `- [ ] ${singleLine(f)}`).join("\n")}

@@ -255,3 +255,33 @@ it("renders TikTok photo ordinals without inventing Instagram-style slide links"
   expect(body).toContain("- Slide 1 · ocr: ERPNext");
   expect(body).not.toContain("img_index");
 });
+
+it("retains a bounded owner-only capture beyond the public excerpt", async () => {
+  const { composeFinding } = await import("../src/compose.js");
+  const { getFindingDetail, getPublicFindingDetail } = await import("../src/findings.js");
+  const { tmpdir } = await import("node:os");
+  const transcript = "x".repeat(410) + "\n## Retry history\nPRIVATE_TRANSCRIPT" + "z".repeat(16000);
+  const { filename, body } = composeFinding({
+    extract: { ...extractFixture, transcript, transcript_source: "subs" },
+    research: researchFixture, implementation: implementationFixture,
+  });
+  const root = fs.mkdtempSync(path.join(tmpdir(), "extended-capture-"));
+  try {
+    const findingsDir = path.join(root, "tech-radar", "findings");
+    fs.mkdirSync(findingsDir, { recursive: true });
+    fs.writeFileSync(path.join(findingsDir, filename), body);
+    const privateDetail = getFindingDetail(filename, root);
+    expect(privateDetail?.sections.extendedCapture).toContain("PRIVATE_TRANSCRIPT");
+    expect(privateDetail?.sections.extendedCapture).toContain("16000 of " + transcript.length);
+    const publicDetail = getPublicFindingDetail(filename, root);
+    expect(publicDetail).toBeTruthy();
+    expect(JSON.stringify(publicDetail)).not.toContain("PRIVATE_TRANSCRIPT");
+    const historical = body.split("## Fit for ")[0] + "\n## Retry history\n\nPrevious attempt.\n\n## Extended capture\n\n> PRIVATE_TRANSCRIPT";
+    fs.writeFileSync(path.join(findingsDir, filename), historical);
+    const recovered = getPublicFindingDetail(filename, root);
+    expect(recovered?.sections.retryHistory).toContain("Previous attempt");
+    expect(JSON.stringify(recovered)).not.toContain("PRIVATE_TRANSCRIPT");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

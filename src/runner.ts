@@ -537,6 +537,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const enrichedExtract = await extractAndEnrich(extractResult);
     let findingPath = "";
     let childCount = 0;
+    let preservedCoverage = false;
     let findingFilename = "";
     const activeRepo = repo;
 
@@ -550,14 +551,17 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
         const implementationResult = await runImplementation(sharedExtract, researchResult, implementationMemoryDir);
         const composed = composeFinding({ extract: sharedExtract, research: researchResult, implementation: implementationResult });
         const write = await activeRepo.writeFindingForSource({ sourceUrl: url, filename: composed.filename, body: composed.body, date: today });
-        await activeRepo.updateIndex({ date: today, title: sharedExtract.title ?? write.filename, finding: write.filename, targetProject: implementationResult.target_project });
-        for (const row of childArtifactInboxRows(sharedExtract, { date: today, parentFinding: write.filename })) {
-          if (await activeRepo.updateInboxIfMissing(row)) childCount++;
+        preservedCoverage = !!write.preservedCoverage;
+        if (!preservedCoverage) {
+          await activeRepo.updateIndex({ date: today, title: sharedExtract.title ?? write.filename, finding: write.filename, targetProject: implementationResult.target_project });
+          for (const row of childArtifactInboxRows(sharedExtract, { date: today, parentFinding: write.filename })) {
+            if (await activeRepo.updateInboxIfMissing(row)) childCount++;
+          }
         }
         findingPath = `tech-radar/findings/${write.filename}`;
         findingFilename = write.filename;
         run.findingPath = findingPath;
-        run.generatedFindingPath = write.generatedFilename === write.filename ? undefined : `tech-radar/findings/${write.generatedFilename}`;
+        run.generatedFindingPath = preservedCoverage || write.generatedFilename === write.filename ? undefined : `tech-radar/findings/${write.generatedFilename}`;
         run.replacedExistingFinding = write.replacedExisting;
         return findingPath;
       },
@@ -607,10 +611,10 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const noRoutedBranch = ["other", "needs_review"].includes(routed.classification.category);
     const hasFinance = Boolean(routed.finance);
     const terminalFinanceStatus = routed.finance ? stockBotTerminalRunStatus(routed.finance, run.id) : undefined;
-    const captureReview = Boolean(routed.technology) && !requestedFinance && needsCaptureReview(measuredCoverage(photoCapture(enrichedExtract)));
+    const captureReview = Boolean(routed.technology) && !requestedFinance && (preservedCoverage || needsCaptureReview(measuredCoverage(photoCapture(enrichedExtract))));
     const pipelineStatus = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : captureReview ? "needs_review" : "processed");
     run.status = mergeRunStatus(run.status, pipelineStatus);
-    run.error = branchErrors.length ? branchErrors.join("; ").slice(0, 1_000) : undefined;
+    run.error = branchErrors.length ? branchErrors.join("; ").slice(0, 1_000) : preservedCoverage ? "Retry lost slide evidence. The existing finding and index were retained." : undefined;
     run.finishedAt = run.status === "downstream_pending" ? undefined : new Date().toISOString();
     if (terminalFinanceStatus === "failed") run.error = "StockBot analysis failed";
     if (terminalFinanceStatus === "skipped") run.error = run.deduplicatedToRunId
@@ -619,7 +623,7 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const inboxFinding = hasFinance
       ? [findingFilename || null, `stockbot:${run.downstreamAnalysisId}`, `run:${run.id}`].filter(Boolean).join(";")
       : findingFilename;
-    await repo.updateInbox({ url, status: run.status, finding: inboxFinding || null, date: today });
+    await repo.updateInbox({ url, status: run.status, finding: inboxFinding || null, date: today, error: preservedCoverage ? run.error : undefined });
     await repo.commitAndPush(hasFinance ? `tech-radar: StockBot handoff ${run.id}` : `tech-radar: ${run.status} ${run.id}`);
     storeRun(run);
 
@@ -628,6 +632,8 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
       sendTelegram(run.deduplicatedToRunId
         ? `⏭️ *Stock analysis deduplicated*\nReusing run ${run.deduplicatedToRunId}${link}`
         : `${terminalFinanceStatus === "processed" ? "✅" : "⚠️"} *Stock analysis ${routed.finance!.status}*${link}`);
+    } else if (preservedCoverage && !branchErrors.length) {
+      sendTelegram(`⚠️ *Existing finding retained*\n\nThe retry lost slide evidence and needs review.\n${url.slice(0, 80)}`);
     } else if (captureReview && !branchErrors.length) {
       sendTelegram(`⚠️ *Finding saved for review*\n\nPhoto slide evidence is incomplete.\n${url.slice(0, 80)}`);
     } else if (noRoutedBranch) {

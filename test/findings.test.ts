@@ -803,6 +803,7 @@ describe("parseFindingMarkdown()", () => {
       retryable: true,
       reasons: expect.arrayContaining(["repo_found_source_weak"]),
     });
+    expect(finding.evidence.caption).toBe(false);
     expect(finding.quality.reasons).toContain("repo found, source weak");
     expect(finding.quality.reasons).toContain("needs transcript");
     expect(finding.recommendedAction).toBe("Retry");

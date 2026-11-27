@@ -132,7 +132,7 @@ function createDashboardHarness(options: {
   const unlock = elements.get("unlock")!;
   unlock.children.set(".wide-label", new FakeElement("unlock-wide"));
   unlock.children.set(".short-label", new FakeElement("unlock-short"));
-  const filters = ["all", "strong", "review", "weak", "repo", "enrich", "ocr", "project", "skip"].map((key) => {
+  const filters = ["all", "strong", "review", "weak", "repo", "enrich", "ocr", "project", "skip", "recovery"].map((key) => {
     const element = new FakeElement(`filter-${key}`);
     element.dataset.filter = key;
     if (key === "all") element.classList.toggle("active", true);
@@ -222,6 +222,7 @@ function createDashboardHarness(options: {
     history,
     location: { href: "http://dashboard.test/" + (options.queryString ?? ""), search: options.queryString ?? "" },
     navigator: {},
+    URL,
     URLSearchParams,
     fetch: options.fetch || defaultFetch,
     requestAnimationFrame: (callback: () => void) => callback(),
@@ -283,6 +284,24 @@ describe("dashboard reason presentation", () => {
 });
 
 describe("dashboard HTML", () => {
+  it("uses the private recovery order and displays evidence only in owner view", async () => {
+    const harness = createDashboardHarness();
+    await harness.settle();
+    const result = await harness.evaluate(`
+      const prior = state.findings; state.findings = [{ id: "child.md" }, { id: "parent.md" }];
+      state.privateUnlocked = true;
+      state.filter = "recovery";
+      state.recovery = new Map([["child.md", { id: "child.md", reason: "Incomplete slide capture",
+        nextAction: "Check the source.", currentSlides: "2 of 4 listed media items returned OCR text.",
+        previousSlides: "No slide counts recorded.", capturedSignals: ["caption", "ocr"] }]]);
+      const result = { ids: visibleFindings().map(f => f.id), panel: recoveryPanel({ id: "child.md" }) };
+      state.privateUnlocked = false; state.filter = "all"; state.findings = prior; result
+    `);
+    expect(result).toMatchObject({ ids: ["child.md"], panel: expect.stringContaining("2 of 4") });
+    expect((result as { panel: string }).panel).toContain("No slide counts recorded.");
+    expect(await harness.evaluate('state.privateUnlocked = false; recoveryPanel({ id: "child.md" })')).toBe("");
+  });
+
   it("advertises the public feed and opens a linked finding on mobile", async () => {
     const html = DASHBOARD_HTML([]);
     expect(html).toContain('rel="alternate" type="application/rss+xml"');
@@ -925,5 +944,78 @@ describe("dashboard HTML", () => {
     expect(flaggedDetails).toContain("Weak quality: 1");
     expect(flaggedDetails).not.toContain("Missing links");
     expect(flaggedDetails).not.toContain("No flagged reasons");
+  });
+});
+
+describe("Copy build prompt", () => {
+  it("copies an interview-first brief for the selected public finding and preserves the source reference", async () => {
+    const harness = createDashboardHarness();
+    await harness.settle();
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.assign(harness.context.navigator, { clipboard: { writeText } });
+    const fallback = { hidden: false };
+    Object.assign(harness.context, { fallback });
+    const detail = harness.elements.get("detail-body")!;
+    const finding = {
+      ...parentFinding, filename: "parent.md", captureCoverage: { listed: 7, withText: 3 },
+      targetProject: "Private project reference", verdict: "Private assessment",
+    };
+    const button = {
+      dataset: { action: "copy-build" },
+      addEventListener: vi.fn(),
+    };
+    Object.assign(detail, {
+      querySelectorAll: (selector: string) => selector === "[data-action]" ? [button] : [],
+      querySelector: (selector: string) => selector === "[data-copy-fallback]" ? fallback : null,
+    });
+    const selected = detailFixture(finding);
+    Object.assign(selected.sections, {
+      coverage: "The submitted link pointed to slide 7.\n- [Slide 1](https://example.com/1) Cover\n- [Slide 7](https://example.com/7) Check quotations",
+      shown: "The creator demonstrates a writing review. https://example.com/demo?access_token=private-confirmation",
+      fit: "Private project reference", implementation: "Private assessment",
+    });
+    Object.assign(harness.context, { selected });
+    await harness.evaluate("state.detail = selected; state.loading = false; renderDetail()");
+    expect(detail.innerHTML).toContain('data-action="copy-build"');
+    button.addEventListener.mock.calls[0][1]();
+    await harness.settle();
+    const prompt = writeText.mock.calls[0][0];
+    expect(prompt).not.toContain("private-confirmation");
+    expect(prompt).toMatch(/^Help me decide.*Start with a short interview and wait for my reply/);
+    for (const phrase of [
+      "parent.md", parentFinding.source.url, "7 listed items, 3 with extracted text",
+      "existing project", "standalone project", "skills, plugins and tools", "independent review",
+      "explicit approval before deploying", "tech-radar/applied.json", "portfolio radar", "RSS",
+    ]) expect(prompt).toContain(phrase);
+    expect(prompt).toContain("Radar link: http://dashboard.test/?finding=parent.md");
+    expect(prompt).toContain("The creator demonstrates a writing review.");
+    expect(prompt.indexOf("Requested slide: - [Slide 7]")).toBeGreaterThan(0);
+    expect(prompt.indexOf("Check quotations")).toBeLessThan(prompt.indexOf("[Slide 1]"));
+    expect(prompt).not.toMatch(/Private project reference|Private assessment/);
+    expect(fallback.hidden).toBe(true);
+  });
+
+  it("selects the full prompt for manual copy when clipboard access is unavailable", async () => {
+    const harness = createDashboardHarness();
+    await harness.settle();
+    const field = { value: "", focus: vi.fn(), select: vi.fn() };
+    const fallback = { hidden: true, querySelector: () => field };
+    Object.assign(harness.context, {
+      selected: {
+        finding: { ...childFinding, filename: "child.md", source: { url: null } },
+        sections: { fit: "Existing project A", implementation: "Prototype B" },
+      },
+      fallback,
+    });
+    await harness.evaluate('copyBuildPrompt(selected, {querySelector: () => fallback}, true)');
+    expect(fallback.hidden).toBe(false);
+    expect(field.focus).toHaveBeenCalled();
+    expect(field.select).toHaveBeenCalled();
+    expect(field.value).toContain("Finding: child.md");
+    expect(field.value).toContain("Original source: unavailable");
+    expect(field.value).toContain("Owner workspace notes");
+    expect(field.value).toContain("Existing project A");
+    expect(field.value).toContain("Prototype B");
+    expect(field.value).toContain("Media coverage was not measured");
   });
 });
