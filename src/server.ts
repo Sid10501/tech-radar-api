@@ -21,7 +21,7 @@ import {
   listPublicFindings,
   type FindingSummary,
 } from "./findings.js";
-import { auditFindings, auditPublicFindings, enrichmentProfile, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
+import { auditFindings, auditPublicFindings, recoveryQueue, enrichmentProfile, filterCounts, filterCountsFromPublic } from "./findingAudit.js";
 import { listReleaseNotes } from "./releaseNotes.js";
 import { buildRssXml } from "./rss.js";
 import { AiMemoryRepo, setupSshKey, withAiMemoryRepoMutation } from "./git.js";
@@ -280,7 +280,8 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
     }
   });
 
-  registerLabRoutes(app, dependencies.labStore ?? new LabStore(process.env["LAB_STATE_DIR"]?.trim() || path.join(process.env["RUN_STATE_DIR"] ?? os.tmpdir(), "lab")), isOwnerAuthorized, dependencies.captureDiscussion,
+  const labStore = dependencies.labStore ?? new LabStore(process.env["LAB_STATE_DIR"]?.trim() || path.join(process.env["RUN_STATE_DIR"] ?? os.tmpdir(), "lab"));
+  registerLabRoutes(app, labStore, isOwnerAuthorized, dependencies.captureDiscussion,
     async id => { await ensureAiMemoryCheckout(); const detail = getFindingDetail(id); return detail ? { title: detail.finding.title, summary: detail.finding.summary } : null; });
 
   app.get("/healthz", async () => {
@@ -554,10 +555,14 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
     return { findings: listClusteredFindings() };
   });
 
-  app.get("/api/audit", { preHandler: authMiddleware }, async () => {
+  app.get("/api/audit", { preHandler: authMiddleware }, async (request) => {
     await ensureAiMemoryCheckout();
     const findings = listClusteredFindings();
-    return { audit: auditFindings(findings), filters: filterCounts(findings) };
+    const filters = filterCounts(findings);
+    const audit = auditFindings(findings);
+    if (!isOwnerAuthorized(request)) return { audit, filters };
+    const recovery = recoveryQueue(findings, labStore.read().reviews);
+    return { audit, filters: { ...filters, recovery: recovery.length }, recovery };
   });
 
   app.post<{ Params: { id: string } }>(

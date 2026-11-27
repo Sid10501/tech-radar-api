@@ -23,6 +23,7 @@ def test_extract_google_drive_file_id_from_common_urls():
 
 
 def test_extract_google_drive_pdf_uses_document_text_without_ytdlp(monkeypatch, tmp_path):
+    monkeypatch.setattr(extract_post, "resolves_to_public_address", lambda host: True)
     pdf_path = tmp_path / "source.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n")
 
@@ -75,6 +76,7 @@ def test_extract_rejects_unsafe_primary_urls_before_ytdlp(monkeypatch, tmp_path)
 
 
 def test_run_ytdlp_reports_timeout(monkeypatch, tmp_path):
+    monkeypatch.setattr(extract_post, "resolves_to_public_address", lambda host: True)
     class FakeYoutubeDL:
         def __init__(self, _opts):
             pass
@@ -310,3 +312,37 @@ def test_tiktok_photo_scope_rejects_foreign_hosts_and_credentials():
                 "https://user@www.tiktok.com/"]:
         assert not extract_post.tiktok_url_allowed(url)
     assert not extract_post.tiktok_url_allowed("https://www.tiktok.com/", media=True)
+
+
+def test_social_description_survives_title_and_meta_attribute_order(monkeypatch, tmp_path):
+    monkeypatch.setattr(extract_post, "is_allowed_fetch_url", lambda url: True)
+    monkeypatch.setattr(extract_post, "run_ytdlp", lambda *a, **kw: ({"title": "Post by Sid"}, None, None, None))
+    monkeypatch.setattr(extract_post, "_http_get", lambda *a, **kw: """<meta content="Here's the demo &amp; its docs https://example.com/docs #demo" property="og:description">""")
+    result = extract_post.extract("https://www.instagram.com/p/example/", tmp_path, False, False)
+    assert result["caption"] == "Here's the demo & its docs https://example.com/docs #demo"
+    assert result["hashtags"] == ["demo"]
+    assert "https://example.com/docs" in result["source_links"]
+    assert "html-meta:description" in result["extraction_methods"]
+
+
+def test_social_title_alone_is_not_a_caption(monkeypatch, tmp_path):
+    monkeypatch.setattr(extract_post, "is_allowed_fetch_url", lambda url: True)
+    monkeypatch.setattr(extract_post, "run_ytdlp", lambda *a, **kw: (None, None, None, None))
+    monkeypatch.setattr(extract_post, "run_ytdlp_json_cli", lambda *a: (None, None))
+    monkeypatch.setattr(extract_post, "try_oembed", lambda *a: {"title": "Post by Sid"})
+    monkeypatch.setattr(extract_post, "try_html_meta", lambda *a: {})
+    result = extract_post.extract("https://www.instagram.com/p/example/", tmp_path, False, False)
+    assert result["title"] == "Post by Sid"
+    assert result["caption"] is None
+
+
+def test_tiktok_oembed_preserves_creator_description(monkeypatch, tmp_path):
+    monkeypatch.setattr(extract_post, "is_allowed_fetch_url", lambda url: True)
+    monkeypatch.setattr(extract_post, "run_ytdlp", lambda *a, **kw: (None, None, None, None))
+    monkeypatch.setattr(extract_post, "tiktok_photo_manifest", lambda *a: None)
+    monkeypatch.setattr(extract_post, "try_html_meta", lambda *a: {})
+    monkeypatch.setattr(extract_post, "try_oembed", lambda *a: {"title": "Try this #demo https://example.com/demo"})
+    result = extract_post.extract("https://www.tiktok.com/@creator/video/1234567890123456789", tmp_path, False, False)
+    assert result["caption"] == "Try this #demo https://example.com/demo"
+    assert result["hashtags"] == ["demo"]
+    assert "tiktok:oembed-title" in result["extraction_methods"]

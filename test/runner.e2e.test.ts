@@ -45,7 +45,18 @@ describe("runPipeline()", () => {
   it.each([
     { name: "complete source", capture: undefined, status: "processed" },
     { name: "incomplete carousel", capture: { kind: "enumerated", slides: [{ index: 1, status: "ocr", text: "Cover" }, { index: 2, status: "skipped", text: null }] }, status: "needs_review" },
-  ])("runs end-to-end for $name", async ({ capture, status }) => {
+    { name: "regressed retry", capture: undefined, status: "needs_review", preserve: true },
+  ])("runs end-to-end for $name", async ({ capture, status, preserve }) => {
+    const sourceUrl = "https://www.youtube.com/shorts/dQw4w9WgXcQ";
+    const canonical = "# Reviewed\n\n**Source:** youtube · [Author](https://www.youtube.com/shorts/dQw4w9WgXcQ)\n\n## Source coverage\n\nOCR returned text for 2 of 2 listed media items.";
+    const indexPath = "tech-radar/INDEX.md";
+    if (preserve) {
+      fs.writeFileSync(path.join(workDir, "tech-radar/findings/reviewed.md"), canonical);
+      fs.appendFileSync(path.join(workDir, indexPath), "| 2026-07-06 | Reviewed | reviewed.md | Original project |\n");
+      execFileSync("git", ["-C", workDir, "add", "."]);
+      execFileSync("git", ["-C", workDir, "commit", "-m", "Seed reviewed finding"]);
+      execFileSync("git", ["-C", workDir, "push"]);
+    }
     const extractFixture = JSON.parse(
       fs.readFileSync(path.join(FIXTURE_DIR, "extract_youtube.json"), "utf8"),
     );
@@ -139,7 +150,7 @@ describe("runPipeline()", () => {
       const { runPipeline, registerPipelineRun, getRun, listRuns } = await import("../src/runner.js");
 
       const { runId, findingPath } = await runPipeline(
-        "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+        sourceUrl,
         {
           remoteUrl: bareDir,
           localDir,
@@ -164,9 +175,15 @@ describe("runPipeline()", () => {
       const fullFindingPath = path.join(localDir, findingPath);
       expect(fs.existsSync(fullFindingPath)).toBe(true);
       const findingContent = fs.readFileSync(fullFindingPath, "utf8");
-      expect(findingContent).toContain("## Implementation Idea");
-
       const inbox = fs.readFileSync(path.join(localDir, "tech-radar", "INBOX.md"), "utf8");
+      if (preserve) {
+        expect(findingContent).toBe(canonical);
+        expect(fs.readFileSync(path.join(localDir, indexPath), "utf8")).toBe(fs.readFileSync(path.join(workDir, indexPath), "utf8"));
+        expect(inbox).toContain("Retry lost slide evidence");
+        expect(inbox).not.toContain("child of");
+        return;
+      }
+      expect(findingContent).toContain("## Implementation Idea");
       expect(inbox).toContain("| https://github.com/colinhacks/zod | pending |");
       expect(inbox).toContain("| https://zod.dev/ | pending |");
       expect(inbox).toContain(`child of ${path.basename(findingPath)}: github_repo`);
@@ -174,6 +191,40 @@ describe("runPipeline()", () => {
       expect(fs.existsSync(extractionOutDir)).toBe(false);
 
     } finally {
+      fs.rmSync(localDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { financeSuccess: false, status: "failed", expected: "Technology branch failed (insufficient provider credits); StockBot handoff failed (HTTP 503)" },
+    { financeSuccess: true, status: "partial", expected: "Technology branch failed (insufficient provider credits)" },
+  ])("persists safe branch evidence in the inbox for a $status mixed run", async ({ financeSuccess, status, expected }) => {
+    const fixture = JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, "extract_youtube.json"), "utf8"));
+    const sourceUrl = `https://www.instagram.com/p/mixed-${status}/`;
+    vi.doMock("../src/extract.js", () => ({ extract: async () => ({ ...fixture, url: sourceUrl,
+      title: "AI agent for stock market investing", source_links: [], linked_artifacts: [] }) }));
+    vi.doMock("../src/linkEnrichment.js", () => ({ enrichLinksFromExtract: async () => ({ confirmed: {}, candidates: [], warnings: [], github: null }) }));
+    vi.doMock("../src/agents/research.js", () => ({ runResearch: async () => {
+      throw new Error('400 {"message":"Your credit balance is too low","authorization":"secret-test-value"}\nprivate provider details');
+    } }));
+    vi.doMock("../src/stockbotClient.js", () => ({ StockBotClient: class {
+      async submitVideoEvidence() {
+        if (!financeSuccess) throw new Error("StockBot returned HTTP 503");
+        return { analysisId: "demo-analysis", status: "pending", deduplicated: false };
+      }
+    } }));
+    const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-routed-error-"));
+    try {
+      const { runPipeline, getRun } = await import("../src/runner.js");
+      const { runId } = await runPipeline(sourceUrl, { remoteUrl: bareDir, localDir, intent: "auto" });
+      expect(getRun(runId)).toMatchObject({ status, error: expected });
+      const inbox = fs.readFileSync(path.join(localDir, "tech-radar/INBOX.md"), "utf8");
+      expect(inbox.split("\n").filter(line => line.includes(sourceUrl))).toEqual([expect.stringContaining(expected)]);
+      expect(inbox).not.toMatch(/secret-test-value|private provider details|authorization/);
+    } finally {
+      vi.doUnmock("../src/linkEnrichment.js");
+      vi.doUnmock("../src/agents/research.js");
+      vi.doUnmock("../src/stockbotClient.js");
       fs.rmSync(localDir, { recursive: true, force: true });
     }
   });

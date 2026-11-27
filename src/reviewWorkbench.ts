@@ -74,6 +74,7 @@ function bindReviewPanel(f) {
         draft.reviewDirty = false;
       }
       draft.message = '';
+      if (data.review.decision === 'Dismiss' || previous?.decision === 'Dismiss') await refreshAuditView();
     } catch (error) {
       draft.message = error.message + ' Your edits remain here.';
       if (state.selectedId === selectedId) status.textContent = draft.message;

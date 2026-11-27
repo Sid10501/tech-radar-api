@@ -1,3 +1,4 @@
+import { buildFindingPrompt } from "./buildPrompt.js";
 import type { Run } from "./runner.js";
 import { SID_REVIEW_SCRIPT } from "./reviewWorkbench.js";
 
@@ -922,6 +923,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
           <button class="filter secondary-filter" data-filter="repo">Repo/docs <span data-count-for="repo">0</span></button>
           <button class="filter secondary-filter" data-filter="ocr">OCR <span data-count-for="ocr">0</span></button>
           <button class="filter secondary-filter private-only-filter" data-filter="project">Project fit <span data-count-for="project">0</span></button>
+          <button class="filter secondary-filter private-only-filter" data-filter="recovery">Recovery queue <span data-count-for="recovery">0</span></button>
           <button class="filter secondary-filter private-only-filter" data-filter="skip">Skip <span data-count-for="skip">0</span></button>
         </div>
         <button id="audit-toggle" class="filter audit-toggle" type="button" aria-expanded="false" aria-controls="audit-panel">Audit</button>
@@ -960,9 +962,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
   <div id="toast" class="toast"></div>
   <script>
     window.__RUNS__ = ${JSON.stringify(runs)};
+    const buildFindingPrompt = ${buildFindingPrompt.toString()};
     const dashboardReasonKey = ${dashboardReasonKey.toString()};
     const dedupeDashboardReasons = ${dedupeDashboardReasons.toString()};
-    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, filterCounts: {}, mobileDetailOpen: false, secondaryFiltersOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false, releaseNotesRequestSeq: 0 };
+    const state = { findings: [], selectedId: null, detail: null, query: "", filter: "all", privateUnlocked: false, requestSeq: 0, loading: true, detailCache: new Map(), audit: null, recovery: new Map(), auditSeq: 0, filterCounts: {}, mobileDetailOpen: false, secondaryFiltersOpen: false, view: "findings", releaseNotes: [], releaseNotesLoading: false, releaseNotesRequestSeq: 0 };
     const token = new URLSearchParams(location.search).get("token") || "";
     state.privateUnlocked = Boolean(token);
     const $ = (id) => document.getElementById(id);
@@ -1088,7 +1091,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       return requestId === state.releaseNotesRequestSeq && state.view === "release-notes";
     }
 
-    const secondaryFilters = new Set(["repo", "enrich", "ocr", "project", "skip"]);
+    const secondaryFilters = new Set(["repo", "enrich", "ocr", "project", "skip", "recovery"]);
 
     function setSecondaryFiltersOpen(open) {
       if (open) setAuditPanelOpen(false);
@@ -1262,6 +1265,10 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     function visibleFindings() {
+      if (state.filter === "recovery" && state.privateUnlocked) {
+        const byId = new Map(state.findings.map(finding => [finding.id, finding]));
+        return [...state.recovery.keys()].map(id => byId.get(id)).filter(finding => finding && matchesQuery(finding));
+      }
       return state.findings.filter((finding) => matchesFilter(finding) && matchesQuery(finding));
     }
 
@@ -1280,6 +1287,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         project: "Project fit",
         ocr: "OCR",
         skip: "Skip",
+        recovery: "Recovery queue",
       };
       return labels[state.filter] || "All";
     }
@@ -1401,21 +1409,35 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
     }
 
     async function loadAudit() {
-      const path = state.privateUnlocked ? "/api/audit" : "/api/public/audit";
+      const owner = state.privateUnlocked;
+      const requestId = ++state.auditSeq;
+      let body;
       try {
-        const res = await fetch(path, { headers: state.privateUnlocked ? requestHeaders() : {}, credentials: "same-origin" });
-        if (!res.ok) {
-          state.audit = null;
-          state.filterCounts = {};
-          return;
-        }
-        const body = await res.json();
-        state.audit = body.audit || null;
-        state.filterCounts = body.filters || {};
-      } catch {
-        state.audit = null;
-        state.filterCounts = {};
-      }
+        const res = await fetch(owner ? "/api/audit" : "/api/public/audit", { headers: owner ? requestHeaders() : {}, credentials: "same-origin" });
+        if (res.ok) body = await res.json();
+      } catch { /* A refresh can retry a failed audit read. */ }
+      if (requestId !== state.auditSeq || owner !== state.privateUnlocked) return;
+      state.audit = body?.audit || null;
+      state.filterCounts = body?.filters || {};
+      state.recovery = new Map((owner ? body?.recovery || [] : []).map(row => [row.id, row]));
+    }
+
+    async function refreshAuditView() {
+      await loadAudit();
+      const previousId = state.selectedId;
+      renderList();
+      if (state.selectedId && state.selectedId !== previousId) await selectFinding(state.selectedId);
+      else renderDetail();
+    }
+
+    function recoveryPanel(finding) {
+      const row = state.privateUnlocked && state.recovery.get(finding.id);
+      if (!row) return "";
+      return sectionPanel("Recovery review", [row.reason + ". " + row.nextAction,
+        "Current slide OCR: " + row.currentSlides,
+        "Previous slide OCR: " + row.previousSlides,
+        "Current capture signals: " + (row.capturedSignals.join(", ") || "none recorded") + ". Historical per-channel counts are unavailable."
+      ].join("\\n\\n"));
     }
 
     function renderList() {
@@ -1610,7 +1632,9 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         sectionPanel("Source coverage", d.sections.coverage || ""),
         personal ? sectionPanel("Implementation idea", d.sections.implementation) : "",
         personal ? sectionPanel("Child artifact intake", d.sections.childArtifacts) : "",
+        state.privateUnlocked && d.sections.extendedCapture ? sectionPanel("Extended capture", d.sections.extendedCapture) : "",
         personal ? sectionPanel("Follow-ups", d.sections.followups) : "",
+        recoveryPanel(f),
         reviewPanel(f),
         sectionPanel("Retry history", d.sections.retryHistory),
         !state.privateUnlocked ? '<div class="panel"><div class="panel-head">Sid-specific layer</div><div class="panel-body">Unlock when you want to see project fit, recommended action, and implementation notes. The public research above stays open for everyone.</div></div>' : "",
@@ -1631,9 +1655,11 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
               <div class="summary">\${escapeHtml(f.summary)}</div>
               <div class="hero-actions">
                 \${f.source.url ? '<a class="inline-action primary" href="' + escapeHtml(f.source.url) + '" target="_blank" rel="noopener">Open source</a>' : ""}
+                <button class="inline-action" data-action="copy-build" title="\${state.privateUnlocked ? 'Includes private project fit and implementation notes' : 'Includes source evidence for this finding'}">Copy build prompt</button>
                 \${state.privateUnlocked ? '<button class="inline-action" data-action="copy-next">Copy next step</button>' : '<button class="inline-action" data-action="unlock">Unlock Sid fit</button>'}
               </div>
             </div>
+            <div data-copy-fallback hidden><label>Build prompt<textarea readonly rows="8" style="width:100%"></textarea></label></div>
             \${privateSummary(f, d)}
           </section>
           <section class="body-grid">
@@ -1662,6 +1688,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       detail.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => {
         if (button.dataset.action === "mobile-back") closeMobileView();
         if (button.dataset.action === "unlock") unlockPrivateView();
+        if (button.dataset.action === "copy-build") copyBuildPrompt(d, detail, state.privateUnlocked);
         if (button.dataset.action === "copy-next") {
           const text = nextTaskText(f);
           navigator.clipboard?.writeText(text).then(() => showToast("Next step copied."), () => showToast(text));
@@ -1672,6 +1699,23 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
         selectFinding(link.dataset.workflowFinding, { openDetail: true, historyMode: "push" });
       }));
       bindReviewPanel(f);
+    }
+
+    async function copyBuildPrompt(data, detail, ownerView) {
+      const text = buildFindingPrompt(data, ownerView, location.href);
+      const fallback = detail.querySelector("[data-copy-fallback]");
+      try {
+        await navigator.clipboard.writeText(text);
+        fallback.hidden = true;
+        showToast("Build prompt copied.");
+      } catch {
+        fallback.hidden = false;
+        const field = fallback.querySelector("textarea");
+        field.value = text;
+        field.focus();
+        field.select();
+        showToast("Select and copy the build prompt.");
+      }
     }
 
     function detailCacheKey(id) {
@@ -1790,7 +1834,7 @@ export const DASHBOARD_HTML = (runs: Run[]) => `<!DOCTYPE html>
       state.loading = false;
       selectFirstVisibleIfNeeded();
       renderList();
-      loadAudit().then(() => renderList());
+      refreshAuditView();
       if (options.preserveView && state.view === "release-notes") {
         renderDetail();
         return;

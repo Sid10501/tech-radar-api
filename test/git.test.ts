@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { AiMemoryRepo, withAiMemoryRepoMutation } from "../src/git.js";
 
+import { parseFindingMarkdown } from "../src/findings.js";
+
 let bareRepoDir: string;
 let workDir: string;
 
@@ -212,6 +214,7 @@ describe("AiMemoryRepo", () => {
     expect(content).toContain("New body.");
     expect(content).toContain("## Retry history");
     expect(content).toContain("Previous filename: `2026-07-06-same-title.md`");
+    expect(parseFindingMarkdown(write.filename, content).retry?.previousCoverage).toBeUndefined();
   });
 
   it("rewrites Instagram carousel retries that vary only by query params", async () => {
@@ -226,7 +229,7 @@ describe("AiMemoryRepo", () => {
         `**Source:** instagram · [Palmier](${originalSourceUrl})`,
         "**Saved:** 20260619",
         "",
-        "Old body.",
+        "## Source coverage", "", "OCR returned text for 2 of 4 listed media items.",
         "",
       ].join("\n"),
       date: "2026-06-19",
@@ -243,7 +246,7 @@ describe("AiMemoryRepo", () => {
         "**Source:** instagram · [Palmier](https://instagram.com/p/DZxFPZjjnTN/?utm_source=ig_web_copy_link)",
         "**Saved:** 20260706",
         "",
-        "New body.",
+        "## Source coverage", "", "OCR returned text for 3 of 4 listed media items.",
         "",
       ].join("\n"),
       date: "2026-07-06",
@@ -255,8 +258,42 @@ describe("AiMemoryRepo", () => {
       replacedExisting: true,
     });
     const content = fs.readFileSync(path.join(workDir, "clone", "tech-radar", "findings", "2026-06-19-palmier-carousel.md"), "utf8");
+    expect(parseFindingMarkdown(write.filename, content)).toMatchObject({ captureCoverage: { withText: 3, listed: 4 }, retry: { previousCoverage: { withText: 2, listed: 4 } } });
     expect(content).toContain("# Palmier Pro");
     expect(content).toContain("Generated filename: `2026-07-06-palmier-pro.md`");
+  });
+
+  it("reuses one finding across legacy Shorts, watch and share URLs while preserving distinct video IDs", async () => {
+    const save = (sourceUrl: string, filename: string) => repo.writeFindingForSource({
+      sourceUrl, filename, date: "2026-07-06", body: `# Saved video\n\n**Source:** youtube · [Creator](${sourceUrl})\n`,
+    });
+    await repo.pullLatest();
+    const original = "2026-07-06-first-video.md";
+    await save("https://www.youtube.com/shorts/dQw4w9WgXcQ", original);
+    for (const url of ["https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=20", "https://youtu.be/dQw4w9WgXcQ?si=shared"]) {
+      expect(await save(url, "renamed-video.md")).toMatchObject({ filename: original, replacedExisting: true });
+    }
+    expect(await save("https://www.youtube.com/watch?v=dQw4w9WgXcq", "different-video.md"))
+      .toMatchObject({ filename: "different-video.md", replacedExisting: false });
+  });
+
+  it("retains the canonical finding across regressions in manifest, counts or captured ordinals", async () => {
+    const sourceUrl = "https://www.instagram.com/p/keep-reviewed/";
+    const filename = "2026-07-06-keep-reviewed.md";
+    const header = "# Canonical\n\n**Source:** instagram · [Creator](" + sourceUrl + ")\n\n";
+    const section = "## Source coverage\n\n";
+    const previous = header + section + "OCR returned text for 2 of 3 listed media items.\n" +
+      "- [Slide 1](https://example.com/1) · Hand-reviewed cover\n- Slide 2 · ocr: Previous text\n- Slide 3 · no text: No text captured\n";
+    await repo.pullLatest();
+    await repo.writeFindingForSource({ sourceUrl, filename, body: previous, date: "2026-07-06" });
+    for (const regressed of ["", section + "Slide coverage unknown.", section + "OCR returned text for 1 of 3 listed media items.",
+      section + "OCR returned text for 2 of 2 listed media items.",
+      section + "OCR returned text for 2 of 3 listed media items.\n- Slide 1 · ocr: Cover\n- Slide 2 · ocr unavailable: No text captured\n- Slide 3 · ocr: Newly recovered"]) {
+      const write = await repo.writeFindingForSource({ sourceUrl, filename: "retry.md", body: header + regressed, date: "2026-07-07" });
+      expect(write).toMatchObject({ filename, replacedExisting: false, preservedCoverage: true });
+      expect(fs.readFileSync(path.join(workDir, "clone", "tech-radar", "findings", filename), "utf8")).toBe(previous);
+      expect(fs.existsSync(path.join(workDir, "clone", "tech-radar", "findings", "retry.md"))).toBe(false);
+    }
   });
 
   it("does not rewrite a finding that only mentions the same social URL outside Source", async () => {

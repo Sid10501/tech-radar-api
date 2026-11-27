@@ -1,3 +1,5 @@
+import { findingCoverageSection, youtubeVideoSourceKey } from "./findings.js";
+import { parseCaptureCoverage, type CaptureCoverage } from "./lib/captureCoverage.js";
 import { simpleGit, SimpleGit } from "simple-git";
 import fs from "node:fs";
 import path from "node:path";
@@ -56,6 +58,7 @@ export interface WriteFindingResult {
   filename: string;
   generatedFilename: string;
   replacedExisting: boolean;
+  preservedCoverage?: true;
 }
 
 export class AiMemoryRepo {
@@ -123,13 +126,21 @@ export class AiMemoryRepo {
     const existingFilename = input.sourceUrl ? this.findFindingBySourceUrl(input.sourceUrl) : null;
     const generatedFilename = safeFindingFilename(input.filename);
     const targetFilename = safeFindingFilename(existingFilename ?? generatedFilename);
-    const body = existingFilename
-      ? appendRetryMetadata(input.body, {
-          date: input.date,
-          generatedFilename,
-          previousFilename: existingFilename,
-        })
-      : input.body;
+    let body = input.body;
+    if (existingFilename) {
+      const oldSection = findingCoverageSection(fs.readFileSync(path.join(findingsDir, targetFilename), "utf8"));
+      const previousCoverage = parseCaptureCoverage(oldSection);
+      if (previousCoverage && previousCoverage.listed !== null) {
+        const newSection = findingCoverageSection(input.body);
+        const current = parseCaptureCoverage(newSection);
+        const newSlides = capturedSlideOrdinals(newSection);
+        if (!current || current.listed === null || current.listed < previousCoverage.listed ||
+            current.withText < previousCoverage.withText || [...capturedSlideOrdinals(oldSection)].some(index => !newSlides.has(index))) {
+          return { filename: targetFilename, generatedFilename, replacedExisting: false, preservedCoverage: true };
+        }
+      }
+      body = appendRetryMetadata(input.body, { date: input.date, generatedFilename, previousFilename: existingFilename, previousCoverage });
+    }
 
     fs.writeFileSync(path.join(findingsDir, targetFilename), body, "utf8");
     await this.git.add(path.join("tech-radar", "findings", targetFilename));
@@ -264,6 +275,8 @@ function cleanUrl(rawUrl: string): string {
 function canonicalSourceKey(rawUrl: string): string | null {
   try {
     const parsed = new URL(cleanUrl(rawUrl));
+    const youtube = youtubeVideoSourceKey(parsed);
+    if (youtube) return youtube;
     const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
     const pathParts = parsed.pathname.split("/").filter(Boolean);
 
@@ -289,15 +302,28 @@ function canonicalSourceKey(rawUrl: string): string | null {
   return null;
 }
 
+function capturedSlideOrdinals(section: string): Set<number> {
+  const ordinals = new Set<number>();
+  for (const match of section.matchAll(/^- \[?Slide (\d+)(?:\]\([^)]+\))? · (.+)$/gm)) {
+    // Generated rows carry a status. Hand-reviewed rows may carry a description instead.
+    if (!/^(?:unavailable|ocr unavailable|skipped|no text|failed)(?:[:. ]|$)/i.test(match[2])) ordinals.add(Number(match[1]));
+  }
+  return ordinals;
+}
+
 function appendRetryMetadata(
   body: string,
-  metadata: { date: string; generatedFilename: string; previousFilename: string },
+  metadata: { date: string; generatedFilename: string; previousFilename: string; previousCoverage?: CaptureCoverage },
 ): string {
   const block = [
     "",
     "## Retry history",
     "",
     `- Updated: ${metadata.date}`,
+    ...(metadata.previousCoverage ? [
+      metadata.previousCoverage.listed === null ? "- Previous slide capture: Slide coverage unknown." :
+        `- Previous slide capture: OCR returned text for ${metadata.previousCoverage.withText} of ${metadata.previousCoverage.listed} listed media items.`,
+    ] : []),
     `- Previous filename: \`${metadata.previousFilename}\``,
     `- Generated filename: \`${metadata.generatedFilename}\``,
     "",

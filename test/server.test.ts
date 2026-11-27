@@ -376,6 +376,8 @@ describe("server routes", () => {
     expect(body.filters.enrich).toBe(1);
     expect(body.filters.repo).toBe(0);
     expect(body.audit).not.toHaveProperty("actions");
+    expect(body).not.toHaveProperty("recovery");
+    expect(body.filters).not.toHaveProperty("recovery");
     expectNoPrivateFindingFields(body);
     expect(res.headers["cache-control"]).toBe(EXPECTED_PUBLIC_CACHE_CONTROL);
     expect(res.headers["vary"]).toContain("Origin");
@@ -1227,6 +1229,8 @@ describe("server routes", () => {
       const body = res.json();
       expect(body.audit.actions.Skip).toBe(1);
       expect(body.filters.skip).toBe(1);
+      expect(body.recovery).toEqual([]);
+      expect(body.filters.recovery).toBe(0);
     });
 
     it("GET /api/findings/:id returns markdown for a selected finding", async () => {

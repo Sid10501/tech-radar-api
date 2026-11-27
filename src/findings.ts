@@ -43,6 +43,7 @@ export interface FindingTriage {
 }
 
 export interface FindingRetryHistory {
+  previousCoverage?: CaptureCoverage;
   updated: string | null;
   previousFilename: string | null;
   generatedFilename: string | null;
@@ -152,6 +153,7 @@ export interface FindingDetail {
     research: string;
     links: string;
     kickstarter: string;
+    extendedCapture?: string;
     fit: string;
     implementation: string;
     childArtifacts: string;
@@ -180,7 +182,7 @@ export interface PublicFindingDetail {
 
 const DEFAULT_AI_MEMORY_DIR = "/Users/work/Repositories/ai-memory";
 const TEMPLATE_SECTION_HEADING =
-  /^## (TL;DR|What the post showed|Source coverage|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Follow-ups|Retry history|Correction — \d{4}-\d{2}-\d{2})\s*$/m;
+  /^## (TL;DR|What the post showed|Source coverage|Workflow Audit|What it actually is|Links|Kickstarter guide|Fit for .+|Implementation Idea|Child Artifact Intake Status|Extended capture|Follow-ups|Retry history|Correction — \d{4}-\d{2}-\d{2})\s*$/m;
 const PRIVATE_PROJECT_REFERENCE =
   /\b(Cross-Tax|StockBot|Finance Assistant|Kalkine Stocks Tracker|tech-radar-api|ai-video)\b/i;
 
@@ -579,7 +581,9 @@ function parseRetryHistory(body: string): FindingRetryHistory | null {
   const retryHistory = textBetween(body, "Retry history");
   if (!retryHistory) return null;
 
+  const previousCoverage = parseCaptureCoverage(retryHistory.match(/^- Previous slide capture: (.+)$/m)?.[1] ?? "");
   return {
+    ...(previousCoverage ? { previousCoverage } : {}),
     updated: retryHistory.match(/^- Updated:\s*(.+)$/m)?.[1]?.trim() ?? null,
     previousFilename: retryHistory.match(/^- Previous filename:\s*`?([^`\n]+)`?/m)?.[1]?.trim() ?? null,
     generatedFilename: retryHistory.match(/^- Generated filename:\s*`?([^`\n]+)`?/m)?.[1]?.trim() ?? null,
@@ -592,6 +596,7 @@ function hasCapturedText(value: string, unavailable: RegExp): boolean {
 }
 
 function withoutPrivateSections(markdown: string): string {
+  markdown = removeTemplateSections(markdown, "Extended capture");
   // Public appendices can follow owner notes in old findings. Inside the owner
   // block a generated heading such as "Links" still belongs to the owner.
   const ownerStart = /^## Fit for .+$/m.exec(markdown) ?? /^## Implementation Idea\s*$/m.exec(markdown);
@@ -780,7 +785,12 @@ function publicSafeValue(value: string | null): string | null {
   return PRIVATE_PROJECT_REFERENCE.test(value) ? null : value;
 }
 
+export function findingCoverageSection(markdown: string): string {
+  return textBetween(withoutPrivateSections(markdown), "Source coverage");
+}
+
 export function parseFindingMarkdown(filename: string, markdown: string): FindingSummary {
+  markdown = removeTemplateSections(markdown, "Extended capture");
   const title = decodeEntities(markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() || filename.replace(/\.md$/, ""));
   const sourceLine = markdown.match(/^\*\*Source:\*\*\s*(.+)$/m)?.[1]?.trim() ?? "";
   const sourceMatch = sourceLine.match(/^([^·\n]+?)(?:\s*·\s*(?:\[([^\]]+)\]\(([^)]+)\)|(.+)))?$/);
@@ -818,7 +828,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   ]);
   const extractionWarnings = parseBulletLines(markerText(shown, "Extraction warnings:"));
   const evidence: FindingEvidence = {
-    caption: hasCapturedText(captionText, /^(none|no caption available)$/i),
+    caption: hasCapturedText(captionText, /^\(?(?:none|no caption available)\)?$/i),
     transcript: hasCapturedText(transcriptText, /^[-\s]*(\(no transcript available\)|no transcript available)$/i),
     ocr: hasCapturedText(ocrText, /^[-\s]*(\(no on-screen text available\)|no on-screen text available|not captured)$/i),
     repo: isRealGithubRepoUrl(repoUrl) || isRealGithubRepoUrl(sourceUrl) || githubUrls(markdown).some(isRealGithubRepoUrl),
@@ -832,7 +842,7 @@ export function parseFindingMarkdown(filename: string, markdown: string): Findin
   const displaySummary = displayHeader?.summary || deriveDisplaySummary(tldr) || summary;
   const retry = parseRetryHistory(markdown);
   const scoredQuality = scoreFinding(markdown, evidence, targetProject, verdict, classification, directPublicArtifact);
-  const captureCoverage = parseCaptureCoverage(textBetween(withoutPrivateSections(markdown), "Source coverage"));
+  const captureCoverage = parseCaptureCoverage(findingCoverageSection(markdown));
   const triage = triageFinding(markdown, evidence, sourceUrl, classification, directPublicArtifact, scoredQuality);
   if (needsCaptureReview(captureCoverage)) {
     triage.retryable = true;
@@ -1135,6 +1145,16 @@ function normalizeDuplicateUrl(rawUrl: string | null): string | null {
   }
 }
 
+export function youtubeVideoSourceKey(url: URL): string | null {
+  const host = url.hostname.replace(/^(?:www|m|mobile)\./, "").toLowerCase();
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (host === "youtu.be" && segments[0]) return `youtube:${segments[0]}`;
+  if (host !== "youtube.com" && host !== "music.youtube.com") return null;
+  if (/^(?:shorts|embed|live)$/i.test(segments[0] ?? "") && segments[1]) return `youtube:${segments[1]}`;
+  const id = url.searchParams.get("v");
+  return segments[0] === "watch" && id ? `youtube:${id}` : null;
+}
+
 function canonicalSocialSourceKey(url: URL): string | null {
   const host = url.hostname;
   const segments = url.pathname.split("/").filter(Boolean);
@@ -1143,13 +1163,8 @@ function canonicalSocialSourceKey(url: URL): string | null {
     return `instagram:${segments[1]}`;
   }
 
-  if (host === "youtu.be" && segments[0]) return `youtube:${segments[0]}`;
-  if ((host === "youtube.com" || host === "music.youtube.com") && url.searchParams.get("v")) {
-    return `youtube:${url.searchParams.get("v")}`;
-  }
-  if ((host === "youtube.com" || host === "music.youtube.com") && /^(?:shorts|embed|live)$/i.test(segments[0] ?? "") && segments[1]) {
-    return `youtube:${segments[1]}`;
-  }
+  const youtube = youtubeVideoSourceKey(url);
+  if (youtube) return youtube;
 
   if (host === "tiktok.com") {
     const videoIndex = segments.findIndex((segment) => segment.toLowerCase() === "video");
@@ -1232,6 +1247,7 @@ export function getFindingDetail(filename: string, aiMemoryDir = getAiMemoryDir(
       research: textBetween(markdown, "What it actually is"),
       links: textBetween(markdown, "Links"),
       kickstarter: textBetween(markdown, "Kickstarter guide"),
+      extendedCapture: textBetween(markdown, "Extended capture"),
       fit: textBetween(markdown, "Fit for Sid"),
       implementation: textBetween(markdown, "Implementation Idea"),
       childArtifacts: textBetween(markdown, "Child Artifact Intake Status"),
