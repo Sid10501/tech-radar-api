@@ -274,7 +274,7 @@ describe("AiMemoryRepo", () => {
     await repo.writeFindingForSource({ sourceUrl, filename, body: previous, date: "2026-07-06" });
     for (const regressed of ["", section + "Slide coverage unknown.", section + "OCR returned text for 1 of 3 listed media items.",
       section + "OCR returned text for 2 of 2 listed media items.",
-      section + "OCR returned text for 2 of 3 listed media items.\n- Slide 1 · ocr: Cover\n- Slide 2 · no text: No text captured\n- Slide 3 · ocr: Newly recovered"]) {
+      section + "OCR returned text for 2 of 3 listed media items.\n- Slide 1 · ocr: Cover\n- Slide 2 · ocr unavailable: No text captured\n- Slide 3 · ocr: Newly recovered"]) {
       const write = await repo.writeFindingForSource({ sourceUrl, filename: "retry.md", body: header + regressed, date: "2026-07-07" });
       expect(write).toMatchObject({ filename, replacedExisting: false, preservedCoverage: true });
       expect(fs.readFileSync(path.join(workDir, "clone", "tech-radar", "findings", filename), "utf8")).toBe(previous);

@@ -45,7 +45,18 @@ describe("runPipeline()", () => {
   it.each([
     { name: "complete source", capture: undefined, status: "processed" },
     { name: "incomplete carousel", capture: { kind: "enumerated", slides: [{ index: 1, status: "ocr", text: "Cover" }, { index: 2, status: "skipped", text: null }] }, status: "needs_review" },
-  ])("runs end-to-end for $name", async ({ capture, status }) => {
+    { name: "regressed retry", capture: undefined, status: "needs_review", preserve: true },
+  ])("runs end-to-end for $name", async ({ capture, status, preserve }) => {
+    const sourceUrl = preserve ? "https://www.instagram.com/p/kept-review/" : "https://www.youtube.com/shorts/dQw4w9WgXcQ";
+    const canonical = "# Reviewed\n\n**Source:** instagram · [Author](https://www.instagram.com/p/kept-review/)\n\n## Source coverage\n\nOCR returned text for 2 of 2 listed media items.";
+    const indexPath = "tech-radar/INDEX.md";
+    if (preserve) {
+      fs.writeFileSync(path.join(workDir, "tech-radar/findings/reviewed.md"), canonical);
+      fs.appendFileSync(path.join(workDir, indexPath), "| 2026-07-06 | Reviewed | reviewed.md | Original project |\n");
+      execFileSync("git", ["-C", workDir, "add", "."]);
+      execFileSync("git", ["-C", workDir, "commit", "-m", "Seed reviewed finding"]);
+      execFileSync("git", ["-C", workDir, "push"]);
+    }
     const extractFixture = JSON.parse(
       fs.readFileSync(path.join(FIXTURE_DIR, "extract_youtube.json"), "utf8"),
     );
@@ -139,7 +150,7 @@ describe("runPipeline()", () => {
       const { runPipeline, registerPipelineRun, getRun, listRuns } = await import("../src/runner.js");
 
       const { runId, findingPath } = await runPipeline(
-        "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+        sourceUrl,
         {
           remoteUrl: bareDir,
           localDir,
@@ -164,9 +175,15 @@ describe("runPipeline()", () => {
       const fullFindingPath = path.join(localDir, findingPath);
       expect(fs.existsSync(fullFindingPath)).toBe(true);
       const findingContent = fs.readFileSync(fullFindingPath, "utf8");
-      expect(findingContent).toContain("## Implementation Idea");
-
       const inbox = fs.readFileSync(path.join(localDir, "tech-radar", "INBOX.md"), "utf8");
+      if (preserve) {
+        expect(findingContent).toBe(canonical);
+        expect(fs.readFileSync(path.join(localDir, indexPath), "utf8")).toBe(fs.readFileSync(path.join(workDir, indexPath), "utf8"));
+        expect(inbox).toContain("Retry lost slide evidence");
+        expect(inbox).not.toContain("child of");
+        return;
+      }
+      expect(findingContent).toContain("## Implementation Idea");
       expect(inbox).toContain("| https://github.com/colinhacks/zod | pending |");
       expect(inbox).toContain("| https://zod.dev/ | pending |");
       expect(inbox).toContain(`child of ${path.basename(findingPath)}: github_repo`);
