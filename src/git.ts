@@ -1,4 +1,4 @@
-import { findingCoverageSection } from "./findings.js";
+import { findingCoverageSection, youtubeVideoSourceKey } from "./findings.js";
 import { parseCaptureCoverage, type CaptureCoverage } from "./lib/captureCoverage.js";
 import { simpleGit, SimpleGit } from "simple-git";
 import fs from "node:fs";
@@ -275,6 +275,8 @@ function cleanUrl(rawUrl: string): string {
 function canonicalSourceKey(rawUrl: string): string | null {
   try {
     const parsed = new URL(cleanUrl(rawUrl));
+    const youtube = youtubeVideoSourceKey(parsed);
+    if (youtube) return youtube;
     const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
     const pathParts = parsed.pathname.split("/").filter(Boolean);
 

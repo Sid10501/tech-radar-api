@@ -47,8 +47,8 @@ describe("runPipeline()", () => {
     { name: "incomplete carousel", capture: { kind: "enumerated", slides: [{ index: 1, status: "ocr", text: "Cover" }, { index: 2, status: "skipped", text: null }] }, status: "needs_review" },
     { name: "regressed retry", capture: undefined, status: "needs_review", preserve: true },
   ])("runs end-to-end for $name", async ({ capture, status, preserve }) => {
-    const sourceUrl = preserve ? "https://www.instagram.com/p/kept-review/" : "https://www.youtube.com/shorts/dQw4w9WgXcQ";
-    const canonical = "# Reviewed\n\n**Source:** instagram · [Author](https://www.instagram.com/p/kept-review/)\n\n## Source coverage\n\nOCR returned text for 2 of 2 listed media items.";
+    const sourceUrl = "https://www.youtube.com/shorts/dQw4w9WgXcQ";
+    const canonical = "# Reviewed\n\n**Source:** youtube · [Author](https://www.youtube.com/shorts/dQw4w9WgXcQ)\n\n## Source coverage\n\nOCR returned text for 2 of 2 listed media items.";
     const indexPath = "tech-radar/INDEX.md";
     if (preserve) {
       fs.writeFileSync(path.join(workDir, "tech-radar/findings/reviewed.md"), canonical);

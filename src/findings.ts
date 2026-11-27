@@ -1145,6 +1145,16 @@ function normalizeDuplicateUrl(rawUrl: string | null): string | null {
   }
 }
 
+export function youtubeVideoSourceKey(url: URL): string | null {
+  const host = url.hostname.replace(/^(?:www|m|mobile)\./, "").toLowerCase();
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (host === "youtu.be" && segments[0]) return `youtube:${segments[0]}`;
+  if (host !== "youtube.com" && host !== "music.youtube.com") return null;
+  if (/^(?:shorts|embed|live)$/i.test(segments[0] ?? "") && segments[1]) return `youtube:${segments[1]}`;
+  const id = url.searchParams.get("v");
+  return segments[0] === "watch" && id ? `youtube:${id}` : null;
+}
+
 function canonicalSocialSourceKey(url: URL): string | null {
   const host = url.hostname;
   const segments = url.pathname.split("/").filter(Boolean);
@@ -1153,13 +1163,8 @@ function canonicalSocialSourceKey(url: URL): string | null {
     return `instagram:${segments[1]}`;
   }
 
-  if (host === "youtu.be" && segments[0]) return `youtube:${segments[0]}`;
-  if ((host === "youtube.com" || host === "music.youtube.com") && url.searchParams.get("v")) {
-    return `youtube:${url.searchParams.get("v")}`;
-  }
-  if ((host === "youtube.com" || host === "music.youtube.com") && /^(?:shorts|embed|live)$/i.test(segments[0] ?? "") && segments[1]) {
-    return `youtube:${segments[1]}`;
-  }
+  const youtube = youtubeVideoSourceKey(url);
+  if (youtube) return youtube;
 
   if (host === "tiktok.com") {
     const videoIndex = segments.findIndex((segment) => segment.toLowerCase() === "video");

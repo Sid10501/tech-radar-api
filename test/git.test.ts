@@ -263,6 +263,20 @@ describe("AiMemoryRepo", () => {
     expect(content).toContain("Generated filename: `2026-07-06-palmier-pro.md`");
   });
 
+  it("reuses one finding across legacy Shorts, watch and share URLs while preserving distinct video IDs", async () => {
+    const save = (sourceUrl: string, filename: string) => repo.writeFindingForSource({
+      sourceUrl, filename, date: "2026-07-06", body: `# Saved video\n\n**Source:** youtube · [Creator](${sourceUrl})\n`,
+    });
+    await repo.pullLatest();
+    const original = "2026-07-06-first-video.md";
+    await save("https://www.youtube.com/shorts/dQw4w9WgXcQ", original);
+    for (const url of ["https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=20", "https://youtu.be/dQw4w9WgXcQ?si=shared"]) {
+      expect(await save(url, "renamed-video.md")).toMatchObject({ filename: original, replacedExisting: true });
+    }
+    expect(await save("https://www.youtube.com/watch?v=dQw4w9WgXcq", "different-video.md"))
+      .toMatchObject({ filename: "different-video.md", replacedExisting: false });
+  });
+
   it("retains the canonical finding across regressions in manifest, counts or captured ordinals", async () => {
     const sourceUrl = "https://www.instagram.com/p/keep-reviewed/";
     const filename = "2026-07-06-keep-reviewed.md";
