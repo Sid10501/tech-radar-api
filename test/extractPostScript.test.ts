@@ -239,6 +239,7 @@ def download(url, directory, **options):
     requests.append(options)
     return {"title": "Tutorial", "duration": 300}, None, None, None
 extractor.run_ytdlp = download
+extractor.try_html_meta = lambda url: None
 extractor.download_image_assets = lambda *args: ([], [], [])
 with tempfile.TemporaryDirectory() as directory:
     for setting, ocr in [(None, True), ("1", True), ("1", False)]:
@@ -258,6 +259,7 @@ import scripts.extract_post as extractor
 socket.getaddrinfo = lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
 os.environ["YOUTUBE_VISUAL_ENABLED"] = "1"
 extractor.run_ytdlp = lambda *args, **kwargs: ({"title": "Tutorial", "duration": 300}, None, None, "yt-dlp download exceeded 52428800 bytes")
+extractor.try_html_meta = lambda url: None
 extractor.download_image_assets = lambda *args: ([], [], [])
 with tempfile.TemporaryDirectory() as directory:
     result = extractor.extract("https://www.youtube.com/watch?v=abc", Path(directory), False, True)
