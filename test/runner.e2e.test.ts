@@ -195,6 +195,40 @@ describe("runPipeline()", () => {
     }
   });
 
+  it.each([
+    { financeSuccess: false, status: "failed", expected: "Technology branch failed (insufficient provider credits); StockBot handoff failed (HTTP 503)" },
+    { financeSuccess: true, status: "partial", expected: "Technology branch failed (insufficient provider credits)" },
+  ])("persists safe branch evidence in the inbox for a $status mixed run", async ({ financeSuccess, status, expected }) => {
+    const fixture = JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, "extract_youtube.json"), "utf8"));
+    const sourceUrl = `https://www.instagram.com/p/mixed-${status}/`;
+    vi.doMock("../src/extract.js", () => ({ extract: async () => ({ ...fixture, url: sourceUrl,
+      title: "AI agent for stock market investing", source_links: [], linked_artifacts: [] }) }));
+    vi.doMock("../src/linkEnrichment.js", () => ({ enrichLinksFromExtract: async () => ({ confirmed: {}, candidates: [], warnings: [], github: null }) }));
+    vi.doMock("../src/agents/research.js", () => ({ runResearch: async () => {
+      throw new Error('400 {"message":"Your credit balance is too low","authorization":"secret-test-value"}\nprivate provider details');
+    } }));
+    vi.doMock("../src/stockbotClient.js", () => ({ StockBotClient: class {
+      async submitVideoEvidence() {
+        if (!financeSuccess) throw new Error("StockBot returned HTTP 503");
+        return { analysisId: "demo-analysis", status: "pending", deduplicated: false };
+      }
+    } }));
+    const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-routed-error-"));
+    try {
+      const { runPipeline, getRun } = await import("../src/runner.js");
+      const { runId } = await runPipeline(sourceUrl, { remoteUrl: bareDir, localDir, intent: "auto" });
+      expect(getRun(runId)).toMatchObject({ status, error: expected });
+      const inbox = fs.readFileSync(path.join(localDir, "tech-radar/INBOX.md"), "utf8");
+      expect(inbox.split("\n").filter(line => line.includes(sourceUrl))).toEqual([expect.stringContaining(expected)]);
+      expect(inbox).not.toMatch(/secret-test-value|private provider details|authorization/);
+    } finally {
+      vi.doUnmock("../src/linkEnrichment.js");
+      vi.doUnmock("../src/agents/research.js");
+      vi.doUnmock("../src/stockbotClient.js");
+      fs.rmSync(localDir, { recursive: true, force: true });
+    }
+  });
+
   it("marks run as failed when extract throws", async () => {
     let failedOutDir = "";
     vi.doMock("../src/extract.js", () => ({

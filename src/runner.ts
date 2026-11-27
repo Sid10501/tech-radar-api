@@ -607,23 +607,27 @@ async function executeRegisteredPipeline(run: Run, opts: RunPipelineOptions): Pr
     const requestedFinance = routed.classification.category === "finance" || routed.classification.category === "mixed";
     run.classification = routed.classification;
     run.processedBranches = [routed.technology !== undefined ? "technology" : undefined, routed.finance !== undefined ? "finance" : undefined].filter((branch): branch is "technology" | "finance" => Boolean(branch));
-    const branchErrors = Object.values(routed.branchErrors ?? {});
+    const branchErrors = Object.entries(routed.branchErrors ?? {}).map(([branch, message]) => routedFailureSummary(branch, message));
     const noRoutedBranch = ["other", "needs_review"].includes(routed.classification.category);
     const hasFinance = Boolean(routed.finance);
     const terminalFinanceStatus = routed.finance ? stockBotTerminalRunStatus(routed.finance, run.id) : undefined;
     const captureReview = Boolean(routed.technology) && !requestedFinance && (preservedCoverage || needsCaptureReview(measuredCoverage(photoCapture(enrichedExtract))));
     const pipelineStatus = noRoutedBranch ? "needs_review" : branchErrors.length ? (hasFinance || routed.technology ? "partial" : "failed") : terminalFinanceStatus ?? (hasFinance ? "downstream_pending" : captureReview ? "needs_review" : "processed");
     run.status = mergeRunStatus(run.status, pipelineStatus);
-    run.error = branchErrors.length ? branchErrors.join("; ").slice(0, 1_000) : preservedCoverage ? "Retry lost slide evidence. The existing finding and index were retained." : undefined;
+    const reasons = [...branchErrors];
+    if (terminalFinanceStatus === "failed") reasons.push("StockBot analysis failed");
+    if (terminalFinanceStatus === "partial") reasons.push("StockBot analysis returned partial results");
+    if (preservedCoverage) reasons.push("Retry lost slide evidence. The existing finding and index were retained.");
+    const inboxError = reasons.length ? reasons.join("; ") : undefined;
+    run.error = inboxError;
     run.finishedAt = run.status === "downstream_pending" ? undefined : new Date().toISOString();
-    if (terminalFinanceStatus === "failed") run.error = "StockBot analysis failed";
     if (terminalFinanceStatus === "skipped") run.error = run.deduplicatedToRunId
       ? `Deduplicated to StockBot run ${run.deduplicatedToRunId}`
       : "StockBot analysis canceled";
     const inboxFinding = hasFinance
       ? [findingFilename || null, `stockbot:${run.downstreamAnalysisId}`, `run:${run.id}`].filter(Boolean).join(";")
       : findingFilename;
-    await repo.updateInbox({ url, status: run.status, finding: inboxFinding || null, date: today, error: preservedCoverage ? run.error : undefined });
+    await repo.updateInbox({ url, status: run.status, finding: inboxFinding || null, date: today, error: inboxError });
     await repo.commitAndPush(hasFinance ? `tech-radar: StockBot handoff ${run.id}` : `tech-radar: ${run.status} ${run.id}`);
     storeRun(run);
 
@@ -697,6 +701,21 @@ export function mergeRunStatus(current: Run["status"], proposed: Run["status"]):
 async function extractAndEnrich(extractResult: ExtractResult): Promise<ExtractResult> {
   const visionEnhancedExtract = await withVisionFallback(extractResult);
   return { ...visionEnhancedExtract, enriched_links: await enrichLinksFromExtract(visionEnhancedExtract) };
+}
+
+// Only allow known diagnostic categories into the shared ledger and notifications.
+function routedFailureSummary(branch: string, message: string): string {
+  if (branch === "finance") {
+    const http = /^StockBot returned HTTP ([45]\d{2})$/.exec(message);
+    if (http) return `StockBot handoff failed (HTTP ${http[1]})`;
+    if (message === "StockBot client is not configured") return "StockBot handoff missing configuration";
+    if (message === "StockBot request timed out") return "StockBot handoff timed out";
+    if (message === "StockBot returned an invalid response") return "StockBot handoff returned an invalid response";
+    return "StockBot handoff failed";
+  }
+  if (/credit balance is too low|insufficient[ _-]credits?|out of credits/i.test(message)) return "Technology branch failed (insufficient provider credits)";
+  if (/insufficient_quota|rate_limit_error/i.test(message)) return "Technology branch failed (provider quota or rate limit)";
+  return "Technology branch failed";
 }
 
 interface RouteHandlers {
