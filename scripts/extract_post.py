@@ -381,6 +381,11 @@ def tiktok_photo_manifest(url: str) -> dict | None:
     }
 
 
+def is_generic_tiktok_metadata(value: str | None) -> bool:
+    # Landing pages and expired short links are not recovered post evidence.
+    return isinstance(value, str) and value.strip().casefold() in {"tiktok", "tiktok - make your day", "make your day"}
+
+
 def try_oembed(url: str, platform: str) -> dict | None:
     endpoint = OEMBED_ENDPOINTS.get(platform)
     if not endpoint:
@@ -1508,6 +1513,9 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
         if html_meta:
             result["title"] = result["title"] or html_meta.get("og:title") or html_meta.get("twitter:title")
             cap = html_meta.get("og:description") or html_meta.get("twitter:description") or html_meta.get("description")
+            if platform == "tiktok" and is_generic_tiktok_metadata(cap):
+                errors.append("TikTok metadata is a platform page, not a post caption")
+                cap = None
             if cap and not result["caption"]:
                 result["caption"] = cap
                 result["hashtags"] = result["hashtags"] or pull_hashtags(cap)
@@ -1516,7 +1524,9 @@ def extract(url: str, out_dir: Path, do_transcribe: bool, do_ocr: bool) -> dict:
                 result["extraction_methods"].append("html-meta:description")
 
         # TikTok's oEmbed title carries the creator's video description.
-        if platform == "tiktok" and not result["caption"] and oembed and oembed.get("title"):
+        if platform == "tiktok" and oembed and is_generic_tiktok_metadata(oembed.get("title")):
+            errors.append("TikTok oEmbed is a platform page, not a post caption")
+        if platform == "tiktok" and not result["caption"] and oembed and oembed.get("title") and not is_generic_tiktok_metadata(oembed["title"]):
             result["caption"] = oembed["title"]
             result["hashtags"] = pull_hashtags(result["caption"])
             result["source_links"] = pull_links(result["caption"])
