@@ -17,6 +17,15 @@ const headers={authorization:'Bearer test-owner'};
 const feedback={batchId:'fresh-25',inputHash:'a'.repeat(64),category:'technology'};
 afterEach(async()=>{await Promise.all(apps.splice(0).map(a=>a.close()));vi.unstubAllEnvs();vi.restoreAllMocks();for(const d of dirs.splice(0))fs.rmSync(d,{recursive:true,force:true});});
 describe('topic suggestion trial',()=>{
+  it('preserves the original rubric and accepts an explicitly revised rubric',async()=>{
+    const {app,file,batch}=setup();
+    expect((await app.inject({url:'/api/topic-suggestions',headers})).json().rubricVersion).toBe('investing-v1');
+    fs.writeFileSync(file,JSON.stringify({...batch,batchId:'reviewed-v2',rubricVersion:'everyday-v2'}));
+    const revised=buildServer();apps.push(revised);
+    expect((await revised.inject({url:'/api/topic-suggestions',headers})).json().rubricVersion).toBe('everyday-v2');
+    fs.writeFileSync(file,JSON.stringify({...batch,rubricVersion:'unknown'}));
+    expect(()=>buildServer()).toThrow();
+  });
   it('is absent unless enabled',async()=>{vi.stubEnv('TOPIC_SUGGESTIONS_FILE','');const app=buildServer();apps.push(app);expect((await app.inject('/api/topic-suggestions')).statusCode).toBe(404);});
   it('protects the batch and feedback using owner auth',async()=>{const {app}=setup();expect((await app.inject('/api/topic-suggestions')).statusCode).toBe(401);expect((await app.inject({method:'POST',url:'/api/topic-suggestions/post-1/feedback',payload:feedback})).statusCode).toBe(401);});
   it('saves confirmed and corrected topics across restart without changing run history',async()=>{

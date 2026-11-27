@@ -8,6 +8,7 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const batchSchema = z.object({
   schemaVersion: z.literal(1), batchId: identifier,
   labelSource: z.enum(['model-reviewed', 'unreviewed', 'human-reviewed']),
+  rubricVersion: z.enum(['investing-v1', 'everyday-v2']).default('investing-v1'),
   posts: z.array(z.object({
     id: identifier, inputHash: hash,
     sourceUrl: z.string().url().max(2000).refine(value => {
