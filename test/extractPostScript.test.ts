@@ -34,6 +34,25 @@ with tempfile.TemporaryDirectory() as directory:
 `);
     expect(JSON.parse(output)).toEqual([[], [], []]);
   });
+  it("does not treat a TikTok platform page as a recovered post caption", () => {
+    const output = runPythonSnippet(`
+import json, socket, tempfile
+from pathlib import Path
+import scripts.extract_post as extractor
+socket.getaddrinfo = lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+extractor.run_ytdlp = lambda *args, **kwargs: (None, None, None, "source unavailable")
+extractor.tiktok_photo_manifest = lambda url: None
+results = []
+with tempfile.TemporaryDirectory() as directory:
+    for channel, caption in [("html", "TikTok"), ("oembed", "TikTok"), ("html", "TikTok budgeting tips for families")]:
+        extractor.try_html_meta = lambda url: {"description": caption} if channel == "html" else None
+        extractor.try_oembed = lambda url, platform: {"title": caption} if channel == "oembed" else None
+        result = extractor.extract("https://www.tiktok.com/@creator/video/123", Path(directory), False, False)
+        results.append({"caption": result["caption"], "usable": result["status"] == "ok"})
+print(json.dumps(results))
+`);
+    expect(JSON.parse(output)).toEqual([{caption:null,usable:false},{caption:null,usable:false},{caption:"TikTok budgeting tips for families",usable:true}]);
+  });
   it("configures yt-dlp to reject known media over 30 minutes before download", () => {
     const source = fs.readFileSync("scripts/extract_post.py", "utf8");
     expect(source).toContain("match_filter");
