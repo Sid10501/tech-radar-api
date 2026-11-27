@@ -29,6 +29,9 @@ import { canonicalizeSocialUrl, type SocialVideoIntent } from "./socialVideoRout
 import { StockBotEventDeduper, verifyStockBotCallback } from "./stockbotCallback.js";
 import { verifyUploadToken, type UploadClaims } from "./uploadAuthorization.js";
 
+import { TopicSuggestionStore } from "./topicSuggestions.js";
+import { registerTopicSuggestionRoutes } from "./topicSuggestionRoutes.js";
+
 const SECURITY_HEADERS = {
   "Content-Security-Policy":
     "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'",
@@ -190,6 +193,9 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
       }
     }
   }
+  const topicBatchFile = process.env["TOPIC_SUGGESTIONS_FILE"];
+  if (topicBatchFile && !process.env["RUN_STATE_DIR"]) throw new Error("topic trial requires RUN_STATE_DIR");
+  const topicStore = topicBatchFile ? new TopicSuggestionStore(topicBatchFile, path.resolve(process.env["RUN_STATE_DIR"]!)) : null;
   const app = Fastify({ logger: true });
   app.register(multipart, { limits: { files: 1, fileSize: MAX_LOCAL_MEDIA_BYTES, fields: 10, parts: 11 } });
   const callbackStatePath = process.env["RUN_STATE_DIR"]
@@ -320,7 +326,8 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
 
   app.get("/", async (_request, reply) => {
     reply.header("Content-Type", "text/html; charset=utf-8");
-    return DASHBOARD_HTML([]);
+    const html = DASHBOARD_HTML([]);
+    return topicStore ? html.replace('<div class="top-actions">', '<div class="top-actions"><a class="button" href="/suggestions">Topic trial</a>') : html;
   });
 
   app.post<{ Body: { url: string; intent?: SocialVideoIntent; force?: boolean } }>(
@@ -639,6 +646,7 @@ export function buildServer(dependencies: { callbackEvents?: EventReservationSto
     },
   );
 
+  if (topicStore) registerTopicSuggestionRoutes(app, topicStore, authMiddleware);
   return app;
 }
 
